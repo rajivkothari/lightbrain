@@ -149,7 +149,9 @@ class PaletteBlender:
                  but wired in for future phrase/energy-triggered changes).
         """
         now = time.monotonic()
-        dt_ms = (now - self._last_time) * 1000.0
+        # Cap dt to 100 ms so a process suspend/resume doesn't cause a
+        # visual jump (colors snap forward many steps at once).
+        dt_ms = min((now - self._last_time) * 1000.0, 100.0)
         self._last_time = now
 
         colors = self._palette.colors
@@ -167,9 +169,9 @@ class PaletteBlender:
         # Advance blend fraction
         self._blend_t += dt_ms / t_ms
 
-        if self._blend_t >= 1.0:
-            # Advance to next color pair
-            self._blend_t -= 1.0
+        # Use while so a large dt still cycles through correctly
+        while self._blend_t >= 1.0:
+            self._blend_t  -= 1.0
             self._color_idx = self._next_idx
             self._next_idx  = (self._color_idx + 1) % len(colors)
 

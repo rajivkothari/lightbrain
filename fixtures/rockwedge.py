@@ -72,18 +72,23 @@ class RockWedge(FixtureBase):
         """
         addr = self.dmx_address
 
-        # Final brightness = value channel from lane (already safety-scaled)
+        # Final brightness = lane value (safety-scaled) × any additional scale
         final_brightness = max(0.0, min(1.0, value * brightness))
+
+        # Ch1 Dimmer: carries the overall brightness via gamma.
+        # On a real fixture the dimmer gates all color channels, so
+        # we set it to the brightness level and RGB to pure hue.
         dimmer_dmx = apply_gamma_to_dmx(final_brightness, gamma)
 
-        # Convert HSV → RGB for color channels
-        # Use full saturation/hue at max value, dimmer handles intensity
+        # Convert HSV → RGB: pure color at full value (v=1.0).
+        # Brightness is expressed through the Dimmer channel, NOT baked into
+        # the color channels — avoids double-dimming when hardware multiplies
+        # Ch1 × Ch2-4.
         r_norm, g_norm, b_norm = hsv_to_rgb_normalized(hue, saturation, 1.0)
 
-        # Apply gamma to each color channel and scale by brightness
-        r_dmx = apply_gamma_to_dmx(r_norm * final_brightness, gamma)
-        g_dmx = apply_gamma_to_dmx(g_norm * final_brightness, gamma)
-        b_dmx = apply_gamma_to_dmx(b_norm * final_brightness, gamma)
+        r_dmx = apply_gamma_to_dmx(r_norm, gamma)
+        g_dmx = apply_gamma_to_dmx(g_norm, gamma)
+        b_dmx = apply_gamma_to_dmx(b_norm, gamma)
 
         # Strobe: 0 in Sprint 1 (will use fixture-specific strobe table later)
         strobe_dmx = 0

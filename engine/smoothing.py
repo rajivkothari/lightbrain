@@ -38,8 +38,9 @@ class EnvelopeFollower:
         self.config = config
         self.value: float = initial_value
         self._last_update: float = time.monotonic()
-        self._peak_time: float = 0.0   # timestamp of last peak
-        self._last_raw: float = 0.0
+        self._peak_time:   float = 0.0    # timestamp of last rising edge
+        self._peak_value:  float = 0.0    # smoothed value recorded at peak
+        self._last_raw:    float = 0.0    # raw input from previous frame
 
     def update(self, raw: float) -> float:
         """
@@ -69,25 +70,32 @@ class EnvelopeFollower:
             alpha = 1.0 - math.exp(-dt_s / tau_s)
             self.value += alpha * (raw - self.value)
 
-        # Track peak time for cooldown logic
-        if raw > self._last_raw:
-            self._peak_time = now
         self._last_raw = raw
 
-        # Cooldown: if we're inside the cooldown window, don't decay below
-        # the value we had at peak (only relevant when using cooldown_ms > 0)
+        # Track the highest smoothed value reached: update peak whenever the
+        # smoothed value is still climbing.  EMA rises over several frames, so
+        # we must keep updating peak_value as long as self.value keeps growing —
+        # not just on the single frame where raw first jumped.
+        if self.value > self._peak_value:
+            self._peak_value = self.value
+            self._peak_time  = now
+
+        # Cooldown: for cooldown_ms after the last new peak, prevent decay
+        # below peak_value so the lane holds at its maximum before releasing.
         if self.config.cooldown_ms > 0:
             elapsed_since_peak = (now - self._peak_time) * 1000.0
             if elapsed_since_peak < self.config.cooldown_ms:
-                # Don't let value drop during cooldown window
-                self.value = max(self.value, self._last_raw)
+                self.value = max(self.value, self._peak_value)
 
         self.value = max(0.0, min(1.0, self.value))
         return self.value
 
     def reset(self, value: float = 0.0) -> None:
-        self.value = value
+        self.value       = value
         self._last_update = time.monotonic()
+        self._peak_time  = 0.0
+        self._peak_value = 0.0
+        self._last_raw   = 0.0
 
 
 # ---------------------------------------------------------------------------

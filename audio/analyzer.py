@@ -70,10 +70,10 @@ class AudioAnalyzer:
         # Precompute FFT frequency bins
         self._freqs = np.fft.rfftfreq(block_size, d=1.0 / sample_rate)
 
-    def _band_energy(self, magnitudes: np.ndarray,
+    def _band_energy(self, magnitudes: np.ndarray, freqs: np.ndarray,
                      f_low: float, f_high: float) -> float:
-        """RMS energy in a frequency band, normalized by band width."""
-        mask = (self._freqs >= f_low) & (self._freqs < f_high)
+        """RMS energy in a frequency band."""
+        mask = (freqs >= f_low) & (freqs < f_high)
         if not np.any(mask):
             return 0.0
         band = magnitudes[mask]
@@ -93,27 +93,24 @@ class AudioAnalyzer:
         if block.ndim > 1:
             block = block.mean(axis=1)
 
+        # Skip blocks that don't match expected size — avoids mismatched freqs
+        if len(block) != self.block_size:
+            return AudioBands()
+
         # Apply Hann window to reduce spectral leakage
-        windowed = block * np.hanning(len(block))
+        windowed = block * np.hanning(self.block_size)
 
         # FFT — use magnitude (not power) for more musical response
         spectrum = np.abs(np.fft.rfft(windowed))
 
-        # Trim freqs/spectrum to the same length (rfft can differ by 1)
-        min_len = min(len(self._freqs), len(spectrum))
-        freqs   = self._freqs[:min_len]
-        spec    = spectrum[:min_len]
+        # rfftfreq and rfft always produce block_size//2+1 elements
+        # for the same block_size, so lengths always match.
+        freqs = self._freqs
 
-        # Temporarily override internal freqs with trimmed version for band calc
-        orig_freqs      = self._freqs
-        self._freqs     = freqs
-
-        low_e  = self._band_energy(spec, *self.BAND_EDGES["lows"])
-        lmid_e = self._band_energy(spec, *self.BAND_EDGES["low_mids"])
-        mid_e  = self._band_energy(spec, *self.BAND_EDGES["mids"])
-        high_e = self._band_energy(spec, *self.BAND_EDGES["highs"])
-
-        self._freqs = orig_freqs  # restore
+        low_e  = self._band_energy(spectrum, freqs, *self.BAND_EDGES["lows"])
+        lmid_e = self._band_energy(spectrum, freqs, *self.BAND_EDGES["low_mids"])
+        mid_e  = self._band_energy(spectrum, freqs, *self.BAND_EDGES["mids"])
+        high_e = self._band_energy(spectrum, freqs, *self.BAND_EDGES["highs"])
 
         # Merge low_mids into mids for Sprint 1 (weighted blend)
         combined_mid = lmid_e * 0.4 + mid_e * 0.6

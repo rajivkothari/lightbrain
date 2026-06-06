@@ -5,7 +5,10 @@ RockWedge mapper → mock DMX → terminal overlay.
 No physical DMX hardware required.
 
 Run from repo root:
-  python scripts/test_mock_rockwedge.py [--device N] [--palette open_dance]
+  python scripts/test_mock_rockwedge.py                         # real mic, open_dance
+  python scripts/test_mock_rockwedge.py --demo                  # synthetic audio
+  python scripts/test_mock_rockwedge.py --device 2 --palette banger
+  python scripts/test_mock_rockwedge.py --demo --mode dinner
 
 Press Ctrl+C to stop.
 """
@@ -18,8 +21,8 @@ import colorsys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from audio.input    import AudioCapture
-from audio.analyzer import AudioAnalyzer, AudioBands
+from audio.analyzer  import AudioAnalyzer, AudioBands
+from audio.synthetic import SyntheticAudioSource
 
 from engine.smoothing import LaneSmoother
 from engine.palettes  import load_all_palettes
@@ -46,9 +49,11 @@ def main():
     parser.add_argument("--device",  type=int, default=None,
                         help="sounddevice input device index")
     parser.add_argument("--palette", type=str, default="open_dance",
-                        help="starting palette key")
+                        help="starting palette key (default: open_dance)")
     parser.add_argument("--mode",    type=str, default="open_dance",
-                        help="starting mode key")
+                        help="starting mode key (default: open_dance)")
+    parser.add_argument("--demo",    action="store_true",
+                        help="use synthetic audio — no microphone needed")
     args = parser.parse_args()
 
     # ---- palettes ----
@@ -61,13 +66,28 @@ def main():
     palette     = all_palettes.get(palette_key, list(all_palettes.values())[0])
     mode        = get_mode(args.mode)
 
+    # ---- audio source ----
+    error_msg = None
+
+    if args.demo:
+        capture = SyntheticAudioSource(block_size=1024)
+        capture.start()
+        device_label = capture.device_name
+    else:
+        from audio.input import AudioCapture
+        capture = AudioCapture(device_index=args.device, block_size=1024)
+        try:
+            capture.start()
+            device_label = capture.device_name or "unknown device"
+        except Exception as e:
+            error_msg    = f"Audio open failed: {e} — run with --demo"
+            device_label = "no device (use --demo)"
+
     # ---- engine ----
-    capture   = AudioCapture(device_index=args.device, block_size=1024)
     analyzer  = AudioAnalyzer()
     smoother  = LaneSmoother()
     safety    = SafetyEngine()
     safety.update_from_mode(mode)
-
     room_lane = RoomLane(palette)
 
     # ---- fixture + DMX ----
@@ -76,37 +96,33 @@ def main():
         name="RockWedge LED",
         dmx_address=1,
     )
-    universe  = DMXUniverse()
-    dmx_out   = MockDMXOutput(verbose=False)
-    overlay   = TerminalDebugOverlay()
-
-    # ---- start ----
-    error_msg = None
-    try:
-        capture.start()
-    except Exception as e:
-        error_msg = f"Audio: {e}"
-
+    universe = DMXUniverse()
+    dmx_out  = MockDMXOutput(verbose=False)
+    overlay  = TerminalDebugOverlay()
     overlay.init_screen()
 
     try:
         while True:
             t0 = time.monotonic()
 
+            # ---- audio ----
             block = capture.get_latest_block()
             if block is not None:
                 bands = analyzer.analyze(block)
             else:
                 bands = AudioBands()
 
+            # ---- smoothing ----
             lanes = smoother.update(bands.as_dict())
 
+            # ---- room lane ----
             room_out = room_lane.render(
                 smoothed_room=lanes["room"],
                 impact=lanes["impact"],
                 safety=safety,
             )
 
+            # ---- fixture write ----
             rockwedge.render_to_universe(
                 universe,
                 brightness=1.0,
@@ -116,9 +132,10 @@ def main():
                 strobe=room_out.strobe,
             )
 
+            # ---- DMX send ----
             dmx_out.send(universe)
 
-            # RGB for overlay
+            # ---- build RGB for overlay ----
             r_f, g_f, b_f = colorsys.hsv_to_rgb(
                 room_out.hsv.h / 360.0,
                 room_out.hsv.s,
@@ -131,8 +148,9 @@ def main():
                 for label, ch in rockwedge.get_channel_labels().items()
             }
 
+            # ---- render overlay ----
             overlay.update(
-                device_name=capture.device_name or "no device",
+                device_name=device_label,
                 raw_bands=bands.as_dict(),
                 smoothed_lanes=lanes,
                 mode_name=mode.display_name,
@@ -145,12 +163,14 @@ def main():
                 dmx_output_type="MOCK",
                 safety_blackout=safety.state.blackout_active,
                 safety_strobe_ok=safety.state.strobe_allowed,
-                error=error_msg or capture.last_error,
+                error=error_msg or getattr(capture, "last_error", None),
             )
 
+            # ---- frame rate cap ----
             elapsed = time.monotonic() - t0
-            if FRAME_TIME - elapsed > 0:
-                time.sleep(FRAME_TIME - elapsed)
+            remaining = FRAME_TIME - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
 
     except KeyboardInterrupt:
         pass

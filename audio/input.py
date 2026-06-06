@@ -48,8 +48,9 @@ class AudioCapture:
         except Exception:
             self._device_name = f"device {self.device_index}"
 
-        self._running = True
-        self._stream = sd.InputStream(
+        # Create and start stream before setting _running so that
+        # is_running() stays False if stream creation raises.
+        stream = sd.InputStream(
             device=self.device_index,
             samplerate=self.sample_rate,
             blocksize=self.block_size,
@@ -57,7 +58,10 @@ class AudioCapture:
             dtype="float32",
             callback=self._callback,
         )
-        self._stream.start()
+        stream.start()
+        # Only mark running after stream is confirmed started
+        self._stream  = stream
+        self._running = True
 
     def stop(self) -> None:
         """Stop and close the audio input stream."""
