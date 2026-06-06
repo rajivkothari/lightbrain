@@ -1,0 +1,13 @@
+{
+  "name": "Open Dance",
+  "description": "Energetic club colors for open dance floor",
+  "transition_ms": 1500,
+  "transition_type": "smooth",
+  "change_rule": "energy_trigger",
+  "colors": [
+    {"name": "royal_blue",   "h": 225, "s": 1.00, "v": 1.00},
+    {"name": "purple",       "h": 270, "s": 1.00, "v": 0.90},
+    {"name": "cyan",         "h": 185, "s": 1.00, "v": 1.00},
+    {"name": "magenta",      "h": 300, "s": 1.00, "v": 1.00}
+  ]
+}

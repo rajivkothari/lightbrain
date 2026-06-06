@@ -1,0 +1,13 @@
+{
+  "name": "Banger",
+  "description": "High energy, aggressive colors for peak moments",
+  "transition_ms": 500,
+  "transition_type": "snap",
+  "change_rule": "fast_beat",
+  "colors": [
+    {"name": "red",           "h": 0,   "s": 1.00, "v": 1.00},
+    {"name": "magenta",       "h": 300, "s": 1.00, "v": 1.00},
+    {"name": "electric_blue", "h": 210, "s": 1.00, "v": 1.00},
+    {"name": "white_hit",     "h": 0,   "s": 0.00, "v": 1.00}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Speech",
+  "description": "Clean, warm whites for speeches and toasts",
+  "transition_ms": 5000,
+  "transition_type": "smooth",
+  "change_rule": "none",
+  "colors": [
+    {"name": "warm_white",  "h": 40,  "s": 0.15, "v": 1.00},
+    {"name": "amber",       "h": 35,  "s": 0.70, "v": 0.90},
+    {"name": "champagne",   "h": 45,  "s": 0.35, "v": 0.95}
+  ]
+}

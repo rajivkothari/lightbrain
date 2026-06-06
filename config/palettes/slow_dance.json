@@ -1,0 +1,13 @@
+{
+  "name": "Slow Dance",
+  "description": "Soft, romantic tones for slow songs",
+  "transition_ms": 6000,
+  "transition_type": "smooth",
+  "change_rule": "slow_blend",
+  "colors": [
+    {"name": "soft_lavender", "h": 270, "s": 0.40, "v": 0.75},
+    {"name": "blush",         "h": 350, "s": 0.35, "v": 0.85},
+    {"name": "champagne",     "h": 45,  "s": 0.35, "v": 0.90},
+    {"name": "warm_white",    "h": 40,  "s": 0.15, "v": 0.95}
+  ]
+}

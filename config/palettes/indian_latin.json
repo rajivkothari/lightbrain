@@ -1,0 +1,14 @@
+{
+  "name": "Indian / Latin",
+  "description": "Rich, jewel-tone palette for Bollywood and Latin sets",
+  "transition_ms": 2000,
+  "transition_type": "smooth",
+  "change_rule": "energy_trigger",
+  "colors": [
+    {"name": "magenta",    "h": 300, "s": 1.00, "v": 1.00},
+    {"name": "gold",       "h": 45,  "s": 1.00, "v": 1.00},
+    {"name": "emerald",    "h": 145, "s": 1.00, "v": 0.85},
+    {"name": "royal_blue", "h": 225, "s": 1.00, "v": 1.00},
+    {"name": "amber",      "h": 35,  "s": 1.00, "v": 0.95}
+  ]
+}

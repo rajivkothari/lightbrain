@@ -1,0 +1,13 @@
+{
+  "name": "Dinner",
+  "description": "Warm, intimate tones for dinner/cocktail hour",
+  "transition_ms": 4000,
+  "transition_type": "smooth",
+  "change_rule": "slow_blend",
+  "colors": [
+    {"name": "warm_amber",    "h": 35,  "s": 1.00, "v": 0.85},
+    {"name": "champagne",     "h": 45,  "s": 0.40, "v": 0.90},
+    {"name": "warm_white",    "h": 40,  "s": 0.20, "v": 1.00},
+    {"name": "soft_rose",     "h": 350, "s": 0.50, "v": 0.80}
+  ]
+}

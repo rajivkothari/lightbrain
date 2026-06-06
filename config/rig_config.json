@@ -1,0 +1,29 @@
+{
+  "rig_name": "RKADE LightBrain MVP",
+  "version": "0.1.0",
+  "default_mode": "open_dance",
+  "default_palette": "open_dance",
+  "master_dimmer": 1.0,
+  "target_fps": 40,
+  "audio": {
+    "device_index": null,
+    "sample_rate": 44100,
+    "block_size": 1024,
+    "channels": 1
+  },
+  "dmx": {
+    "output": "mock",
+    "serial_port": null,
+    "baud_rate": 250000
+  },
+  "fixtures": [
+    {
+      "id": "rw_001",
+      "type": "rockwedge",
+      "name": "RockWedge 1",
+      "dmx_address": 1,
+      "lane": "room",
+      "group": "all"
+    }
+  ]
+}
