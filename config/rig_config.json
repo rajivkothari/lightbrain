@@ -23,7 +23,45 @@
       "name": "RockWedge 1",
       "dmx_address": 1,
       "lane": "room",
-      "group": "all"
+      "group": "all",
+      "_note": "Placeholder — swap with real fixtures below when hardware arrives"
+    }
+  ],
+  "_hardware_fixtures_comment": [
+    "Uncomment and replace the fixture list above when hardware is connected.",
+    "Verify all DMX start addresses against your DMX controller patch.",
+    "Set each fixture's personality to match the type listed below."
+  ],
+  "_hardware_fixtures": [
+    {
+      "id": "washfx2_l",
+      "type": "wash_fx2",
+      "name": "Wash FX 2 Left",
+      "dmx_address": 1,
+      "lane": "room",
+      "group": "left",
+      "_personality": "8Ch"
+    },
+    {
+      "id": "washfx2_r",
+      "type": "wash_fx2",
+      "name": "Wash FX 2 Right",
+      "dmx_address": 9,
+      "lane": "room",
+      "group": "right",
+      "_personality": "8Ch"
+    },
+    {
+      "id": "gigbar_001",
+      "type": "gigbar_move_ils",
+      "name": "GigBAR Move+ILS",
+      "dmx_address": 17,
+      "lane": "room",
+      "group": "center",
+      "_personality": "29Ch",
+      "spot_pan_deg": 270,
+      "spot_tilt_dmx": 90,
+      "laser_enabled": false
     }
   ]
 }

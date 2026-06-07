@@ -3864,3 +3864,195 @@ class TestBlackoutSafetyBypass:
         se._hold_t = 0.1
         result = se.update(high_energy=0.1, mode_key="banger", now=1.0)
         assert result[1] >= 0.0
+
+
+# ===========================================================================
+# Chauvet Wash FX 2 — 8-channel fixture mapper
+# ===========================================================================
+
+from fixtures.chauvet_wash_fx2 import ChauvetWashFX2, NUM_CHANNELS as WASHFX2_CHANNELS
+from fixtures.chauvet_gigbar_move_ils import (
+    ChauvetGigBarMoveILS,
+    NUM_CHANNELS as GIGBAR_CHANNELS,
+    CH_PAR_RED, CH_PAR_STROBE, CH_DERBY_ROTATION,
+    CH_FLASH_1, CH_LASER_COLOR, CH_SPOT_PAN, CH_SPOT_DIMMER, CH_SPOT_STROBE,
+    _SPOT_STROBE_OPEN,
+)
+
+
+class TestChauvetWashFX2:
+
+    def _make(self, addr=1):
+        return ChauvetWashFX2(fixture_id="wx1", name="Wash FX2 Test", dmx_address=addr)
+
+    def _render(self, fx, **kwargs):
+        uni = DMXUniverse()
+        fx.render_to_universe(uni, **kwargs)
+        return uni
+
+    def test_num_channels_is_8(self):
+        assert WASHFX2_CHANNELS == 8
+
+    def test_blackout_at_zero_brightness(self):
+        uni = self._render(self._make(), brightness=0.0, value=1.0,
+                           hue=120.0, saturation=1.0)
+        addr = 1
+        for i in range(8):
+            assert uni.get_channel(addr + i) == 0, f"ch {i+1} should be 0 at blackout"
+
+    def test_full_white_all_channels_high(self):
+        uni = self._render(self._make(), brightness=1.0, value=1.0,
+                           hue=0.0, saturation=0.0)
+        addr = 1
+        # R/G/B should all be near 255 for white (hue 0, sat 0)
+        assert uni.get_channel(addr + 0) > 200  # Red
+        assert uni.get_channel(addr + 1) > 200  # Green
+        assert uni.get_channel(addr + 2) > 200  # Blue
+
+    def test_strobe_off_when_zero(self):
+        uni = self._render(self._make(), strobe=0.0)
+        assert uni.get_channel(1 + 4) == 0   # Ch5 strobe
+
+    def test_strobe_nonzero_when_active(self):
+        uni = self._render(self._make(), strobe=1.0, brightness=1.0, value=1.0)
+        assert uni.get_channel(1 + 4) > 0    # Ch5 strobe
+
+    def test_strobe_max_is_255(self):
+        uni = self._render(self._make(), strobe=1.0, brightness=1.0, value=1.0)
+        assert uni.get_channel(1 + 4) == 255
+
+    def test_auto_program_channels_always_zero(self):
+        """Ch6/Ch7 auto-program channels must stay 0 in manual mode."""
+        uni = self._render(self._make(), brightness=1.0, value=1.0, hue=200.0)
+        assert uni.get_channel(1 + 5) == 0   # Ch6 Auto Program
+        assert uni.get_channel(1 + 6) == 0   # Ch7 Speed
+        assert uni.get_channel(1 + 7) == 0   # Ch8 Dimmer
+
+    def test_uv_channel_driven_by_uv_param(self):
+        uni_off = self._render(self._make(), uv=0.0, brightness=1.0, value=1.0)
+        uni_on  = self._render(self._make(), uv=1.0, brightness=1.0, value=1.0)
+        assert uni_off.get_channel(1 + 3) == 0        # Ch4 UV off
+        assert uni_on.get_channel(1 + 3) > 200        # Ch4 UV on
+
+    def test_amber_and_white_params_ignored(self):
+        """WashFX2 has no amber/white channels — should not raise."""
+        uni = self._render(self._make(), amber=1.0, white=1.0,
+                           brightness=1.0, value=1.0)
+        assert uni.get_channel(1) >= 0  # no crash, sane output
+
+    def test_channels_within_dmx_range(self):
+        uni = self._render(self._make(), brightness=1.0, value=1.0,
+                           hue=60.0, saturation=0.8, strobe=0.5, uv=0.5)
+        for i in range(8):
+            ch = uni.get_channel(1 + i)
+            assert 0 <= ch <= 255, f"ch {i+1} = {ch} out of range"
+
+
+# ===========================================================================
+# Chauvet GigBAR Move + ILS — 29-channel fixture mapper
+# ===========================================================================
+
+class TestChauvetGigBarMoveILS:
+
+    def _make(self, addr=1, **kwargs):
+        return ChauvetGigBarMoveILS(
+            fixture_id="gb1", name="GigBAR Test", dmx_address=addr, **kwargs
+        )
+
+    def _render(self, fx, **kwargs):
+        uni = DMXUniverse()
+        fx.render_to_universe(uni, **kwargs)
+        return uni
+
+    def test_num_channels_is_29(self):
+        assert GIGBAR_CHANNELS == 29
+
+    def test_all_channels_zero_at_blackout(self):
+        uni = self._render(self._make(), brightness=0.0, value=0.0)
+        # Par channels should be 0 (no colour at blackout brightness)
+        addr = 1
+        for i in range(7):          # Par R–Strobe
+            assert uni.get_channel(addr + i) == 0, f"par ch {i+1} should be 0"
+
+    def test_par_rgb_written_at_full_brightness(self):
+        uni = self._render(self._make(), brightness=1.0, value=1.0,
+                           hue=0.0, saturation=1.0)
+        addr = 1
+        assert uni.get_channel(addr + CH_PAR_RED) > 200   # red hue → high R
+
+    def test_par_strobe_off_by_default(self):
+        uni = self._render(self._make(), strobe=0.0, brightness=1.0, value=1.0)
+        assert uni.get_channel(1 + CH_PAR_STROBE) == 0
+
+    def test_par_strobe_active_at_full(self):
+        uni = self._render(self._make(), strobe=1.0, brightness=1.0, value=1.0)
+        assert uni.get_channel(1 + CH_PAR_STROBE) == 250  # _PAR_STROBE_MAX
+
+    def test_derby_rotation_zero_when_dark(self):
+        uni = self._render(self._make(), brightness=0.0, value=0.0)
+        assert uni.get_channel(1 + CH_DERBY_ROTATION) == 0
+
+    def test_derby_rotates_when_bright(self):
+        uni = self._render(self._make(), brightness=1.0, value=1.0)
+        rot = uni.get_channel(1 + CH_DERBY_ROTATION)
+        assert rot >= 129, f"expected CCW rotation, got {rot}"
+
+    def test_flash_leds_low_at_full_brightness(self):
+        uni = self._render(self._make(), brightness=1.0, value=1.0)
+        flash = uni.get_channel(1 + CH_FLASH_1)
+        # Should be >0 but well below 255 (fill ratio is 15%)
+        assert 0 < flash < 100
+
+    def test_laser_off_by_default(self):
+        uni = self._render(self._make())
+        assert uni.get_channel(1 + CH_LASER_COLOR) == 0
+
+    def test_laser_enabled_flag(self):
+        fx = self._make(laser_enabled=True)
+        uni = self._render(fx, brightness=1.0, value=1.0)
+        assert uni.get_channel(1 + CH_LASER_COLOR) > 0
+
+    def test_spot_pan_default_is_center(self):
+        fx = self._make(spot_pan_deg=270.0)  # centre of 540° range
+        uni = self._render(fx, brightness=1.0, value=1.0)
+        pan = uni.get_channel(1 + CH_SPOT_PAN)
+        assert 120 <= pan <= 140, f"centre pan should be ~128, got {pan}"
+
+    def test_set_spot_aim_updates_pan(self):
+        fx = self._make()
+        fx.set_spot_aim(pan_deg=0.0, tilt_dmx=90)
+        uni = self._render(fx, brightness=1.0, value=1.0)
+        assert uni.get_channel(1 + CH_SPOT_PAN) == 0
+
+    def test_spot_strobe_open_when_inactive(self):
+        uni = self._render(self._make(), strobe=0.0, brightness=1.0, value=1.0)
+        assert uni.get_channel(1 + CH_SPOT_STROBE) == _SPOT_STROBE_OPEN
+
+    def test_spot_strobe_active_when_strobe_nonzero(self):
+        uni = self._render(self._make(), strobe=1.0, brightness=1.0, value=1.0)
+        strobe_val = uni.get_channel(1 + CH_SPOT_STROBE)
+        assert strobe_val > _SPOT_STROBE_OPEN
+
+    def test_spot_dimmer_tracks_brightness(self):
+        uni_dim  = self._render(self._make(), brightness=0.25, value=1.0)
+        uni_full = self._render(self._make(), brightness=1.0,  value=1.0)
+        assert uni_full.get_channel(1 + CH_SPOT_DIMMER) > \
+               uni_dim.get_channel(1 + CH_SPOT_DIMMER)
+
+    def test_all_channels_within_dmx_range(self):
+        fx = self._make()
+        uni = self._render(fx, brightness=0.7, value=0.8, hue=180.0,
+                           saturation=0.9, strobe=0.3, uv=0.2,
+                           white=0.3, amber=0.2)
+        for i in range(29):
+            ch = uni.get_channel(1 + i)
+            assert 0 <= ch <= 255, f"ch {i+1} = {ch} out of range"
+
+    def test_amber_and_white_drive_par_channels(self):
+        uni = self._render(self._make(), brightness=1.0, value=0.0,
+                           hue=0.0, saturation=0.0,
+                           amber=1.0, white=1.0)
+        # Par Amber (Ch4) and Par White (Ch5) should be driven
+        from fixtures.chauvet_gigbar_move_ils import CH_PAR_AMBER, CH_PAR_WHITE
+        assert uni.get_channel(1 + CH_PAR_AMBER) > 0
+        assert uni.get_channel(1 + CH_PAR_WHITE) > 0

@@ -55,6 +55,8 @@ from dmx.output_mock       import MockDMXOutput
 from dmx.output_enttec_pro import EnttecProOutput
 
 from fixtures.rockwedge import RockWedge
+from fixtures.chauvet_wash_fx2 import ChauvetWashFX2
+from fixtures.chauvet_gigbar_move_ils import ChauvetGigBarMoveILS
 
 from ui.terminal_debug import TerminalDebugOverlay
 from engine.scenes        import SceneManager
@@ -246,13 +248,29 @@ def main():
     universe  = DMXUniverse()
     fixtures  = []
     for fx_cfg in config.get("fixtures", []):
-        if fx_cfg.get("type") == "rockwedge":
+        _ftype = fx_cfg.get("type")
+        _fid   = fx_cfg["id"]
+        _fname = fx_cfg["name"]
+        _faddr = fx_cfg["dmx_address"]
+        _flane = fx_cfg.get("lane", "room")
+        _fgrp  = fx_cfg.get("group", "all")
+        if _ftype == "rockwedge":
             fixtures.append(RockWedge(
-                fixture_id=fx_cfg["id"],
-                name=fx_cfg["name"],
-                dmx_address=fx_cfg["dmx_address"],
-                lane=fx_cfg.get("lane", "room"),
-                group=fx_cfg.get("group", "all"),
+                fixture_id=_fid, name=_fname, dmx_address=_faddr,
+                lane=_flane, group=_fgrp,
+            ))
+        elif _ftype == "wash_fx2":
+            fixtures.append(ChauvetWashFX2(
+                fixture_id=_fid, name=_fname, dmx_address=_faddr,
+                lane=_flane, group=_fgrp,
+            ))
+        elif _ftype == "gigbar_move_ils":
+            fixtures.append(ChauvetGigBarMoveILS(
+                fixture_id=_fid, name=_fname, dmx_address=_faddr,
+                lane=_flane, group=_fgrp,
+                spot_pan_deg=float(fx_cfg.get("spot_pan_deg", 270.0)),
+                spot_tilt_dmx=int(fx_cfg.get("spot_tilt_dmx", 90)),
+                laser_enabled=bool(fx_cfg.get("laser_enabled", False)),
             ))
     if not fixtures:
         print("[ERROR] No fixtures found in rig_config.json")
