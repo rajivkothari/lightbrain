@@ -36,7 +36,7 @@
 
     /* ---- Header ---- */
     header {
-      display: flex; align-items: center; gap: 12px;
+      display: flex; align-items: center; gap: 10px;
       padding: 8px 16px; flex-shrink: 0;
       background: #0a0a16; border-bottom: 1px solid var(--border);
     }
@@ -48,20 +48,32 @@
     .logo { font-weight: 700; font-size: 0.85rem; letter-spacing: 0.2em; color: var(--accent); }
     .mode-name {
       font-size: 0.8rem; color: var(--dim); margin-left: auto;
-      max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .test-pill {
+      background: #1a3a1a; border: 1px solid var(--green); border-radius: 4px;
+      color: var(--green); font-size: 0.6rem; font-weight: 700;
+      letter-spacing: 0.12em; padding: 2px 7px; flex-shrink: 0; display: none;
     }
     .bpm-display {
       font-size: 1.15rem; font-weight: 700; color: var(--green);
       font-variant-numeric: tabular-nums;
       min-width: 75px; text-align: right; transition: color 0.08s;
     }
-    .view-toggle {
-      width: 36px; height: 36px; border: none; background: none;
-      color: var(--dim); font-size: 1.3rem; cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      border-radius: 6px; flex-shrink: 0;
+
+    /* ---- Tab bar ---- */
+    .tab-bar {
+      display: flex; flex-shrink: 0;
+      background: #0a0a16; border-bottom: 1px solid var(--border);
     }
-    .view-toggle:active { background: var(--card); }
+    .tab {
+      flex: 1; height: 30px; border: none; background: none;
+      color: var(--dim); font-family: inherit; font-size: 0.62rem;
+      font-weight: 700; letter-spacing: 0.14em; cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
     /* ---- Main scrollable area ---- */
     .view {
@@ -163,6 +175,65 @@
       border-color: #887722; color: #ffdd66;
     }
 
+    /* ---- Fixture test view ---- */
+    .test-status {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; margin-bottom: 10px;
+      font-size: 0.75rem; color: var(--dim); text-align: center;
+    }
+    .test-status .ts-val {
+      display: block; margin-top: 3px; font-size: 0.95rem; font-weight: 700;
+      color: var(--text); letter-spacing: 0.06em;
+    }
+    .test-status.active { border-color: var(--green); }
+    .test-status.active .ts-val { color: var(--green); }
+
+    .test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .btn-test {
+      min-height: 52px; border-radius: 10px; border: 2px solid;
+      font-family: inherit; font-size: 0.8rem; font-weight: 700;
+      letter-spacing: 0.06em; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: transform 0.06s, filter 0.1s;
+    }
+    .btn-test:active { transform: scale(0.95); }
+    .btn-test.active { outline: 2px solid #fff; outline-offset: 2px; }
+
+    .bt-blackout { background: #0c0c14; border-color: #2a2a44; color: #6666aa; }
+    .bt-dim      { background: #181828; border-color: #444466; color: #9999cc; }
+    .bt-white    { background: #1e1e38; border-color: #8888cc; color: #ddddff; }
+    .bt-red      { background: #3a0000; border-color: #cc2222; color: #ff8888; }
+    .bt-green    { background: #003a00; border-color: #22cc22; color: #88ff88; }
+    .bt-blue     { background: #00003a; border-color: #2222cc; color: #8888ff; }
+    .bt-yellow   { background: #2e2e00; border-color: #cccc00; color: #ffff88; }
+    .bt-cyan     { background: #003030; border-color: #00bbbb; color: #88ffff; }
+    .bt-magenta  { background: #2e002e; border-color: #cc00cc; color: #ff88ff; }
+    .bt-uv       { background: #1a0030; border-color: #7700cc; color: #cc88ff; }
+    .bt-amber    { background: #2e1800; border-color: #cc7700; color: #ffcc88; }
+    .bt-strobe   { background: #2a2400; border-color: #ddcc00; color: #ffee66; }
+
+    .aim-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px;
+    }
+    .btn-aim {
+      min-height: 48px; border-radius: 10px; border: 2px solid var(--border);
+      background: var(--card); color: var(--dim); font-family: inherit;
+      font-size: 0.78rem; font-weight: 700; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; transition: transform 0.06s;
+    }
+    .btn-aim .aim-sub { font-size: 0.55rem; color: var(--dim); font-weight: 400; }
+    .btn-aim:active { transform: scale(0.95); background: #1c1c42; color: #aaaaff; border-color: var(--accent); }
+
+    .btn-release-test {
+      width: 100%; min-height: 58px; border-radius: 10px;
+      border: 2px solid var(--green); background: #0a220a;
+      color: var(--green); font-family: inherit; font-size: 0.95rem;
+      font-weight: 700; letter-spacing: 0.12em; cursor: pointer;
+      margin-top: 12px; transition: background 0.1s, transform 0.06s;
+    }
+    .btn-release-test:active { transform: scale(0.97); background: #164a16; }
+
     /* ---- Blackout bar (sticky bottom) ---- */
     .blackout-bar {
       flex-shrink: 0;
@@ -259,9 +330,14 @@
   <div class="conn-dot" id="conn-dot"></div>
   <span class="logo">LIGHTBRAIN</span>
   <span class="mode-name" id="mode-name">--</span>
+  <span class="test-pill" id="test-pill">TEST</span>
   <span class="bpm-display" id="bpm">-- BPM</span>
-  <button class="view-toggle" id="view-toggle" onclick="toggleView()">&#x2699;</button>
 </header>
+<div class="tab-bar">
+  <button class="tab active" id="tab-perf"  onclick="switchView('perf')">PERF</button>
+  <button class="tab"        id="tab-test"  onclick="switchView('test')">TEST</button>
+  <button class="tab"        id="tab-setup" onclick="switchView('setup')">SETUP</button>
+</div>
 
 <!-- ==================== PERFORMANCE VIEW ==================== -->
 <div class="view" id="perf-view">
@@ -323,6 +399,60 @@
 
 </div>
 
+<!-- ==================== FIXTURE TEST VIEW ==================== -->
+<div class="view hidden" id="test-view">
+
+  <div class="test-status" id="test-status">
+    Engine status
+    <span class="ts-val" id="test-status-val">Engine running — no override</span>
+  </div>
+
+  <div class="sec-label">Colour / Intensity</div>
+  <div class="test-grid">
+    <button class="btn-test bt-blackout" data-pattern="blackout" onclick="sendFixtureTest('blackout')">BLACKOUT</button>
+    <button class="btn-test bt-dim"      data-pattern="dim"      onclick="sendFixtureTest('dim')">DIM CHECK</button>
+    <button class="btn-test bt-white"    data-pattern="white"    onclick="sendFixtureTest('white')">WHITE</button>
+    <button class="btn-test bt-red"      data-pattern="red"      onclick="sendFixtureTest('red')">RED</button>
+    <button class="btn-test bt-green"    data-pattern="green"    onclick="sendFixtureTest('green')">GREEN</button>
+    <button class="btn-test bt-blue"     data-pattern="blue"     onclick="sendFixtureTest('blue')">BLUE</button>
+    <button class="btn-test bt-yellow"   data-pattern="yellow"   onclick="sendFixtureTest('yellow')">YELLOW</button>
+    <button class="btn-test bt-cyan"     data-pattern="cyan"     onclick="sendFixtureTest('cyan')">CYAN</button>
+    <button class="btn-test bt-magenta"  data-pattern="magenta"  onclick="sendFixtureTest('magenta')">MAGENTA</button>
+    <button class="btn-test bt-uv"       data-pattern="uv"       onclick="sendFixtureTest('uv')">UV</button>
+    <button class="btn-test bt-amber"    data-pattern="amber"    onclick="sendFixtureTest('amber')">AMBER</button>
+    <button class="btn-test bt-strobe"   data-pattern="strobe"   onclick="sendFixtureTest('strobe')">STROBE</button>
+  </div>
+
+  <div class="sec-label" style="margin-top:14px">Moving Head — Pan</div>
+  <div class="aim-grid">
+    <button class="btn-aim" onclick="sendTestAim(0,90)">
+      &#x2190; LEFT<span class="aim-sub">0°</span>
+    </button>
+    <button class="btn-aim" onclick="sendTestAim(270,90)">
+      &#x25C9; CENTER<span class="aim-sub">270°</span>
+    </button>
+    <button class="btn-aim" onclick="sendTestAim(540,90)">
+      RIGHT &#x2192;<span class="aim-sub">540°</span>
+    </button>
+  </div>
+
+  <div class="sec-label">Moving Head — Tilt</div>
+  <div class="aim-grid">
+    <button class="btn-aim" onclick="sendTestAim(270,20)">
+      &#x2191; CEILING<span class="aim-sub">tilt 20</span>
+    </button>
+    <button class="btn-aim" onclick="sendTestAim(270,90)">
+      &#x25CE; FLOOR<span class="aim-sub">tilt 90</span>
+    </button>
+    <button class="btn-aim" onclick="sendTestAim(270,200)">
+      FRONT &#x2193;<span class="aim-sub">tilt 200</span>
+    </button>
+  </div>
+
+  <button class="btn-release-test" onclick="releaseFixtureTest()">&#x2713; RELEASE TEST</button>
+
+</div>
+
 <!-- ==================== SETUP VIEW ==================== -->
 <div class="view hidden" id="setup-view">
 
@@ -379,7 +509,8 @@ let _currentScene = null;
 let _modesBuilt = false;
 let _scenesBuilt = false;
 let _fadersSynced = false;
-let _activeView = 'perf'; // 'perf' | 'setup'
+let _activeView = 'perf'; // 'perf' | 'test' | 'setup'
+let _testPattern = null;  // active test pattern, null if engine is live
 
 // Joystick
 let _joyPan = 270;
@@ -566,6 +697,11 @@ function applyState(s) {
   // Setup view live values
   document.getElementById('s-dmx').textContent = s.dmx_output || 'MOCK';
   document.getElementById('s-fps').textContent = (s.fps || 0) + ' fps';
+
+  // Fixture test mode
+  if (s.test_mode !== undefined) {
+    _updateTestUI(!!s.test_mode, s.test_pattern || '');
+  }
 }
 
 function syncFader(name, val) {
@@ -580,19 +716,46 @@ function syncFader(name, val) {
 // ============================================================
 // VIEW SWITCHING
 // ============================================================
-function toggleView() {
-  const btn = document.getElementById('view-toggle');
-  if (_activeView === 'perf') {
-    _activeView = 'setup';
-    document.getElementById('perf-view').classList.add('hidden');
-    document.getElementById('setup-view').classList.remove('hidden');
-    btn.innerHTML = '&#x25C0;';
+function switchView(name) {
+  ['perf','test','setup'].forEach(v => {
+    document.getElementById(v + '-view').classList.toggle('hidden', v !== name);
+    document.getElementById('tab-' + v).classList.toggle('active', v === name);
+  });
+  _activeView = name;
+}
+
+// ============================================================
+// FIXTURE TEST
+// ============================================================
+function sendFixtureTest(pattern) {
+  send({type: 'fixture_test', pattern: pattern});
+}
+
+function releaseFixtureTest() {
+  send({type: 'release_fixture_test'});
+}
+
+function sendTestAim(pan, tilt) {
+  send({type: 'fixture_test_aim', pan: pan, tilt: tilt});
+}
+
+function _updateTestUI(testMode, testPattern) {
+  _testPattern = testMode ? testPattern : null;
+  const statusEl = document.getElementById('test-status');
+  const valEl    = document.getElementById('test-status-val');
+  const pillEl   = document.getElementById('test-pill');
+  if (testMode) {
+    statusEl.classList.add('active');
+    valEl.textContent = (testPattern || '').toUpperCase();
+    pillEl.style.display = '';
   } else {
-    _activeView = 'perf';
-    document.getElementById('setup-view').classList.add('hidden');
-    document.getElementById('perf-view').classList.remove('hidden');
-    btn.innerHTML = '&#x2699;';
+    statusEl.classList.remove('active');
+    valEl.textContent = 'Engine running — no override';
+    pillEl.style.display = 'none';
   }
+  document.querySelectorAll('.btn-test').forEach(b => {
+    b.classList.toggle('active', testMode && b.dataset.pattern === _testPattern);
+  });
 }
 
 // ============================================================

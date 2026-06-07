@@ -83,6 +83,22 @@ TARGET_FPS      = 40
 FRAME_TIME      = 1.0 / TARGET_FPS
 BLACKOUT_FADE_S = 0.8      # seconds to fade out when blackout is activated
 
+# Fixed render params for each fixture test pattern (sent as-is to render_to_universe)
+_TEST_PATTERNS: dict = {
+    "blackout": dict(brightness=0.0, hue=0.0,   saturation=0.0, value=0.0, strobe=0.0, white=0.0, amber=0.0, uv=0.0),
+    "dim":      dict(brightness=0.1, hue=0.0,   saturation=0.0, value=1.0, strobe=0.0, white=1.0, amber=0.0, uv=0.0),
+    "white":    dict(brightness=1.0, hue=0.0,   saturation=0.0, value=1.0, strobe=0.0, white=1.0, amber=0.0, uv=0.0),
+    "red":      dict(brightness=1.0, hue=0.0,   saturation=1.0, value=1.0, strobe=0.0, white=0.0, amber=0.0, uv=0.0),
+    "green":    dict(brightness=1.0, hue=120.0, saturation=1.0, value=1.0, strobe=0.0, white=0.0, amber=0.0, uv=0.0),
+    "blue":     dict(brightness=1.0, hue=240.0, saturation=1.0, value=1.0, strobe=0.0, white=0.0, amber=0.0, uv=0.0),
+    "yellow":   dict(brightness=1.0, hue=60.0,  saturation=1.0, value=1.0, strobe=0.0, white=0.0, amber=0.0, uv=0.0),
+    "cyan":     dict(brightness=1.0, hue=180.0, saturation=1.0, value=1.0, strobe=0.0, white=0.0, amber=0.0, uv=0.0),
+    "magenta":  dict(brightness=1.0, hue=300.0, saturation=1.0, value=1.0, strobe=0.0, white=0.0, amber=0.0, uv=0.0),
+    "uv":       dict(brightness=1.0, hue=0.0,   saturation=0.0, value=0.0, strobe=0.0, white=0.0, amber=0.0, uv=1.0),
+    "amber":    dict(brightness=1.0, hue=0.0,   saturation=0.0, value=0.0, strobe=0.0, white=0.0, amber=1.0, uv=0.0),
+    "strobe":   dict(brightness=1.0, hue=0.0,   saturation=0.0, value=1.0, strobe=1.0, white=1.0, amber=0.0, uv=0.0),
+}
+
 
 def _load_app_config() -> dict:
     if os.path.exists(APP_CONFIG_PATH):
@@ -351,6 +367,8 @@ def main():
     _flash_frames      = 0      # countdown frames for manual flash hit
     _strobe_burst_end  = 0.0    # monotonic time when strobe burst expires
     _strobe_hold       = False   # iPad hold-to-strobe button state
+    _test_mode         = False   # fixture test mode — overrides audio engine
+    _test_pattern      = ""      # active test pattern name
     _blackout_fading   = False   # True while blackout fade-out is in progress
     _blackout_fade_start = 0.0   # monotonic time when fade began
     _blackout_fade_alpha = 1.0   # 1.0=full, 0.0=dark
@@ -570,6 +588,23 @@ def main():
                         _strobe_burst_end = time.monotonic() + 2.0
                     elif _eff == "strobe_hold":
                         _strobe_hold = (_act == "start")
+                elif _wtype == "fixture_test":
+                    _pname = _wcmd.get("pattern", "white")
+                    if _pname in _TEST_PATTERNS:
+                        _test_mode    = True
+                        _test_pattern = _pname
+                elif _wtype == "release_fixture_test":
+                    _test_mode    = False
+                    _test_pattern = ""
+                elif _wtype == "fixture_test_aim":
+                    try:
+                        _aim_pan  = float(_wcmd.get("pan",  270.0))
+                        _aim_tilt = int(_wcmd.get("tilt", 90))
+                        for _fx in fixtures:
+                            if hasattr(_fx, "set_spot_aim"):
+                                _fx.set_spot_aim(_aim_pan, _aim_tilt)
+                    except (ValueError, TypeError):
+                        pass
 
             # --- MIDI ---
             if midi_in is not None:
@@ -721,6 +756,18 @@ def main():
                 eff_uv      = _fade_uv_snap  * _blackout_fade_alpha
                 _eff_strobe = 0.0
 
+            # --- fixture test override (bypasses audio engine) ---
+            if _test_mode and not safety.state.blackout_active:
+                _tp         = _TEST_PATTERNS[_test_pattern]
+                _frame_brt  = _tp["brightness"]
+                _frame_h    = _tp["hue"]
+                _frame_s    = _tp["saturation"]
+                _frame_v    = _tp["value"]
+                _frame_w    = _tp["white"]
+                eff_amber   = _tp["amber"]
+                eff_uv      = _tp["uv"]
+                _eff_strobe = _tp["strobe"]
+
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
                 fixture.render_to_universe(
@@ -837,6 +884,8 @@ def main():
                     strobe_master=   float(_strobe_master),
                     master_dimmer=   float(_master_dimmer),
                     uplight_dimmer=  float(_uplight_dimmer),
+                    test_mode=       _test_mode,
+                    test_pattern=    _test_pattern,
                 )
 
             # --- frame rate cap ---

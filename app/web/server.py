@@ -60,6 +60,8 @@ _engine_state: Dict[str, Any] = {
     "strobe_master":  1.0,
     "master_dimmer":  1.0,
     "uplight_dimmer": 1.0,
+    "test_mode":      False,
+    "test_pattern":   "",
 }
 
 _command_queue: _queue.Queue = _queue.Queue()
