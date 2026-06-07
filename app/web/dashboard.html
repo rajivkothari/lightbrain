@@ -163,10 +163,18 @@
     .btn-kill-dash:hover { background: #1a0000; border-color: #884444; }
     .btn-kill-dash.active { background: #330000; border-color: var(--red); color: var(--red); }
 
-    /* ---- Canvas blackout state ---- */
+    /* ---- Canvas blackout / flash state ---- */
     #rig-canvas.blacked-out {
       border-color: #550000;
       box-shadow: 0 0 0 1px #330000 inset;
+    }
+    #rig-canvas.strobe-active {
+      border-color: #888866;
+      box-shadow: 0 0 16px rgba(255,240,100,0.35);
+    }
+    #rig-canvas.flash-pop {
+      border-color: #aaaacc;
+      box-shadow: 0 0 24px rgba(200,200,255,0.7);
     }
 
     /* ---- Scene editor ---- */
@@ -359,6 +367,7 @@ const BL = 430, BT = 620, BR = 770, BB = 700;  // DJ booth
 
 let _lastFixtures = null;
 let _blackoutActive = false;
+let _lastFlashActive = false;
 let _beatFlash = 0;    // 0–1, set to 1 on beat, decays each draw frame
 let _ambientWarm = 0;  // 0–1, driven by W/A channels (dinner / slow dance)
 
@@ -828,11 +837,27 @@ function applyState(s) {
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
   document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
 
-  // Kill switches
+  // Kill switches — red = element is silenced/OFF
+  const killLabels = {strobe:'⚡ STROBE', derby:'⊕ DERBY', laser:'▶ LASER'};
+  const killOffLabels = {strobe:'⚡ STROBE OFF', derby:'⊕ DERBY OFF', laser:'▶ LASER OFF'};
   ['strobe','derby','laser'].forEach(t => {
     const el = document.getElementById('dash-kill-' + t);
-    if (el) el.classList.toggle('active', !!s['kill_' + t]);
+    if (!el) return;
+    const killed = !!s['kill_' + t];
+    el.classList.toggle('active', killed);
+    el.textContent = killed ? killOffLabels[t] : killLabels[t];
   });
+
+  // Flash feedback — brief canvas pop
+  const canvas = document.getElementById('rig-canvas');
+  if (s.flash_active && !_lastFlashActive) {
+    canvas.classList.add('flash-pop');
+    setTimeout(() => canvas.classList.remove('flash-pop'), 200);
+  }
+  _lastFlashActive = !!s.flash_active;
+
+  // Strobe glow while holding
+  canvas.classList.toggle('strobe-active', (s.strobe_rate || 0) > 0.1 && !s.blackout);
 
   // Canvas — always draw regardless of active tab
   if (s.fixtures && Object.keys(s.fixtures).length) {

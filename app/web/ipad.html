@@ -742,9 +742,17 @@ function applyState(s) {
   _syncKill('laser',  !!s.kill_laser);
 }
 
+const _killIcons = {strobe:'⚡', derby:'⊕', laser:'▶'};
+
 function _syncKill(target, active) {
   const el = document.getElementById('kill-' + target);
-  if (el) el.classList.toggle('active', active);
+  if (!el) return;
+  el.classList.toggle('active', active);
+  const icon = _killIcons[target];
+  const name = target.toUpperCase();
+  el.innerHTML = active
+    ? `<span class="kill-icon">✕</span>${name} OFF`
+    : `<span class="kill-icon">${icon}</span>${name}`;
 }
 
 function syncFader(name, val) {

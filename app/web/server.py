@@ -65,6 +65,7 @@ _engine_state: Dict[str, Any] = {
     "kill_strobe":    False,
     "kill_derby":     False,
     "kill_laser":     False,
+    "flash_active":   False,
 }
 
 _command_queue: _queue.Queue = _queue.Queue()

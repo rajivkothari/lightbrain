@@ -910,6 +910,7 @@ def main():
                     kill_strobe=     _kill_strobe,
                     kill_derby=      _kill_derby,
                     kill_laser=      _kill_laser,
+                    flash_active=    _flash_frames > 0,
                 )
 
             # --- frame rate cap ---
