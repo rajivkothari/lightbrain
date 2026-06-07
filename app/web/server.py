@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 try:
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
     from fastapi.responses import HTMLResponse, JSONResponse
     import uvicorn
     _FASTAPI_AVAILABLE = True
@@ -155,7 +155,8 @@ def _build_app() -> "FastAPI":
         return JSONResponse(dict(_engine_state))
 
     @fastapi_app.post("/api/command")
-    async def api_command(cmd: dict) -> dict:
+    async def api_command(request: Request) -> dict:
+        cmd = await request.json()
         _command_queue.put_nowait(cmd)
         return {"ok": True}
 
