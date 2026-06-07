@@ -124,6 +124,10 @@ _HOLDING = "holding"
 _TRANSITIONING = "transitioning"
 
 
+_BEAT_COOLDOWN_S: float  = 10.0   # seconds to lock out beat-triggered swaps
+_ENERGY_GATE: float     = 0.25   # minimum room energy to allow beat-triggered swap
+
+
 class PaletteBlender:
     """
     Slowly cycles through the colors of the active palette.
@@ -135,6 +139,14 @@ class PaletteBlender:
 
     Setting hold_ms=0 collapses into the original continuous-blend behavior
     (effectively always TRANSITIONING).
+
+    Beat-triggered transitions are gated by two safeguards:
+    - Cooldown: after a beat-triggered swap, further beat triggers are locked
+      out for _BEAT_COOLDOWN_S seconds.  Prevents color vomit on syncopated
+      tracks where the onset detector fires erratically.
+    - Energy gate: beat triggers are ignored when room energy is below
+      _ENERGY_GATE.  Prevents unmotivated swaps during quiet breakdowns.
+    Manual mode changes (set_palette) bypass both gates.
     """
 
     def __init__(self, palette: Palette, hold_ms: float = 0.0):
@@ -146,9 +158,13 @@ class PaletteBlender:
         self._hold_elapsed_ms  = 0.0
         self._last_time        = time.monotonic()
         self._state            = _HOLDING if hold_ms > 0 else _TRANSITIONING
+        self._last_beat_swap   = -_BEAT_COOLDOWN_S  # allow first beat immediately
 
     def set_palette(self, palette: Palette, now: Optional[float] = None) -> None:
-        """Switch to a new palette — restart blend from color index 0."""
+        """Switch to a new palette — restart blend from color index 0.
+
+        Resets the beat cooldown so the new palette responds immediately.
+        """
         self._palette          = palette
         self._color_idx        = 0
         self._next_idx         = 1 % max(len(palette.colors), 1)
@@ -156,6 +172,7 @@ class PaletteBlender:
         self._hold_elapsed_ms  = 0.0
         self._last_time        = now if now is not None else time.monotonic()
         self._state            = _HOLDING if self._hold_ms > 0 else _TRANSITIONING
+        self._last_beat_swap   = -_BEAT_COOLDOWN_S  # reset cooldown on manual mode change
 
     def set_hold_ms(self, hold_ms: float) -> None:
         """Update hold time (takes effect at the next state transition)."""
@@ -172,6 +189,7 @@ class PaletteBlender:
 
         energy        — room energy 0.0–1.0
         beat_trigger  — when True, releases hold phase for energy_trigger/fast_beat palettes
+                        (subject to cooldown and energy gate)
         now           — optional clock override for deterministic replay (Sprint 3);
                         omit for live operation (uses time.monotonic())
         """
@@ -191,11 +209,16 @@ class PaletteBlender:
         t_ms = self._palette.transition_ms or 2000.0
 
         if self._state == _HOLDING:
-            beat_release = (beat_trigger
-                            and self._palette.change_rule in ("energy_trigger", "fast_beat"))
-            if beat_release:
-                self._state   = _TRANSITIONING
-                self._blend_t = 0.0
+            beat_wants_release = (
+                beat_trigger
+                and self._palette.change_rule in ("energy_trigger", "fast_beat")
+                and energy >= _ENERGY_GATE
+                and (now - self._last_beat_swap) >= _BEAT_COOLDOWN_S
+            )
+            if beat_wants_release:
+                self._state          = _TRANSITIONING
+                self._blend_t        = 0.0
+                self._last_beat_swap = now
             else:
                 self._hold_elapsed_ms += dt_ms
                 if self._hold_elapsed_ms >= self._hold_ms:
