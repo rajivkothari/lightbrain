@@ -62,6 +62,7 @@ from engine.strobe        import StrobeEngine
 from engine.hue_crossfader import HueCrossfader
 from app.render.scene import SceneLayout
 from app.web import server as _web
+from app.web import ipad_server as _ipad
 
 try:
     from midi.input import MidiInput
@@ -70,13 +71,21 @@ except ImportError:
 
 
 # ---- constants ----
-CONFIG_PATH    = os.path.join(ROOT, "config", "rig_config.json")
-PALETTES_DIR   = os.path.join(ROOT, "config", "palettes")
-SCENES_DIR     = os.path.join(ROOT, "config", "scenes")
-POSITIONS_FILE = os.path.join(ROOT, "fixtures", "positions.json")
-STATES_FILE    = os.path.join(ROOT, "fixtures", "states.json")
-TARGET_FPS     = 40
-FRAME_TIME     = 1.0 / TARGET_FPS
+CONFIG_PATH     = os.path.join(ROOT, "config", "rig_config.json")
+APP_CONFIG_PATH = os.path.join(ROOT, "config", "app_config.json")
+PALETTES_DIR    = os.path.join(ROOT, "config", "palettes")
+SCENES_DIR      = os.path.join(ROOT, "config", "scenes")
+POSITIONS_FILE  = os.path.join(ROOT, "fixtures", "positions.json")
+STATES_FILE     = os.path.join(ROOT, "fixtures", "states.json")
+TARGET_FPS      = 40
+FRAME_TIME      = 1.0 / TARGET_FPS
+
+
+def _load_app_config() -> dict:
+    if os.path.exists(APP_CONFIG_PATH):
+        with open(APP_CONFIG_PATH) as f:
+            return json.load(f)
+    return {"web_server_enabled": True, "web_server_port": 8080, "headless_mode": False}
 
 # F-key escape sequences → key names (xterm / VT100 / Linux console)
 _ESCAPE_MAP = {
@@ -175,7 +184,15 @@ def main():
                         help="start web dashboard (requires fastapi + uvicorn)")
     parser.add_argument("--web-port",    type=int,  default=8765,
                         help="web dashboard port (default: 8765)")
+    parser.add_argument("--ipad-port",   type=int,  default=None,
+                        help="iPad controller port (default: from app_config.json)")
+    parser.add_argument("--headless",    action="store_true",
+                        help="headless mode — no terminal overlay, no keyboard input")
     args = parser.parse_args()
+
+    app_cfg = _load_app_config()
+    if args.headless or app_cfg.get("headless_mode", False):
+        args.headless = True
 
     config = load_config()
 
@@ -279,35 +296,48 @@ def main():
         _web.start(port=args.web_port)
         _web.set_paths(SCENES_DIR, POSITIONS_FILE, STATES_FILE, scene_mgr)
 
+    # ---- iPad controller ----
+    _ipad_enabled = app_cfg.get("web_server_enabled", True)
+    _ipad_port = args.ipad_port or app_cfg.get("web_server_port", 8080)
+    if _ipad_enabled:
+        _ipad.start(port=_ipad_port)
+
     # ---- fps counter ----
     _fps_frames = 0
     _fps_last_t = time.monotonic()
     _fps_display = 0
 
     # ---- UI ----
-    overlay = TerminalDebugOverlay()
-    overlay.init_screen()
-
-    # ---- keyboard thread ----
-    kbd_thread = _start_keyboard()
+    overlay = None
+    kbd_thread = None
+    if not args.headless:
+        overlay = TerminalDebugOverlay()
+        overlay.init_screen()
+        kbd_thread = _start_keyboard()
+    else:
+        print("[Headless] Terminal overlay and keyboard disabled.")
 
     # Sprint 2: WAU crossfade snapshot (captured at each mode switch)
     _wau_snapshot = (0.0, 0.0, 0.0)
 
     last_bands = AudioBands()
     last_lanes: dict = {"impact": 0.0, "room": 0.0}
-    quit_flag      = False
-    _last_hue      = 0.0    # raw hue from previous frame — reference for snap()
-    _prev_mode_key = mode_key
-    _strobe_master = 1.0    # 0–1 multiplier, set via web slider
+    quit_flag          = False
+    _last_hue          = 0.0    # raw hue from previous frame — reference for snap()
+    _prev_mode_key     = mode_key
+    _strobe_master     = 1.0    # 0–1 multiplier, set via web/iPad slider
+    _master_dimmer     = 1.0    # 0–1, overall brightness
+    _uplight_dimmer    = 1.0    # 0–1, uplight-only brightness
+    _flash_frames      = 0      # countdown frames for manual flash hit
+    _strobe_burst_end  = 0.0    # monotonic time when strobe burst expires
 
     try:
         while not quit_flag:
             frame_start = time.monotonic()
             _prev_mode_key = mode_key   # capture before input handling changes it
 
-            # --- keyboard ---
-            while not _key_queue.empty():
+            # --- keyboard (disabled in headless mode) ---
+            while not args.headless and not _key_queue.empty():
                 key = _key_queue.get_nowait()
                 if key == "q" or key == "\x03":
                     quit_flag = True
@@ -408,6 +438,58 @@ def main():
                     safety.toggle_blackout()
                 elif _wtype == "strobe_master":
                     _strobe_master = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
+                elif _wtype == "set_mode":
+                    _wval = _wcmd.get("value", "")
+                    if _wval in MODES:
+                        new_mode    = get_mode(_wval)
+                        new_palette = all_palettes.get(
+                            new_mode.palette_key, current_palette
+                        )
+                        _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                         last_lanes.get("wau_amber", 0.0),
+                                         last_lanes.get("wau_uv",    0.0))
+                        transitioner.switch(new_mode)
+                        current_mode    = new_mode
+                        current_palette = new_palette
+                        mode_key        = _wval
+                        safety.update_from_mode(current_mode)
+                        room_lane.set_mode(current_mode)
+                        room_lane.set_palette(current_palette)
+                elif _wtype == "activate_scene":
+                    _sid = _wcmd.get("value", "")
+                    if scene_mgr.activate_scene(_sid):
+                        _base = scene_mgr.active_base_mode
+                        if _base and _base in MODES:
+                            new_mode    = get_mode(_base)
+                            new_palette = all_palettes.get(
+                                new_mode.palette_key, current_palette
+                            )
+                            _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                             last_lanes.get("wau_amber", 0.0),
+                                             last_lanes.get("wau_uv",    0.0))
+                            transitioner.switch(new_mode)
+                            current_mode    = new_mode
+                            current_palette = new_palette
+                            mode_key        = _base
+                            safety.update_from_mode(current_mode)
+                            room_lane.set_mode(current_mode)
+                            room_lane.set_palette(current_palette)
+                elif _wtype == "set_fader":
+                    _fname = _wcmd.get("fader", "")
+                    _fval  = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
+                    if _fname == "master":
+                        _master_dimmer = _fval
+                    elif _fname == "uplight":
+                        _uplight_dimmer = _fval
+                    elif _fname == "strobe":
+                        _strobe_master = _fval
+                elif _wtype == "momentary":
+                    _eff = _wcmd.get("effect", "")
+                    _act = _wcmd.get("action", "start")
+                    if _eff == "flash" and _act == "start":
+                        _flash_frames = 3
+                    elif _eff == "strobe_burst" and _act == "start":
+                        _strobe_burst_end = time.monotonic() + 2.0
 
             # --- MIDI ---
             if midi_in is not None:
@@ -507,16 +589,34 @@ def main():
             )
             _eff_strobe = _strobe_rate * _strobe_master if safety.state.strobe_allowed else 0.0
 
+            # --- strobe burst override ---
+            if time.monotonic() < _strobe_burst_end:
+                _eff_strobe = 1.0
+
+            # --- prepare per-frame render values ---
+            _frame_brt = _master_dimmer
+            _frame_h   = _render_h
+            _frame_s   = _render_s
+            _frame_v   = _render_v
+            _frame_w   = eff_white
+
+            if _flash_frames > 0:
+                _flash_frames -= 1
+                _frame_brt = 1.0
+                _frame_v   = 1.0
+                _frame_s   = 0.0
+                _frame_w   = 1.0
+
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
                 fixture.render_to_universe(
                     universe,
-                    brightness=1.0,
-                    hue=_render_h,
-                    saturation=_render_s,
-                    value=_render_v,
+                    brightness=_frame_brt,
+                    hue=_frame_h,
+                    saturation=_frame_s,
+                    value=_frame_v,
                     strobe=_eff_strobe,
-                    white=eff_white,
+                    white=_frame_w,
                     amber=eff_amber,
                     uv=eff_uv,
                 )
@@ -524,48 +624,46 @@ def main():
             # --- DMX send ---
             dmx_out.send(universe)
 
-            # --- overlay prep ---
-            h_norm = room_out.hsv.h / 360.0
-            r_f, g_f, b_f = colorsys.hsv_to_rgb(
-                h_norm, room_out.hsv.s, room_out.hsv.v
-            )
-            rgb_out = (int(r_f * 255), int(g_f * 255), int(b_f * 255))
-
-            primary_fixture = fixtures[0]
-            ch_labels       = primary_fixture.get_channel_labels()
-            dmx_ch_vals     = {
-                label: universe.get_channel(ch)
-                for label, ch in ch_labels.items()
-            }
-
-            _active_scene = scene_mgr.active_scene
-            _mode_display = (
-                f"{current_mode.display_name} [{_active_scene.name}]"
-                if _active_scene else current_mode.display_name
-            )
-
-            overlay.update(
-                device_name=device_label,
-                raw_bands=bands_dict,
-                smoothed_lanes=last_lanes,
-                mode_name=_mode_display,
-                palette_name=room_lane.palette_name,
-                color_name=room_lane.current_color_name,
-                next_color_name=room_lane.next_color_name,
-                hold_remaining_ms=room_lane.hold_remaining_ms,
-                transition_progress=room_lane.transition_progress,
-                hsv=(room_out.hsv.h, room_out.hsv.s, room_out.hsv.v),
-                rgb=rgb_out,
-                brightness_base=room_out.base_brightness,
-                brightness_pulse=room_out.pulse_brightness,
-                fixture_name=primary_fixture.name,
-                dmx_address=primary_fixture.dmx_address,
-                dmx_channels=dmx_ch_vals,
-                dmx_output_type=dmx_out.output_type,
-                safety_blackout=safety.state.blackout_active,
-                safety_strobe_ok=safety.state.strobe_allowed,
-                error=error_msg or getattr(capture, "last_error", None),
-            )
+            # --- overlay prep (skip in headless) ---
+            if overlay:
+                h_norm = room_out.hsv.h / 360.0
+                r_f, g_f, b_f = colorsys.hsv_to_rgb(
+                    h_norm, room_out.hsv.s, room_out.hsv.v
+                )
+                rgb_out = (int(r_f * 255), int(g_f * 255), int(b_f * 255))
+                primary_fixture = fixtures[0]
+                ch_labels       = primary_fixture.get_channel_labels()
+                dmx_ch_vals     = {
+                    label: universe.get_channel(ch)
+                    for label, ch in ch_labels.items()
+                }
+                _active_scene = scene_mgr.active_scene
+                _mode_display = (
+                    f"{current_mode.display_name} [{_active_scene.name}]"
+                    if _active_scene else current_mode.display_name
+                )
+                overlay.update(
+                    device_name=device_label,
+                    raw_bands=bands_dict,
+                    smoothed_lanes=last_lanes,
+                    mode_name=_mode_display,
+                    palette_name=room_lane.palette_name,
+                    color_name=room_lane.current_color_name,
+                    next_color_name=room_lane.next_color_name,
+                    hold_remaining_ms=room_lane.hold_remaining_ms,
+                    transition_progress=room_lane.transition_progress,
+                    hsv=(room_out.hsv.h, room_out.hsv.s, room_out.hsv.v),
+                    rgb=rgb_out,
+                    brightness_base=room_out.base_brightness,
+                    brightness_pulse=room_out.pulse_brightness,
+                    fixture_name=primary_fixture.name,
+                    dmx_address=primary_fixture.dmx_address,
+                    dmx_channels=dmx_ch_vals,
+                    dmx_output_type=dmx_out.output_type,
+                    safety_blackout=safety.state.blackout_active,
+                    safety_strobe_ok=safety.state.strobe_allowed,
+                    error=error_msg or getattr(capture, "last_error", None),
+                )
 
             # --- fps counter ---
             _fps_frames += 1
@@ -575,8 +673,8 @@ def main():
                 _fps_frames  = 0
                 _fps_last_t  = _fps_now
 
-            # --- web state push ---
-            if args.web:
+            # --- web state push (dashboard + iPad both read _engine_state) ---
+            if args.web or _ipad_enabled:
                 # Snap hue crossfader on mode change (before blend)
                 _raw_hue = room_out.hsv.h
                 if _prev_mode_key != mode_key:
@@ -597,6 +695,9 @@ def main():
                     ambient_white=eff_white, ambient_amber=eff_amber,
                 )
                 _rig_web = scene_mgr.apply_to_rig_state(_rig_web)
+                if _uplight_dimmer < 1.0:
+                    for _ul in _rig_web.uplights:
+                        _ul.brightness *= _uplight_dimmer
                 _web.update_state(
                     mode=            mode_key,
                     mode_display=    current_mode.display_name,
@@ -616,6 +717,8 @@ def main():
                     room_lane=       float(last_lanes.get("room",   0.0)),
                     strobe_rate=     float(_eff_strobe),
                     strobe_master=   float(_strobe_master),
+                    master_dimmer=   float(_master_dimmer),
+                    uplight_dimmer=  float(_uplight_dimmer),
                 )
 
             # --- frame rate cap ---
@@ -627,14 +730,16 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        _stop_keyboard(kbd_thread)
+        if kbd_thread is not None:
+            _stop_keyboard(kbd_thread)
         if midi_in is not None:
             midi_in.close()
         universe.blackout()
         dmx_out.send(universe)
         dmx_out.close()
         capture.stop()
-        overlay.restore_screen()
+        if overlay:
+            overlay.restore_screen()
         print("LightBrain stopped.")
 
 

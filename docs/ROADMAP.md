@@ -145,6 +145,65 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
+## Phase 13 — Sprint 13: iPad Web Controller
+
+**Status: Complete — 422 tests passing**
+
+### Delivered
+
+- [x] `config/app_config.json` — new config file: `web_server_enabled`, `web_server_port` (8080), `headless_mode`
+- [x] `app/web/ipad_server.py` — FastAPI server on port 8080 sharing `_engine_state` and `_command_queue` with the dashboard; pushes state at 15 Hz; bidirectional WebSocket: iPad sends commands upstream, server pushes state downstream
+- [x] `app/web/ipad.html` — self-contained PWA (no CDN dependencies): dark high-contrast theme for DJ booth use; two views (Performance + Setup); large touch targets (min 60×60px); `manifest.json` for "Add to Home Screen"; WebSocket auto-reconnect with connection status indicator
+- [x] `app/main.py` — `--ipad-port` and `--headless` CLI args; loads `app_config.json` for defaults; starts iPad server alongside dashboard; handles new command types: `set_mode`, `activate_scene`, `set_fader` (master/uplight/strobe), `momentary` (flash/strobe_burst), `aim_fixture`, `save_position`; `_master_dimmer` and `_uplight_dimmer` faders applied to DMX output and visualizer; `_flash_frames` for manual flash hit; `_strobe_burst_end` for timed strobe burst; headless mode disables terminal overlay and keyboard thread
+- [x] `app/web/server.py` — added `master_dimmer` and `uplight_dimmer` to `_engine_state` defaults
+
+### iPad PWA features
+
+- **Performance view**: energy meters (Low/Mid/High/Overall), mode buttons (2-col grid), scene presets (2-col grid + Release), faders (Master/Uplight/Strobe with large thumb sliders), momentary buttons (Flash Hit / Strobe Burst), blackout button (sticky bottom, always accessible)
+- **Setup view**: system status (DMX output, engine FPS, connection), fixture aiming joystick (pan 0–540°, tilt 0–270°), position save flow
+- **PWA**: `apple-mobile-web-app-capable`, standalone display mode, dark status bar, safe-area insets for modern iPads
+
+### Command protocol (WebSocket bidirectional)
+
+```
+iPad → Server:
+  {type: "set_mode",        value: "banger"}
+  {type: "activate_scene",  value: "first_dance"}
+  {type: "blackout"}
+  {type: "set_fader",       fader: "master",  value: 0.8}
+  {type: "momentary",       effect: "flash",  action: "start"}
+  {type: "aim_fixture",     fixture: "beam_l", pan: 270, tilt: 135}
+  {type: "save_position",   name: "center",   fixture: "beam_l", ...}
+
+Server → iPad (15 Hz):
+  Full engine state dict including mode, scene, energy bands,
+  BPM, fader values, fixtures, DMX output type, FPS
+```
+
+### Headless mode
+
+```
+python -m app.main --demo --headless
+# No terminal overlay, no keyboard input
+# iPad on port 8080 is the only UI
+# Dashboard still available on port 8765 with --web
+```
+
+---
+
+## Phase 12 — Sprint 12: Strobe Master + Lighting Lanes
+
+**Status: Complete — 414 tests passing**
+
+### Delivered
+
+- [x] `engine/strobe.py` — raised `_THRESHOLD` from 0.28 to 0.55 so strobe only fires during actual EDM build-ups
+- [x] `app/web/server.py` — added `impact_lane`, `room_lane`, `strobe_rate`, `strobe_master` to `_engine_state`
+- [x] `app/main.py` — `_strobe_master` slider; reads `strobe_master` command; applies as multiplier on strobe rate; pushes impact/room lanes and strobe values in state
+- [x] `app/web/dashboard.html` — "Audio Bands" and "Lighting Lanes" sections with labelled bars (Impact→flashes, Room→color, Strobe→EDM); strobe master slider (0–100%); strobe bar flashes white when firing
+
+---
+
 ## Phase 11 — Sprint 11: Live Visual Quality
 
 **Status: Complete — 414 tests passing**
@@ -313,3 +372,5 @@ python -m app.main --demo --web
 | 9 | 378 ✅ | Canvas rig visualizer, scene editor UI, scene CRUD API, serialize_rig_state |
 | 10 | 399 ✅ | EDM lift strobe engine, safety chain strobe passthrough, RockWedge Ch8, visual flash |
 | 11 | 414 ✅ | Per-fixture color zones, mode hue crossfade, ambient warm tint in canvas |
+| 12 | 414 ✅ | Strobe master slider, lighting lanes clarity (Impact/Room/Strobe bars) |
+| 13 | 422 ✅ | iPad PWA controller, master/uplight faders, flash/strobe hit, headless mode |

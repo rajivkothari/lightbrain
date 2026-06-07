@@ -3614,3 +3614,118 @@ class TestUplightZones:
     def test_ambient_warm_capped_at_one(self):
         rig = self._build(ambient_amber=0.9, ambient_white=0.9)
         assert rig.ambient_warm <= 1.0
+
+
+# ===========================================================================
+# Sprint 12: strobe threshold, faders, iPad server
+# ===========================================================================
+
+class TestStrobeThreshold:
+    _T = 1000.0
+
+    def _eng(self):
+        from engine.strobe import StrobeEngine
+        e = StrobeEngine()
+        e._last_t = self._T
+        return e
+
+    def test_inactive_below_055(self):
+        e = self._eng()
+        _, rate, _ = e.update(0.50, "banger", now=self._T + 0.01)
+        assert rate == pytest.approx(0.0)
+
+    def test_active_above_055(self):
+        e = self._eng()
+        _, rate, _ = e.update(0.60, "banger", now=self._T + 0.01)
+        assert rate > 0.0
+
+
+class TestEngineState:
+    def test_engine_state_has_fader_fields(self):
+        from app.web.server import _engine_state
+        assert "master_dimmer" in _engine_state
+        assert "uplight_dimmer" in _engine_state
+        assert "strobe_master" in _engine_state
+        assert "impact_lane" in _engine_state
+        assert "room_lane" in _engine_state
+        assert "strobe_rate" in _engine_state
+
+    def test_engine_state_fader_defaults(self):
+        from app.web.server import _engine_state
+        assert _engine_state["master_dimmer"] == 1.0
+        assert _engine_state["uplight_dimmer"] == 1.0
+        assert _engine_state["strobe_master"] == 1.0
+
+
+class TestIPadServer:
+    def test_ipad_server_import(self):
+        from app.web import ipad_server
+        assert hasattr(ipad_server, "start")
+        assert hasattr(ipad_server, "_build_app")
+
+    def test_ipad_server_shares_state(self):
+        from app.web.server import _engine_state, _command_queue
+        from app.web.ipad_server import _engine_state as ipad_state
+        assert ipad_state is _engine_state
+
+    def test_ipad_manifest_endpoint(self):
+        try:
+            from starlette.testclient import TestClient
+        except ImportError:
+            pytest.skip("starlette not installed")
+        from app.web.ipad_server import _build_app
+        app = _build_app()
+        client = TestClient(app)
+        resp = client.get("/manifest.json")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "LightBrain"
+        assert data["display"] == "standalone"
+
+    def test_ipad_serves_html(self):
+        try:
+            from starlette.testclient import TestClient
+        except ImportError:
+            pytest.skip("starlette not installed")
+        from app.web.ipad_server import _build_app
+        app = _build_app()
+        client = TestClient(app)
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "LIGHTBRAIN" in resp.text
+
+
+class TestAppConfig:
+    def test_app_config_loads(self):
+        import json, os
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "config", "app_config.json"
+        )
+        with open(path) as f:
+            cfg = json.load(f)
+        assert cfg["web_server_enabled"] is True
+        assert cfg["web_server_port"] == 8080
+        assert cfg["headless_mode"] is False
+
+
+class TestUplightDimmer:
+    def test_uplight_dimmer_reduces_brightness(self):
+        from app.render.scene import SceneLayout
+        sl = SceneLayout()
+        sl.reset_time(0.0)
+        bands = {"low_energy": 0.5, "mid_energy": 0.5,
+                 "high_energy": 0.5, "overall_energy": 0.5}
+        lanes = {"impact": 0.5, "room": 0.5}
+        rig = sl.update_and_build(
+            bands=bands, lanes=lanes,
+            hue=120.0, saturation=1.0, brightness=0.8,
+            base_brt=0.3, pulse_brt=0.2,
+            mode_key="open_dance", palette_name="test", blackout=False,
+        )
+        original_brts = [u.brightness for u in rig.uplights]
+        dimmer = 0.5
+        for u in rig.uplights:
+            u.brightness *= dimmer
+        for i, u in enumerate(rig.uplights):
+            assert u.brightness == pytest.approx(original_brts[i] * 0.5)
