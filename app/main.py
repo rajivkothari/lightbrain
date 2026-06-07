@@ -54,6 +54,8 @@ from dmx.universe          import DMXUniverse
 from dmx.output_mock       import MockDMXOutput
 from dmx.output_enttec_pro import EnttecProOutput
 from dmx.output_artnet     import ArtNetOutput
+from dmx.output_thread     import DmxOutputThread
+from engine.pacer          import precise_sleep_until
 
 from fixtures.rockwedge import RockWedge
 from fixtures.chauvet_wash_fx2 import ChauvetWashFX2
@@ -298,7 +300,7 @@ def main():
         print("[ERROR] No fixtures found in rig_config.json")
         sys.exit(1)
 
-    # ---- DMX output ----
+    # ---- DMX output backend ----
     # Priority: --serial CLI > --artnet CLI > config dmx.output > mock
     _dmx_cfg    = config.get("dmx", {})
     _cfg_output = _dmx_cfg.get("output", "mock")
@@ -309,12 +311,12 @@ def main():
 
     if _serial_port:
         try:
-            dmx_out = EnttecProOutput()
-            dmx_out.open(_serial_port)
+            _dmx_backend = EnttecProOutput()
+            _dmx_backend.open(_serial_port)
             print(f"[DMX] Opened Enttec on {_serial_port}")
         except Exception as e:
             print(f"[DMX] Serial open failed ({e}), falling back to MOCK")
-            dmx_out = MockDMXOutput(verbose=args.verbose_dmx)
+            _dmx_backend = MockDMXOutput(verbose=args.verbose_dmx)
     elif _artnet_ip:
         class _ArtNetAdapter:
             """Thin adapter: gives ArtNetOutput the send(universe)/close() interface."""
@@ -327,9 +329,15 @@ def main():
                 self._out.send_universe(list(universe.to_bytes()))
             def close(self) -> None:
                 self._out.disconnect()
-        dmx_out = _ArtNetAdapter(_artnet_ip)
+        _dmx_backend = _ArtNetAdapter(_artnet_ip)
     else:
-        dmx_out = MockDMXOutput(verbose=args.verbose_dmx)
+        _dmx_backend = MockDMXOutput(verbose=args.verbose_dmx)
+
+    # ---- DMX output thread ----
+    # The backend runs in its own 40Hz daemon thread — pyserial.write() never
+    # touches the DSP critical path.
+    dmx_thread = DmxOutputThread(_dmx_backend, fps=_target_fps)
+    dmx_thread.start()
 
     # ---- MIDI ----
     midi_in = None
@@ -837,8 +845,8 @@ def main():
             if safety.state.blackout_active and not _blackout_fading:
                 universe.blackout()
 
-            # --- DMX send ---
-            dmx_out.send(universe)
+            # --- post to DMX thread (non-blocking ~1µs copy into single-slot buffer) ---
+            dmx_thread.post(universe)
 
             # --- overlay prep (skip in headless) ---
             if overlay:
@@ -875,7 +883,7 @@ def main():
                     fixture_name=primary_fixture.name,
                     dmx_address=primary_fixture.dmx_address,
                     dmx_channels=dmx_ch_vals,
-                    dmx_output_type=dmx_out.output_type,
+                    dmx_output_type=dmx_thread.output_type,
                     safety_blackout=safety.state.blackout_active,
                     safety_strobe_ok=safety.state.strobe_allowed,
                     error=error_msg or getattr(capture, "last_error", None),
@@ -927,7 +935,7 @@ def main():
                     high_energy=     float(bands_dict.get("high_energy",   0.0)),
                     overall_energy=  float(bands_dict.get("overall_energy",0.0)),
                     fps=             _fps_display,
-                    dmx_output=      dmx_out.output_type,
+                    dmx_output=      dmx_thread.output_type,
                     fixtures=        _web.serialize_rig_state(_rig_web),
                     impact_lane=     float(last_lanes.get("impact", 0.0)),
                     room_lane=       float(last_lanes.get("room",   0.0)),
@@ -943,11 +951,8 @@ def main():
                     flash_active=    _flash_frames > 0,
                 )
 
-            # --- frame rate cap ---
-            elapsed = time.monotonic() - frame_start
-            sleep_t = _frame_time - elapsed
-            if sleep_t > 0:
-                time.sleep(sleep_t)
+            # --- frame rate cap (hybrid sleep/spin-lock, ~50µs jitter) ---
+            precise_sleep_until(frame_start + _frame_time)
 
     except KeyboardInterrupt:
         pass
@@ -956,15 +961,7 @@ def main():
             _stop_keyboard(kbd_thread)
         if midi_in is not None:
             midi_in.close()
-        try:
-            universe.blackout()
-            dmx_out.send(universe)
-        except Exception:
-            pass
-        try:
-            dmx_out.close()
-        except Exception:
-            pass
+        dmx_thread.stop()   # signals thread, sends blackout, closes backend
         capture.stop()
         if overlay:
             overlay.restore_screen()

@@ -76,6 +76,10 @@ class DMXUniverse:
             for i in diff_indices
         ]
 
+    def load_snapshot(self, data: bytes) -> None:
+        """Overwrite all 512 channels from a raw bytes snapshot (must be 512 bytes)."""
+        self._channels[:] = np.frombuffer(data, dtype=np.uint8)
+
     def snapshot(self) -> np.ndarray:
         """Return a copy of the raw channel array (0-indexed)."""
         return self._channels.copy()

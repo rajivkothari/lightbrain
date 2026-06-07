@@ -208,9 +208,12 @@ class _ConnectionManager:
 _manager = _ConnectionManager()
 
 
+_WS_PUSH_INTERVAL = 1.0 / 15  # 15 Hz — safe for iPad thermal budget
+
+
 async def _broadcast_loop() -> None:
     while True:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(_WS_PUSH_INTERVAL)
         if _manager.active:
             await _manager.broadcast(dict(_engine_state))
 
