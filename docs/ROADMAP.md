@@ -200,10 +200,25 @@ These were added after the formal audit in direct development:
 
 ## Hardware readiness checklist (DMX adapter arriving ~2 weeks)
 
+### 0. Linux / Raspberry Pi setup (one-time)
+
+- [ ] Plug in DMXking; run `lsusb` — confirm FTDI shows `0403:6001`
+- [ ] Confirm VCP device enumerated: `ls /dev/ttyUSB*` (should see `/dev/ttyUSB0`)
+- [ ] If `/dev/ttyUSB*` missing: `sudo modprobe ftdi_sio` (stock RPi OS loads it automatically)
+- [ ] Add user to `dialout` group: `sudo usermod -aG dialout $USER` then **log out / back in**
+- [ ] Install latency rule: `sudo cp deploy/99-dmxking-latency.rules /etc/udev/rules.d/`
+- [ ] Reload udev: `sudo udevadm control --reload-rules && sudo udevadm trigger`
+- [ ] Verify latency: `cat /sys/class/tty/ttyUSB0/device/latency_timer` → should read `1`
+
+### 1. DMX configuration
+
 - [ ] Swap `config/rig_config.json` `fixtures` array from RockWedge placeholder to `_hardware_fixtures` block
 - [ ] Set `dmx.output` to `"enttec"` and `dmx.serial_port` to the USB adapter port
 - [ ] Set fixture personalities on hardware: Wash FX2 → 8Ch, GigBAR → 29Ch
 - [ ] Verify DMX addresses match config (Wash FX2 L=1, Wash FX2 R=9, GigBAR=17)
+
+### 2. Smoke tests
+
 - [ ] Run `python scripts/test_dmxking_rockwedge.py --port <PORT>` against each fixture
 - [ ] Test full pipeline: `python -m app.main --device <N> --serial <PORT> --web`
 - [ ] Tune `spot_pan_deg` and `spot_tilt_dmx` in rig_config for venue aim

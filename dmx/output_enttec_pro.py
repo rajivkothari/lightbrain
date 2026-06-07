@@ -34,12 +34,18 @@ Do NOT run test_dmxking_rockwedge.py without a DMX fixture connected
 and correctly addressed in the right channel mode.
 """
 
+import logging
+import os
+import sys
 from typing import Optional, List
+
 import serial
 import serial.tools.list_ports
 import time
 
 from dmx.universe import DMXUniverse
+
+log = logging.getLogger(__name__)
 
 
 ENTTEC_PRO_START = 0x7E
@@ -79,6 +85,58 @@ def build_enttec_frame(universe: DMXUniverse) -> bytes:
     return bytes(frame)
 
 
+_LATENCY_TIMER_TARGET = 1  # ms — down from the 16ms ftdi_sio kernel default
+
+
+def _tune_latency_timer(port: str) -> None:
+    """
+    On Linux, lower the FTDI latency_timer from 16ms to 1ms via sysfs.
+
+    The ftdi_sio kernel driver holds back small USB packets for up to
+    latency_timer milliseconds before flushing to hardware.  At 16ms default,
+    this adds up to 64% of a 25ms DMX frame period as jitter — fixtures
+    pulse unevenly even though the software loop is perfectly paced.
+
+    Writing to sysfs requires either root or a udev rule that sets the file
+    permissions.  If the write fails (permissions, non-FTDI chip, container
+    environment) we log a warning and continue — the engine still works, just
+    with slightly worse timing on physical hardware.
+    """
+    tty_name = os.path.basename(port)       # e.g. "ttyUSB0"
+    sysfs_path = f"/sys/class/tty/{tty_name}/device/latency_timer"
+    if not os.path.exists(sysfs_path):
+        return  # not an FTDI device or sysfs not mounted — nothing to tune
+
+    try:
+        with open(sysfs_path, "r") as f:
+            current = int(f.read().strip())
+    except (OSError, ValueError):
+        return
+
+    if current <= _LATENCY_TIMER_TARGET:
+        log.info("FTDI latency_timer already %dms — no change needed", current)
+        return
+
+    try:
+        with open(sysfs_path, "w") as f:
+            f.write(str(_LATENCY_TIMER_TARGET))
+        log.info("FTDI latency_timer: %dms → %dms", current, _LATENCY_TIMER_TARGET)
+        print(f"[DMX] FTDI latency_timer: {current}ms → {_LATENCY_TIMER_TARGET}ms")
+    except PermissionError:
+        log.warning(
+            "Cannot write latency_timer (need root or udev rule). "
+            "Current value %dms may cause visible jitter on fixtures. "
+            "Fix: install deploy/99-dmxking-latency.rules into /etc/udev/rules.d/",
+            current,
+        )
+        print(
+            f"[DMX] WARNING: FTDI latency_timer is {current}ms (want {_LATENCY_TIMER_TARGET}ms).\n"
+            f"  Fixtures may show timing jitter. To fix permanently:\n"
+            f"  sudo cp deploy/99-dmxking-latency.rules /etc/udev/rules.d/\n"
+            f"  sudo udevadm control --reload-rules && sudo udevadm trigger"
+        )
+
+
 class EnttecProOutput:
     """
     Serial DMX output for Enttec USB Pro compatible devices.
@@ -108,21 +166,39 @@ class EnttecProOutput:
             ensuring the DMX daemon thread never stalls indefinitely if the USB
             cable is disconnected mid-write.
 
+        On Linux, also tunes the FTDI latency_timer down from the 16ms kernel
+        default to 1ms.  Without this, the ftdi_sio driver buffers small USB
+        packets for up to 16ms before flushing to hardware, producing visible
+        timing jitter on fixtures despite a perfectly paced 40Hz software loop.
+
         Raises serial.SerialException if the port cannot be opened.
+        Raises PermissionError with an actionable fix message if the user
+        lacks read/write access to the serial device.
         """
-        self._port   = port
-        self._serial = serial.Serial(
-            port          = port,
-            baudrate      = baud_rate,
-            bytesize      = serial.EIGHTBITS,
-            parity        = serial.PARITY_NONE,
-            stopbits      = serial.STOPBITS_TWO,
-            timeout       = 0,        # non-blocking reads (we never read)
-            write_timeout = 0.1,      # fail fast if USB stalls
-            rtscts        = False,    # no RTS/CTS hardware flow control
-            dsrdtr        = False,    # no DSR/DTR hardware flow control
-            xonxoff       = False,    # no XON/XOFF software flow control
-        )
+        self._port = port
+        try:
+            self._serial = serial.Serial(
+                port          = port,
+                baudrate      = baud_rate,
+                bytesize      = serial.EIGHTBITS,
+                parity        = serial.PARITY_NONE,
+                stopbits      = serial.STOPBITS_TWO,
+                timeout       = 0,        # non-blocking reads (we never read)
+                write_timeout = 0.1,      # fail fast if USB stalls
+                rtscts        = False,    # no RTS/CTS hardware flow control
+                dsrdtr        = False,    # no DSR/DTR hardware flow control
+                xonxoff       = False,    # no XON/XOFF software flow control
+            )
+        except PermissionError:
+            raise PermissionError(
+                f"Cannot open {port}: permission denied.\n"
+                f"  Fix:  sudo usermod -aG dialout $USER\n"
+                f"  Then log out and back in (or run: newgrp dialout).\n"
+                f"  Do NOT run LightBrain under sudo."
+            ) from None
+
+        if sys.platform == "linux":
+            _tune_latency_timer(port)
 
     def send(self, universe: DMXUniverse) -> None:
         """Send a DMX universe frame to the device."""

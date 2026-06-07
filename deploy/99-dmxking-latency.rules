@@ -1,0 +1,29 @@
+# LightBrain — FTDI USB-to-DMX low-latency udev rule
+#
+# The ftdi_sio kernel driver defaults to a 16ms internal latency timer,
+# buffering small USB packets before flushing to the physical FTDI chip.
+# At 40Hz DMX (25ms frame period), 16ms of kernel-side jitter causes
+# visible fixture timing instability.
+#
+# This rule fires when the device is plugged in and:
+#   1. Sets latency_timer to 1ms (flush immediately)
+#   2. Makes the sysfs file world-writable so the engine process can
+#      re-tune it at runtime without root (belt-and-suspenders with the
+#      _tune_latency_timer() call in output_enttec_pro.py)
+#
+# Installation:
+#   sudo cp deploy/99-dmxking-latency.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Verify:
+#   cat /sys/class/tty/ttyUSB0/device/latency_timer   # should read "1"
+#
+# Standard FTDI FT232R chip (used by DMXking ultraDMX MAX, Enttec USB Pro):
+#   idVendor=0403  idProduct=6001
+#
+# If your adapter uses a different FTDI variant (FT232H=6014, FT2232=6010),
+# duplicate this rule with the correct idProduct.
+
+ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", \
+  RUN+="/bin/sh -c 'echo 1 > /sys/class/tty/%k/device/latency_timer'", \
+  RUN+="/bin/chmod 0666 /sys/class/tty/%k/device/latency_timer"

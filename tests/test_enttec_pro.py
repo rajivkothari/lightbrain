@@ -1,18 +1,21 @@
 """
 Regression tests for dmx.output_enttec_pro.
 
-Validates two things:
+Validates:
   1. Packet structure: the Enttec Pro / DMXking frame bytes are exactly correct
      (0x7E header, label 0x06, little-endian length, DMX start code, 0xE7 tail).
   2. VCP serial parameters: serial.Serial() is called with the right kwargs —
      no flow control (rtscts/dsrdtr/xonxoff all False), write_timeout set, and
      the non-standard 250 kbaud rate preserved.
+  3. PermissionError on open() produces an actionable fix message.
+  4. FTDI latency_timer is tuned to 1ms on Linux after port opens.
 
 These tests mock serial.Serial so no hardware is required.
 """
 
 import os
 import sys
+import tempfile
 import unittest.mock as mock
 
 import pytest
@@ -28,6 +31,8 @@ from dmx.output_enttec_pro import (
     ENTTEC_PRO_START,
     ENTTEC_PRO_END,
     ENTTEC_PRO_LABEL,
+    _tune_latency_timer,
+    _LATENCY_TIMER_TARGET,
 )
 
 
@@ -165,3 +170,124 @@ class TestEnttecProOutputOpen:
     def test_custom_baud_passed_through(self):
         call = self._open_with_mock(baud=115200)
         assert call.kwargs.get("baudrate") == 115200
+
+
+# ---------------------------------------------------------------------------
+# EnttecProOutput.open — PermissionError handling
+# ---------------------------------------------------------------------------
+
+class TestEnttecProPermissionError:
+    """Opening a port without dialout group must give an actionable message."""
+
+    def test_permission_error_message_mentions_dialout(self):
+        with mock.patch("dmx.output_enttec_pro.serial.Serial",
+                        side_effect=PermissionError("mock")):
+            out = EnttecProOutput()
+            with pytest.raises(PermissionError, match="dialout"):
+                out.open("/dev/ttyUSB0")
+
+    def test_permission_error_message_mentions_usermod(self):
+        with mock.patch("dmx.output_enttec_pro.serial.Serial",
+                        side_effect=PermissionError("mock")):
+            out = EnttecProOutput()
+            with pytest.raises(PermissionError, match="usermod"):
+                out.open("/dev/ttyUSB0")
+
+    def test_permission_error_warns_against_sudo(self):
+        with mock.patch("dmx.output_enttec_pro.serial.Serial",
+                        side_effect=PermissionError("mock")):
+            out = EnttecProOutput()
+            with pytest.raises(PermissionError, match="Do NOT run.*sudo"):
+                out.open("/dev/ttyUSB0")
+
+    def test_serial_exception_passes_through(self):
+        """Non-permission serial errors must not be wrapped or swallowed."""
+        import serial as _serial
+        with mock.patch("dmx.output_enttec_pro.serial.Serial",
+                        side_effect=_serial.SerialException("no device")):
+            out = EnttecProOutput()
+            with pytest.raises(_serial.SerialException):
+                out.open("/dev/ttyUSB0")
+
+
+# ---------------------------------------------------------------------------
+# _tune_latency_timer — FTDI sysfs tuning
+# ---------------------------------------------------------------------------
+
+class TestTuneLatencyTimer:
+    """Validate the latency_timer tuning logic against a synthetic sysfs tree."""
+
+    def _make_sysfs(self, tmpdir: str, tty_name: str, value: int) -> str:
+        """Create a fake /sys/class/tty/<tty>/device/latency_timer file."""
+        device_dir = os.path.join(tmpdir, "sys", "class", "tty",
+                                  tty_name, "device")
+        os.makedirs(device_dir, exist_ok=True)
+        timer_path = os.path.join(device_dir, "latency_timer")
+        with open(timer_path, "w") as f:
+            f.write(str(value))
+        return timer_path
+
+    def test_tunes_16_to_1(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            timer_path = self._make_sysfs(tmpdir, "ttyUSB0", 16)
+            real_path = "/sys/class/tty/ttyUSB0/device/latency_timer"
+            _real_open = open  # capture before mock replaces it
+
+            with mock.patch("dmx.output_enttec_pro.os.path.basename",
+                            return_value="ttyUSB0"):
+                with mock.patch("dmx.output_enttec_pro.os.path.exists",
+                                side_effect=lambda p: p == real_path):
+                    with mock.patch("builtins.open", side_effect=lambda p, *a, **kw:
+                                    _real_open(timer_path, *a, **kw) if p == real_path
+                                    else _real_open(p, *a, **kw)):
+                        _tune_latency_timer("/dev/ttyUSB0")
+
+            with _real_open(timer_path, "r") as f:
+                assert f.read().strip() == str(_LATENCY_TIMER_TARGET)
+
+    def test_skips_if_already_low(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            timer_path = self._make_sysfs(tmpdir, "ttyUSB0", 1)
+            real_path = "/sys/class/tty/ttyUSB0/device/latency_timer"
+            _real_open = open
+
+            with mock.patch("dmx.output_enttec_pro.os.path.basename",
+                            return_value="ttyUSB0"):
+                with mock.patch("dmx.output_enttec_pro.os.path.exists",
+                                side_effect=lambda p: p == real_path):
+                    with mock.patch("builtins.open", side_effect=lambda p, *a, **kw:
+                                    _real_open(timer_path, *a, **kw) if p == real_path
+                                    else _real_open(p, *a, **kw)):
+                        _tune_latency_timer("/dev/ttyUSB0")
+            # Should remain 1 — no write attempted
+            with _real_open(timer_path, "r") as f:
+                assert f.read().strip() == "1"
+
+    def test_skips_non_ftdi_device(self):
+        """Non-FTDI port (no sysfs entry) must not raise."""
+        _tune_latency_timer("/dev/ttyACM0")  # no sysfs → os.path.exists returns False
+
+    def test_permission_denied_does_not_raise(self):
+        """If sysfs write fails due to permissions, log a warning but don't crash."""
+        real_path = "/sys/class/tty/ttyUSB0/device/latency_timer"
+        with mock.patch("dmx.output_enttec_pro.os.path.basename",
+                        return_value="ttyUSB0"):
+            with mock.patch("dmx.output_enttec_pro.os.path.exists",
+                            side_effect=lambda p: p == real_path):
+                # read returns 16, write raises PermissionError
+                mock_file_read = mock.mock_open(read_data="16")
+                mock_file_write = mock.MagicMock(side_effect=PermissionError("no root"))
+
+                def mock_open_fn(p, *a, **kw):
+                    if p != real_path:
+                        return open(p, *a, **kw)
+                    mode = a[0] if a else kw.get("mode", "r")
+                    if "w" in mode:
+                        raise PermissionError("no root")
+                    return mock_file_read(p, *a, **kw)
+
+                with mock.patch("builtins.open", side_effect=mock_open_fn):
+                    _tune_latency_timer("/dev/ttyUSB0")  # must not raise
+
+    def test_latency_target_constant_is_1ms(self):
+        assert _LATENCY_TIMER_TARGET == 1
