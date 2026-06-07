@@ -470,6 +470,7 @@ def main():
                             safety.update_from_mode(current_mode)
                             room_lane.set_mode(current_mode)
                             room_lane.set_palette(current_palette)
+                            smoother.apply_mode_profile(mode_key)
 
                 elif key == "F10":
                     scene_mgr.release_scene()
@@ -509,6 +510,7 @@ def main():
                         safety.update_from_mode(current_mode)
                         room_lane.set_mode(current_mode)
                         room_lane.set_palette(current_palette)
+                        smoother.apply_mode_profile(mode_key)
 
             # --- web commands ---
             for _wcmd in _web.get_all_commands():
@@ -530,6 +532,7 @@ def main():
                         safety.update_from_mode(current_mode)
                         room_lane.set_mode(current_mode)
                         room_lane.set_palette(current_palette)
+                        smoother.apply_mode_profile(mode_key)
                 elif _wtype == "scene":
                     _sid = _wcmd.get("value", "")
                     if scene_mgr.activate_scene(_sid):
@@ -549,6 +552,7 @@ def main():
                             safety.update_from_mode(current_mode)
                             room_lane.set_mode(current_mode)
                             room_lane.set_palette(current_palette)
+                            smoother.apply_mode_profile(mode_key)
                 elif _wtype == "release_scene":
                     scene_mgr.release_scene()
                 elif _wtype == "blackout":
@@ -588,6 +592,7 @@ def main():
                         safety.update_from_mode(current_mode)
                         room_lane.set_mode(current_mode)
                         room_lane.set_palette(current_palette)
+                        smoother.apply_mode_profile(mode_key)
                 elif _wtype == "activate_scene":
                     _sid = _wcmd.get("value", "")
                     if scene_mgr.activate_scene(_sid):
@@ -607,6 +612,7 @@ def main():
                             safety.update_from_mode(current_mode)
                             room_lane.set_mode(current_mode)
                             room_lane.set_palette(current_palette)
+                            smoother.apply_mode_profile(mode_key)
                 elif _wtype == "set_fader":
                     _fname = _wcmd.get("fader", "")
                     try:
@@ -676,6 +682,7 @@ def main():
                         safety.update_from_mode(current_mode)
                         room_lane.set_mode(current_mode)
                         room_lane.set_palette(current_palette)
+                        smoother.apply_mode_profile(mode_key)
                     elif evt.type == "dimmer":
                         pass  # TODO: route to master_dimmer
                     elif evt.type == "blackout":

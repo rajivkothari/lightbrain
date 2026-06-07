@@ -4,12 +4,40 @@ lighting-friendly, time-smoothed lane values.
 
 Each lane has separate attack and decay time constants so fast transients
 snap up quickly while tails fall off slowly, giving a natural feel.
+
+Physics notes for physical fixtures
+------------------------------------
+The asymmetric EMA model compensates for real-world fixture behavior:
+
+  - LED driver rise/fall inertia: cheap PWM drivers add implicit lag at
+    the bottom of the dimming curve.  A fast attack_ms lets the signal
+    outrun the driver's own ramp.
+  - Moving head yoke inertia: mechanical mass needs heavily dampened decay
+    to avoid overshoot/wobble on stepper motors.
+  - Human visual persistence: a sharp flash registers in ~10-20ms but the
+    after-image lingers.  Matching decay to attack creates nervous blinking;
+    a slower decay produces cohesive sparkle texture.
+
+Alpha coefficients from time constant:
+    alpha_attack = 1 - exp(-dt / tau_attack)
+    alpha_decay  = 1 - exp(-dt / tau_decay)
+
+Directional selection per frame:
+    Y_t = alpha_attack * X_t + (1 - alpha_attack) * Y_{t-1}    if X_t >= Y_{t-1}
+    Y_t = alpha_decay  * X_t + (1 - alpha_decay)  * Y_{t-1}    if X_t <  Y_{t-1}
 """
 
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Dict, Optional
+
+# Smoothed values below this are forced to exactly 0.0.
+# Prevents subnormal float operations and fixtures stuck at DMX 1-2
+# from an exponential decay that mathematically never reaches zero.
+# At gamma 2.2, DMX=1 maps to ~0.0003 relative luminance — invisible,
+# but the fixture's minimum PWM pulse may still be perceptible as a faint glow.
+_DECAY_FLOOR: float = 0.003  # ~= 1/255 / gamma headroom
 
 
 @dataclass
@@ -30,7 +58,7 @@ class EnvelopeFollower:
 
     alpha = 1 - exp(-dt / tau)
 
-    Rising signal  → use attack tau
+    Rising signal  → use attack tau  (transient dominance: instantly overrides decay)
     Falling signal → use decay tau
     """
 
@@ -50,10 +78,15 @@ class EnvelopeFollower:
         now — optional clock override (Sprint 3: pass frame.time_s for deterministic
               replay; omit for live operation to use time.monotonic())
         returns smoothed 0.0–1.0 output value
+
+        Transient dominance: if raw >= self.value (a new hit arrives during an
+        active decay), the attack alpha immediately takes over from the current
+        Y_{t-1}.  There is no discontinuity — the EMA formula is continuous
+        in both directions.
         """
         if now is None:
             now = time.monotonic()
-        dt_s = now - self._last_update
+        dt_s = max(0.0, now - self._last_update)
         self._last_update = now
 
         # Clamp and apply threshold gate
@@ -93,7 +126,18 @@ class EnvelopeFollower:
                 self._peak_value = self.value
 
         self.value = max(0.0, min(1.0, self.value))
+
+        # Decay floor: force to 0.0 when the smoothed value has decayed
+        # below the perceptual threshold.  Prevents fixtures from lingering
+        # at DMX 1-2 indefinitely and eliminates subnormal float arithmetic.
+        if self.value < _DECAY_FLOOR and raw == 0.0:
+            self.value = 0.0
+
         return self.value
+
+    def reconfigure(self, config: EnvelopeConfig) -> None:
+        """Swap EMA config without resetting state (smooth transition on mode switch)."""
+        self.config = config
 
     def reset(self, value: float = 0.0, now: Optional[float] = None) -> None:
         """Reset follower state. Pass now to initialize clock for deterministic use."""
@@ -106,7 +150,7 @@ class EnvelopeFollower:
 
 
 # ---------------------------------------------------------------------------
-# Pre-defined lane configs (Sprint 1: Impact + Room active; others ready)
+# Default lane configs (used when no mode-specific profile is defined)
 # ---------------------------------------------------------------------------
 
 IMPACT_CONFIG = EnvelopeConfig(
@@ -144,21 +188,113 @@ SPARKLE_CONFIG = EnvelopeConfig(
     min_threshold=0.10,
 )
 
+# ---------------------------------------------------------------------------
+# Per-mode EMA profiles
+#
+# Each mode can override any lane config.  Omitted lanes inherit defaults.
+# Tuning rationale per mode:
+#   - dinner/speech/slow_dance: long attack + very long decay = glacial drift,
+#     no perceptible flicker.  Fixtures read like candlelight, not a nightclub.
+#   - banger: very fast attack, moderate decay.  Impact lane has near-zero
+#     attack for strobe-grade snap on kick drums.
+#   - indian_latin: fast attack for tabla/dhol transients, longer decay for
+#     sustained melodic phrases.
+#   - open_dance: balanced middle ground.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ModeEMAProfile:
+    """Per-mode EMA overrides for each lane."""
+    impact:  EnvelopeConfig
+    room:    EnvelopeConfig
+    floor:   EnvelopeConfig
+    beam:    EnvelopeConfig
+    sparkle: EnvelopeConfig
+
+
+MODE_EMA_PROFILES: Dict[str, ModeEMAProfile] = {
+    "dinner": ModeEMAProfile(
+        impact  = EnvelopeConfig(attack_ms=80,   decay_ms=600,   cooldown_ms=400,  min_threshold=0.20),
+        room    = EnvelopeConfig(attack_ms=1200,  decay_ms=5000,  cooldown_ms=0,    min_threshold=0.05),
+        floor   = EnvelopeConfig(attack_ms=300,   decay_ms=1500,  cooldown_ms=200,  min_threshold=0.10),
+        beam    = EnvelopeConfig(attack_ms=200,   decay_ms=3000,  cooldown_ms=1500, min_threshold=0.12),
+        sparkle = EnvelopeConfig(attack_ms=100,   decay_ms=800,   cooldown_ms=200,  min_threshold=0.12),
+    ),
+    "speech": ModeEMAProfile(
+        impact  = EnvelopeConfig(attack_ms=100,  decay_ms=800,   cooldown_ms=500,  min_threshold=0.25),
+        room    = EnvelopeConfig(attack_ms=1500, decay_ms=6000,  cooldown_ms=0,    min_threshold=0.05),
+        floor   = EnvelopeConfig(attack_ms=400,  decay_ms=2000,  cooldown_ms=300,  min_threshold=0.10),
+        beam    = EnvelopeConfig(attack_ms=250,  decay_ms=4000,  cooldown_ms=2000, min_threshold=0.15),
+        sparkle = EnvelopeConfig(attack_ms=120,  decay_ms=1000,  cooldown_ms=250,  min_threshold=0.15),
+    ),
+    "slow_dance": ModeEMAProfile(
+        impact  = EnvelopeConfig(attack_ms=60,   decay_ms=500,   cooldown_ms=350,  min_threshold=0.18),
+        room    = EnvelopeConfig(attack_ms=1000, decay_ms=4500,  cooldown_ms=0,    min_threshold=0.05),
+        floor   = EnvelopeConfig(attack_ms=250,  decay_ms=1200,  cooldown_ms=200,  min_threshold=0.08),
+        beam    = EnvelopeConfig(attack_ms=150,  decay_ms=3000,  cooldown_ms=1200, min_threshold=0.10),
+        sparkle = EnvelopeConfig(attack_ms=80,   decay_ms=600,   cooldown_ms=200,  min_threshold=0.10),
+    ),
+    "open_dance": ModeEMAProfile(
+        impact  = IMPACT_CONFIG,
+        room    = ROOM_CONFIG,
+        floor   = FLOOR_CONFIG,
+        beam    = BEAM_CONFIG,
+        sparkle = SPARKLE_CONFIG,
+    ),
+    "banger": ModeEMAProfile(
+        impact  = EnvelopeConfig(attack_ms=5,    decay_ms=180,   cooldown_ms=200,  min_threshold=0.12),
+        room    = EnvelopeConfig(attack_ms=400,  decay_ms=2000,  cooldown_ms=0,    min_threshold=0.05),
+        floor   = EnvelopeConfig(attack_ms=100,  decay_ms=600,   cooldown_ms=120,  min_threshold=0.08),
+        beam    = EnvelopeConfig(attack_ms=50,   decay_ms=1500,  cooldown_ms=800,  min_threshold=0.08),
+        sparkle = EnvelopeConfig(attack_ms=25,   decay_ms=300,   cooldown_ms=100,  min_threshold=0.08),
+    ),
+    "indian_latin": ModeEMAProfile(
+        impact  = EnvelopeConfig(attack_ms=8,    decay_ms=220,   cooldown_ms=230,  min_threshold=0.14),
+        room    = EnvelopeConfig(attack_ms=500,  decay_ms=2500,  cooldown_ms=0,    min_threshold=0.05),
+        floor   = EnvelopeConfig(attack_ms=120,  decay_ms=800,   cooldown_ms=140,  min_threshold=0.08),
+        beam    = EnvelopeConfig(attack_ms=60,   decay_ms=1800,  cooldown_ms=900,  min_threshold=0.10),
+        sparkle = EnvelopeConfig(attack_ms=30,   decay_ms=350,   cooldown_ms=130,  min_threshold=0.10),
+    ),
+}
+
+
+def get_mode_ema_profile(mode_key: str) -> ModeEMAProfile:
+    """Return the EMA profile for a mode, falling back to open_dance defaults."""
+    return MODE_EMA_PROFILES.get(mode_key, MODE_EMA_PROFILES["open_dance"])
+
 
 class LaneSmoother:
     """
     Holds one EnvelopeFollower per lighting lane and exposes named accessors.
 
-    Sprint 1: impact + room are active.
-    floor / beam / sparkle followers are created but not yet wired to a lane.
+    Call apply_mode_profile() on mode switch to reconfigure EMA coefficients
+    without resetting state — the smoothed values continue from where they
+    are, but attack/decay rates change to match the new mode's character.
     """
 
-    def __init__(self):
-        self.impact  = EnvelopeFollower(IMPACT_CONFIG)
-        self.room    = EnvelopeFollower(ROOM_CONFIG)
-        self.floor   = EnvelopeFollower(FLOOR_CONFIG)   # TODO Sprint 2
-        self.beam    = EnvelopeFollower(BEAM_CONFIG)     # TODO Sprint 2
-        self.sparkle = EnvelopeFollower(SPARKLE_CONFIG)  # TODO Sprint 2
+    def __init__(self, mode_key: str = "open_dance"):
+        profile = get_mode_ema_profile(mode_key)
+        self.impact  = EnvelopeFollower(profile.impact)
+        self.room    = EnvelopeFollower(profile.room)
+        self.floor   = EnvelopeFollower(profile.floor)
+        self.beam    = EnvelopeFollower(profile.beam)
+        self.sparkle = EnvelopeFollower(profile.sparkle)
+
+    def apply_mode_profile(self, mode_key: str) -> None:
+        """
+        Swap all lane EMA configs to match the given mode.
+
+        Does NOT reset smoothed values — the transition is continuous.
+        A dinner→banger switch tightens the attack immediately so the next
+        beat hits with banger-grade snap, but the room lane doesn't jump
+        because its current smoothed value is preserved.
+        """
+        profile = get_mode_ema_profile(mode_key)
+        self.impact.reconfigure(profile.impact)
+        self.room.reconfigure(profile.room)
+        self.floor.reconfigure(profile.floor)
+        self.beam.reconfigure(profile.beam)
+        self.sparkle.reconfigure(profile.sparkle)
 
     def update(self, bands: dict, now: Optional[float] = None) -> dict:
         """
