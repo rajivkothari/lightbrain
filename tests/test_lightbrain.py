@@ -1713,3 +1713,309 @@ class TestClockInjection:
         times1 = [f.time_s for f in fx1.frames]
         times2 = [f.time_s for f in fx2.frames]
         assert times1 == pytest.approx(times2)
+
+
+# =============================================================================
+# Sprint 4: Saved Program Mode
+# =============================================================================
+
+import hashlib
+import tempfile
+import uuid
+
+from data.lighting_program import (
+    LightingProgram, ProgramSummary, compute_song_fingerprint,
+    PROGRAM_SCHEMA_VERSION,
+)
+from data.program_store import ProgramStore, _serialize_program, _deserialize_program
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_full_program(mode_key="open_dance", seed=42, duration_s=1.0):
+    """Build a minimal but complete LightingProgram for testing."""
+    audio    = _make_sine_audio(duration_s=duration_s)
+    sr       = 44100
+    tl       = _make_analysis_timeline(duration_s=duration_s)
+    palettes = _make_palettes()
+    settings = SettingsSnapshot(mode_key=mode_key, palette_key=mode_key)
+    fx_tl    = DeterministicEngine(settings, seed=seed).generate(tl, palettes)
+    return LightingProgram.create(
+        name=f"Test {mode_key}",
+        audio=audio, sample_rate=sr,
+        song_file_path="test.wav",
+        settings=settings, random_seed=seed,
+        analysis_timeline=tl,
+        fixture_state_timeline=fx_tl,
+    ), audio, sr
+
+
+# ---------------------------------------------------------------------------
+# TestSongFingerprint
+# ---------------------------------------------------------------------------
+
+class TestSongFingerprint:
+    def test_returns_sha256_hex_string(self):
+        audio = _make_sine_audio(duration_s=2.0)
+        fp = compute_song_fingerprint(audio, 44100)
+        assert len(fp) == 64
+        assert all(c in "0123456789abcdef" for c in fp)
+
+    def test_deterministic_same_audio(self):
+        audio = _make_sine_audio(duration_s=2.0)
+        fp1 = compute_song_fingerprint(audio, 44100)
+        fp2 = compute_song_fingerprint(audio, 44100)
+        assert fp1 == fp2
+
+    def test_different_audio_different_fingerprint(self):
+        a1 = _make_sine_audio(freq_hz=440, duration_s=2.0)
+        a2 = _make_sine_audio(freq_hz=880, duration_s=2.0)
+        assert compute_song_fingerprint(a1, 44100) != compute_song_fingerprint(a2, 44100)
+
+    def test_volume_normalized(self):
+        audio = _make_sine_audio(duration_s=2.0, amplitude=0.5)
+        loud  = (audio * 2.0).astype(np.float32)
+        assert compute_song_fingerprint(audio, 44100) == compute_song_fingerprint(loud, 44100)
+
+    def test_empty_audio_returns_valid_hex(self):
+        fp = compute_song_fingerprint(np.array([], dtype=np.float32), 44100)
+        assert len(fp) == 64
+
+    def test_uses_only_first_30s(self):
+        long_audio  = _make_sine_audio(duration_s=60.0)
+        short_audio = long_audio[:44100 * 30]
+        # These should match because fingerprint only uses first 30s
+        assert (compute_song_fingerprint(long_audio, 44100) ==
+                compute_song_fingerprint(short_audio, 44100))
+
+
+# ---------------------------------------------------------------------------
+# TestLightingProgram
+# ---------------------------------------------------------------------------
+
+class TestLightingProgram:
+    def test_create_generates_uuid(self):
+        prog, _, _ = _make_full_program()
+        assert len(prog.program_id) == 36  # UUID4 format
+        parsed = uuid.UUID(prog.program_id)
+        assert parsed.version == 4
+
+    def test_create_sets_fingerprint(self):
+        prog, audio, sr = _make_full_program()
+        expected = compute_song_fingerprint(audio, sr)
+        assert prog.song_fingerprint == expected
+
+    def test_create_sets_duration(self):
+        prog, _, _ = _make_full_program(duration_s=1.0)
+        assert prog.song_duration_s == pytest.approx(1.0, abs=0.1)
+
+    def test_schema_version(self):
+        prog, _, _ = _make_full_program()
+        assert prog.version == PROGRAM_SCHEMA_VERSION
+
+    def test_to_summary_fields(self):
+        prog, _, _ = _make_full_program(mode_key="banger")
+        summary = prog.to_summary()
+        assert isinstance(summary, ProgramSummary)
+        assert summary.program_id == prog.program_id
+        assert summary.name == prog.name
+        assert summary.mode_key == "banger"
+        assert summary.song_fingerprint == prog.song_fingerprint
+
+    def test_timestamps_recent(self):
+        before = time.time()
+        prog, _, _ = _make_full_program()
+        after = time.time()
+        assert before <= prog.created_at <= after
+        assert before <= prog.updated_at <= after
+
+    def test_analysis_timeline_stored(self):
+        prog, _, _ = _make_full_program(duration_s=1.0)
+        assert prog.analysis_timeline is not None
+        assert len(prog.analysis_timeline.frames) > 0
+
+    def test_fixture_state_timeline_stored(self):
+        prog, _, _ = _make_full_program(duration_s=1.0)
+        assert prog.fixture_state_timeline is not None
+        assert len(prog.fixture_state_timeline.frames) > 0
+
+
+# ---------------------------------------------------------------------------
+# TestProgramStoreSerialization
+# ---------------------------------------------------------------------------
+
+class TestProgramStoreSerialization:
+    def test_serialize_deserialize_identity(self):
+        prog, _, _ = _make_full_program()
+        data  = _serialize_program(prog)
+        prog2 = _deserialize_program(data)
+        assert prog2.program_id   == prog.program_id
+        assert prog2.name         == prog.name
+        assert prog2.random_seed  == prog.random_seed
+        assert prog2.song_fingerprint == prog.song_fingerprint
+
+    def test_rgb_tuples_preserved(self):
+        prog, _, _ = _make_full_program()
+        data  = _serialize_program(prog)
+        prog2 = _deserialize_program(data)
+        if prog2.fixture_state_timeline and prog2.fixture_state_timeline.frames:
+            state = prog2.fixture_state_timeline.frames[0].state
+            for uplight in state.uplights:
+                assert isinstance(uplight.color_rgb, tuple), \
+                    f"color_rgb should be tuple, got {type(uplight.color_rgb)}"
+                assert len(uplight.color_rgb) == 3
+
+    def test_analysis_frames_preserved(self):
+        prog, _, _ = _make_full_program(duration_s=1.0)
+        data  = _serialize_program(prog)
+        prog2 = _deserialize_program(data)
+        n1 = len(prog.analysis_timeline.frames)
+        n2 = len(prog2.analysis_timeline.frames)
+        assert n1 == n2
+
+    def test_bpm_estimate_preserved(self):
+        prog, _, _ = _make_full_program()
+        data  = _serialize_program(prog)
+        prog2 = _deserialize_program(data)
+        assert prog2.analysis_timeline.bpm_estimate == prog.analysis_timeline.bpm_estimate
+
+    def test_settings_preserved(self):
+        prog, _, _ = _make_full_program(mode_key="dinner")
+        data  = _serialize_program(prog)
+        prog2 = _deserialize_program(data)
+        assert prog2.settings.mode_key    == "dinner"
+        assert prog2.settings.palette_key == prog.settings.palette_key
+
+    def test_none_timelines_handled(self):
+        prog = LightingProgram(
+            program_id=str(uuid.uuid4()),
+            name="Empty",
+            analysis_timeline=None,
+            fixture_state_timeline=None,
+        )
+        data  = _serialize_program(prog)
+        prog2 = _deserialize_program(data)
+        assert prog2.analysis_timeline is None
+        assert prog2.fixture_state_timeline is None
+
+
+# ---------------------------------------------------------------------------
+# TestProgramStore
+# ---------------------------------------------------------------------------
+
+class TestProgramStore:
+    def _store(self, tmpdir):
+        return ProgramStore(tmpdir)
+
+    def test_save_creates_json_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            prog, _, _ = _make_full_program()
+            path = store.save(prog)
+            assert os.path.exists(path)
+            assert path.endswith(".json")
+
+    def test_save_creates_index(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            prog, _, _ = _make_full_program()
+            store.save(prog)
+            assert os.path.exists(os.path.join(d, "index.json"))
+
+    def test_load_roundtrip(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            prog, _, _ = _make_full_program()
+            store.save(prog)
+            loaded = store.load(prog.program_id)
+            assert loaded.program_id == prog.program_id
+            assert loaded.name       == prog.name
+            assert loaded.settings.mode_key == prog.settings.mode_key
+
+    def test_load_missing_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            with pytest.raises(FileNotFoundError):
+                store.load("nonexistent-id")
+
+    def test_list_programs_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            assert store.list_programs() == []
+
+    def test_list_programs_returns_summaries(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            prog, _, _ = _make_full_program()
+            store.save(prog)
+            summaries = store.list_programs()
+            assert len(summaries) == 1
+            assert isinstance(summaries[0], ProgramSummary)
+            assert summaries[0].program_id == prog.program_id
+
+    def test_list_programs_sorted_newest_first(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            p1, _, _ = _make_full_program(mode_key="dinner")
+            time.sleep(0.01)
+            p2, _, _ = _make_full_program(mode_key="banger")
+            store.save(p1)
+            store.save(p2)
+            summaries = store.list_programs()
+            assert summaries[0].program_id == p2.program_id  # newest first
+
+    def test_delete_removes_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            prog, _, _ = _make_full_program()
+            path = store.save(prog)
+            store.delete(prog.program_id)
+            assert not os.path.exists(path)
+
+    def test_delete_removes_from_index(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            prog, _, _ = _make_full_program()
+            store.save(prog)
+            store.delete(prog.program_id)
+            assert store.count() == 0
+
+    def test_delete_nonexistent_is_silent(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            store.delete("ghost-id")  # must not raise
+
+    def test_count(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            assert store.count() == 0
+            p1, _, _ = _make_full_program()
+            p2, _, _ = _make_full_program()
+            store.save(p1); store.save(p2)
+            assert store.count() == 2
+
+    def test_find_by_fingerprint_returns_match(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            prog, audio, sr = _make_full_program()
+            store.save(prog)
+            fp = compute_song_fingerprint(audio, sr)
+            found = store.find_by_fingerprint(fp)
+            assert found is not None
+            assert found.program_id == prog.program_id
+
+    def test_find_by_fingerprint_no_match_returns_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            assert store.find_by_fingerprint("no-such-hash") is None
+
+    def test_updated_at_bumped_on_save(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = self._store(d)
+            prog, _, _ = _make_full_program()
+            original_updated = prog.updated_at
+            time.sleep(0.01)
+            store.save(prog)
+            assert prog.updated_at > original_updated

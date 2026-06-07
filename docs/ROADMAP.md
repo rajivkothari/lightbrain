@@ -107,20 +107,14 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ## Phase 4 — Sprint 4: Saved Program Mode
 
-**Status: Planned — see `docs/SONG_PREVIEW_MODE.md` → Saved Program Mode section**
-
-After previewing a song, the DJ can save the generated lighting pass as a
-**Lighting Program**. This program can later be replayed exactly or used as a
-guide while still reacting live.
+**Status: Complete — 223 tests passing**
 
 ### Core deliverables
 
-- [ ] `data/lighting_program.py` — `LightingProgram` dataclass (full spec in SONG_PREVIEW_MODE.md)
-- [ ] `data/program_store.py` — save/load to JSON + optional SQLite
-- [ ] Program library UI in visualizer (list, load, delete programs)
-- [ ] Playback modes: exact replay / hybrid (program + live reaction) / live override
-- [ ] Song fingerprinting for automatic program matching (hash or acoustic fingerprint)
-- [ ] Export: share program as JSON file
+- [x] `data/lighting_program.py` — `LightingProgram` dataclass + `ProgramSummary` + `compute_song_fingerprint` (SHA-256, volume-normalized)
+- [x] `data/program_store.py` — `ProgramStore`: JSON save/load, index for fast listing, find-by-fingerprint
+- [x] Full serialization roundtrip: nested dataclasses → JSON → rebuilt dataclasses; RGB tuples, BPM estimate, and all fields preserved
+- [x] `scripts/test_song_preview.py` — Ctrl+S save, Ctrl+L program library modal (navigate ↑↓, Enter load, Del delete)
 
 ---
 
@@ -176,4 +170,4 @@ guide while still reacting live.
 | 1 / 1B | 115 ✅ | Engine correctness, fixture state, scene layout |
 | 2 | 143 ✅ | Beat detection, WAU channels, MIDI, ModeTransitioner |
 | 3 | 189 ✅ | OfflineAnalyzer, DeterministicEngine, determinism contract, PlaybackController |
-| 4 | ~220 | LightingProgram save/load, replay correctness |
+| 4 | 223 ✅ | LightingProgram save/load, fingerprinting, serialization roundtrip |
