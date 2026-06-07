@@ -15,6 +15,16 @@ from typing import Optional
 
 from app.web.server import _engine_state, _command_queue
 
+# Commands the iPad is allowed to send. Reject anything outside this set so
+# an attacker who can reach the port cannot inject arbitrary engine state.
+_ALLOWED_TYPES = frozenset({
+    "mode", "set_mode", "scene", "activate_scene", "release_scene",
+    "blackout", "strobe_master", "set_fader", "momentary",
+    "toggle_kill", "fixture_test", "release_fixture_test",
+    "fixture_test_aim", "aim_fixture", "save_position",
+})
+_MAX_QUEUE = 64          # drop commands when the engine is behind
+
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.responses import HTMLResponse, JSONResponse
@@ -71,7 +81,8 @@ async def _lifespan(app: "FastAPI"):  # type: ignore[override]
         pass
 
 
-def _build_app() -> "FastAPI":
+def _build_app(token: str = "") -> "FastAPI":
+    _token = token
     app = FastAPI(title="LightBrain iPad", lifespan=_lifespan)
 
     @app.get("/", response_class=HTMLResponse)
@@ -95,6 +106,14 @@ def _build_app() -> "FastAPI":
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: "WebSocket") -> None:
+        # Optional token check (app_config.json "web_server_token": "secret")
+        token = _token  # captured from build_app closure below
+        if token:
+            q_token = ws.query_params.get("token", "")
+            if q_token != token:
+                await ws.close(code=4403)
+                return
+
         await _mgr.connect(ws)
         await ws.send_text(json.dumps(dict(_engine_state)))
         try:
@@ -102,7 +121,12 @@ def _build_app() -> "FastAPI":
                 raw = await ws.receive_text()
                 try:
                     cmd = json.loads(raw)
-                    _command_queue.put_nowait(cmd)
+                    if not isinstance(cmd, dict):
+                        continue
+                    if cmd.get("type") not in _ALLOWED_TYPES:
+                        continue
+                    if _command_queue.qsize() < _MAX_QUEUE:
+                        _command_queue.put_nowait(cmd)
                 except (json.JSONDecodeError, ValueError):
                     pass
         except (WebSocketDisconnect, Exception):
@@ -116,18 +140,19 @@ def _build_app() -> "FastAPI":
 _thread: Optional[threading.Thread] = None
 
 
-def start(host: str = "0.0.0.0", port: int = 8080) -> None:
+def start(host: str = "0.0.0.0", port: int = 8080, token: str = "") -> None:
     """Start the iPad controller server in a background daemon thread."""
     if not _AVAILABLE:
         print("[iPad] fastapi/uvicorn not installed — iPad controller disabled.")
         return
     global _thread
     cfg = uvicorn.Config(
-        _build_app(), host=host, port=port,
+        _build_app(token=token), host=host, port=port,
         log_level="warning", loop="asyncio",
     )
     srv = uvicorn.Server(cfg)
     _thread = threading.Thread(target=srv.run, daemon=True, name="lightbrain-ipad")
     _thread.start()
     disp = "localhost" if host == "0.0.0.0" else host
-    print(f"[iPad] Controller -> http://{disp}:{port}/")
+    token_note = f"  (token required: ?token=...)" if token else "  (no auth)"
+    print(f"[iPad] Controller -> http://{disp}:{port}/{token_note}")

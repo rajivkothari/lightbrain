@@ -53,6 +53,7 @@ from engine.transitions import ModeTransitioner
 from dmx.universe          import DMXUniverse
 from dmx.output_mock       import MockDMXOutput
 from dmx.output_enttec_pro import EnttecProOutput
+from dmx.output_artnet     import ArtNetOutput
 
 from fixtures.rockwedge import RockWedge
 from fixtures.chauvet_wash_fx2 import ChauvetWashFX2
@@ -79,8 +80,6 @@ PALETTES_DIR    = os.path.join(ROOT, "config", "palettes")
 SCENES_DIR      = os.path.join(ROOT, "config", "scenes")
 POSITIONS_FILE  = os.path.join(ROOT, "fixtures", "positions.json")
 STATES_FILE     = os.path.join(ROOT, "fixtures", "states.json")
-TARGET_FPS      = 40
-FRAME_TIME      = 1.0 / TARGET_FPS
 BLACKOUT_FADE_S = 0.8      # seconds to fade out when blackout is activated
 
 # Fixed render params for each fixture test pattern (sent as-is to render_to_universe)
@@ -195,7 +194,9 @@ def main():
     parser.add_argument("--mode",        type=str,  default=None,
                         help="starting mode key (e.g. dinner)")
     parser.add_argument("--serial",      type=str,  default=None,
-                        help="serial port for DMXking (e.g. /dev/ttyUSB0)")
+                        help="serial port for Enttec USB Pro (e.g. /dev/ttyUSB0)")
+    parser.add_argument("--artnet",      type=str,  default=None,
+                        help="Art-Net target IP (e.g. 2.0.0.1 or 2.255.255.255)")
     parser.add_argument("--verbose-dmx", action="store_true",
                         help="print every changed DMX channel to console")
     parser.add_argument("--midi",        type=str,  default=None,
@@ -215,6 +216,10 @@ def main():
         args.headless = True
 
     config = load_config()
+
+    # ---- fps / frame timing (from config, overridable) ----
+    _target_fps = int(config.get("target_fps", 40))
+    _frame_time = 1.0 / max(1, _target_fps)
 
     # ---- palettes ----
     all_palettes = load_all_palettes(PALETTES_DIR)
@@ -242,7 +247,8 @@ def main():
                         else config["audio"].get("device_index"))
         sample_rate  = config["audio"]["sample_rate"]
         block_size   = config["audio"]["block_size"]
-        capture      = AudioCapture(device_index, sample_rate, block_size)
+        channels     = config["audio"].get("channels", 1)
+        capture      = AudioCapture(device_index, sample_rate, block_size, channels)
         try:
             capture.start()
             device_label = capture.device_name or "unknown device"
@@ -293,14 +299,35 @@ def main():
         sys.exit(1)
 
     # ---- DMX output ----
-    if args.serial:
+    # Priority: --serial CLI > --artnet CLI > config dmx.output > mock
+    _dmx_cfg    = config.get("dmx", {})
+    _cfg_output = _dmx_cfg.get("output", "mock")
+    _cfg_port   = _dmx_cfg.get("serial_port") or None
+
+    _serial_port = args.serial or (_cfg_port if _cfg_output == "enttec" else None)
+    _artnet_ip   = args.artnet or (_dmx_cfg.get("artnet_ip") if _cfg_output == "artnet" else None)
+
+    if _serial_port:
         try:
             dmx_out = EnttecProOutput()
-            dmx_out.open(args.serial)
-            print(f"[DMX] Opened serial port: {args.serial}")
+            dmx_out.open(_serial_port)
+            print(f"[DMX] Opened Enttec on {_serial_port}")
         except Exception as e:
             print(f"[DMX] Serial open failed ({e}), falling back to MOCK")
             dmx_out = MockDMXOutput(verbose=args.verbose_dmx)
+    elif _artnet_ip:
+        class _ArtNetAdapter:
+            """Thin adapter: gives ArtNetOutput the send(universe)/close() interface."""
+            output_type = "artnet"
+            def __init__(self, ip: str) -> None:
+                self._out = ArtNetOutput(target_ip=ip)
+                self._out.connect()
+                print(f"[DMX] Art-Net → {ip}")
+            def send(self, universe) -> None:
+                self._out.send_universe(list(universe.to_bytes()))
+            def close(self) -> None:
+                self._out.disconnect()
+        dmx_out = _ArtNetAdapter(_artnet_ip)
     else:
         dmx_out = MockDMXOutput(verbose=args.verbose_dmx)
 
@@ -334,9 +361,10 @@ def main():
 
     # ---- iPad controller ----
     _ipad_enabled = app_cfg.get("web_server_enabled", True)
-    _ipad_port = args.ipad_port or app_cfg.get("web_server_port", 8080)
+    _ipad_port    = args.ipad_port or app_cfg.get("web_server_port", 8080)
+    _ipad_token   = app_cfg.get("web_server_token", "")
     if _ipad_enabled:
-        _ipad.start(port=_ipad_port)
+        _ipad.start(port=_ipad_port, token=_ipad_token)
 
     # ---- fps counter ----
     _fps_frames = 0
@@ -362,7 +390,7 @@ def main():
     _last_hue          = 0.0    # raw hue from previous frame — reference for snap()
     _prev_mode_key     = mode_key
     _strobe_master     = 1.0    # 0–1 multiplier, set via web/iPad slider
-    _master_dimmer     = 1.0    # 0–1, overall brightness
+    _master_dimmer     = float(config.get("master_dimmer", 1.0))  # 0–1, overall brightness
     _uplight_dimmer    = 1.0    # 0–1, uplight-only brightness
     _flash_frames      = 0      # countdown frames for manual flash hit
     _strobe_burst_end  = 0.0    # monotonic time when strobe burst expires
@@ -430,6 +458,7 @@ def main():
                             transitioner.switch(new_mode)
                             current_mode    = new_mode
                             current_palette = new_palette
+                            mode_key        = base_mk
                             safety.update_from_mode(current_mode)
                             room_lane.set_mode(current_mode)
                             room_lane.set_palette(current_palette)
@@ -635,6 +664,7 @@ def main():
                         transitioner.switch(new_mode)
                         current_mode    = new_mode
                         current_palette = new_palette
+                        mode_key        = evt.value
                         safety.update_from_mode(current_mode)
                         room_lane.set_mode(current_mode)
                         room_lane.set_palette(current_palette)
@@ -915,7 +945,7 @@ def main():
 
             # --- frame rate cap ---
             elapsed = time.monotonic() - frame_start
-            sleep_t = FRAME_TIME - elapsed
+            sleep_t = _frame_time - elapsed
             if sleep_t > 0:
                 time.sleep(sleep_t)
 
@@ -926,9 +956,15 @@ def main():
             _stop_keyboard(kbd_thread)
         if midi_in is not None:
             midi_in.close()
-        universe.blackout()
-        dmx_out.send(universe)
-        dmx_out.close()
+        try:
+            universe.blackout()
+            dmx_out.send(universe)
+        except Exception:
+            pass
+        try:
+            dmx_out.close()
+        except Exception:
+            pass
         capture.stop()
         if overlay:
             overlay.restore_screen()

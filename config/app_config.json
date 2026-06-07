@@ -1,5 +1,6 @@
 {
   "web_server_enabled": true,
   "web_server_port": 8080,
-  "headless_mode": false
+  "headless_mode": false,
+  "web_server_token": ""
 }
