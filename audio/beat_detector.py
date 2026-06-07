@@ -32,12 +32,12 @@ class BeatDetector:
         self,
         history_size: int = 20,
         threshold: float = 1.5,
-        min_interval_ms: float = 200.0,
+        min_interval_ms: float = 333.0,
     ):
         """
         history_size    — frames to average for baseline (20 @ 40 fps ≈ 500 ms)
         threshold       — beat fires when energy > threshold × average
-        min_interval_ms — minimum time between beats (200 ms → max 300 BPM)
+        min_interval_ms — minimum time between beats (333 ms → max 180 BPM)
         """
         self._history        = deque(maxlen=history_size)
         self._threshold      = threshold
@@ -68,7 +68,10 @@ class BeatDetector:
                     self._beat_intervals.append(elapsed)
                     if len(self._beat_intervals) >= 2:
                         mean_ivl = sum(self._beat_intervals) / len(self._beat_intervals)
-                        self.bpm = 60.0 / mean_ivl if mean_ivl > 0 else 0.0
+                        raw_bpm = 60.0 / mean_ivl if mean_ivl > 0 else 0.0
+                        while raw_bpm > 180:
+                            raw_bpm /= 2
+                        self.bpm = raw_bpm
                 self._last_beat_time = now
                 strength = max(0.0, min(1.0, low_energy / max(avg, 1e-6) - 1.0))
                 return True, strength

@@ -381,6 +381,9 @@ def main():
     _last_eff_white    = 0.0
     _last_eff_amber    = 0.0
     _last_eff_uv       = 0.0
+    _kill_strobe       = False   # kill switch: silence all strobe output
+    _kill_derby        = False   # kill switch: stop derby rotation/color
+    _kill_laser        = False   # kill switch: force laser off
 
     try:
         while not quit_flag:
@@ -588,6 +591,20 @@ def main():
                         _strobe_burst_end = time.monotonic() + 2.0
                     elif _eff == "strobe_hold":
                         _strobe_hold = (_act == "start")
+                elif _wtype == "toggle_kill":
+                    _ktarget = _wcmd.get("target", "")
+                    if _ktarget == "strobe":
+                        _kill_strobe = not _kill_strobe
+                    elif _ktarget == "derby":
+                        _kill_derby = not _kill_derby
+                        for _fx in fixtures:
+                            if hasattr(_fx, "set_derby_enabled"):
+                                _fx.set_derby_enabled(not _kill_derby)
+                    elif _ktarget == "laser":
+                        _kill_laser = not _kill_laser
+                        for _fx in fixtures:
+                            if hasattr(_fx, "enable_laser"):
+                                _fx.enable_laser(not _kill_laser)
                 elif _wtype == "fixture_test":
                     _pname = _wcmd.get("pattern", "white")
                     if _pname in _TEST_PATTERNS:
@@ -768,6 +785,10 @@ def main():
                 eff_uv      = _tp["uv"]
                 _eff_strobe = _tp["strobe"]
 
+            # --- kill switch overrides (last word before fixture write) ---
+            if _kill_strobe:
+                _eff_strobe = 0.0
+
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
                 fixture.render_to_universe(
@@ -886,6 +907,9 @@ def main():
                     uplight_dimmer=  float(_uplight_dimmer),
                     test_mode=       _test_mode,
                     test_pattern=    _test_pattern,
+                    kill_strobe=     _kill_strobe,
+                    kill_derby=      _kill_derby,
+                    kill_laser=      _kill_laser,
                 )
 
             # --- frame rate cap ---

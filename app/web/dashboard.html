@@ -144,6 +144,25 @@
     .btn-release { border-color: var(--amber); color: var(--amber); }
     .btn-release:hover { background: #1a1400; border-color: var(--amber); color: var(--amber); }
 
+    /* ---- Strobe / Kill controls ---- */
+    .momentary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 5px; }
+    .btn-strobe-hold {
+      background: #2a2000; border-color: #665500; color: #ffcc44;
+      font-weight: 700; letter-spacing: 0.08em; user-select: none;
+    }
+    .btn-strobe-hold:hover { background: #3a3000; border-color: #887700; }
+    .btn-strobe-hold.held { background: #554400; border-color: #ffcc00; color: #fff;
+                             box-shadow: 0 0 8px rgba(255,200,0,0.4); }
+    .kill-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 5px; }
+    .btn-kill-dash {
+      background: var(--card); border: 1px solid #443333; color: #cc8888;
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; padding: 6px 4px;
+      cursor: pointer; border-radius: 4px; text-align: center;
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .btn-kill-dash:hover { background: #1a0000; border-color: #884444; }
+    .btn-kill-dash.active { background: #330000; border-color: var(--red); color: var(--red); }
+
     /* ---- Canvas blackout state ---- */
     #rig-canvas.blacked-out {
       border-color: #550000;
@@ -271,6 +290,22 @@
             <input type="range" id="strobe-master" min="0" max="100" value="100"
                    oninput="onStrobeMaster(this.value)">
             <span class="slider-val" id="strobe-master-val">100%</span>
+          </div>
+          <div class="momentary-row">
+            <button class="btn btn-full btn-strobe-hold" id="strobe-hold-btn"
+                    onmousedown="strobeHoldStart()" onmouseup="strobeHoldEnd()"
+                    onmouseleave="strobeHoldEnd()">
+              &#x26A1; STROBE HOLD
+            </button>
+            <button class="btn btn-full" onclick="cmd({type:'momentary',effect:'flash',action:'start'})">
+              FLASH
+            </button>
+          </div>
+          <div class="section-label" style="margin-top:8px; margin-bottom:4px">Kill Switches</div>
+          <div class="kill-row">
+            <button class="btn-kill-dash" id="dash-kill-strobe" onclick="toggleKill('strobe')">&#x26A1; STROBE</button>
+            <button class="btn-kill-dash" id="dash-kill-derby"  onclick="toggleKill('derby')">&#x2B55; DERBY</button>
+            <button class="btn-kill-dash" id="dash-kill-laser"  onclick="toggleKill('laser')">&#x25B6; LASER</button>
           </div>
         </div>
       </div>
@@ -686,6 +721,24 @@ function onStrobeMaster(v) {
   cmd({type:'strobe_master', value: parseFloat(v) / 100});
 }
 
+let _strobeHeld = false;
+function strobeHoldStart() {
+  if (_strobeHeld) return;
+  _strobeHeld = true;
+  document.getElementById('strobe-hold-btn').classList.add('held');
+  cmd({type:'momentary', effect:'strobe_hold', action:'start'});
+}
+function strobeHoldEnd() {
+  if (!_strobeHeld) return;
+  _strobeHeld = false;
+  document.getElementById('strobe-hold-btn').classList.remove('held');
+  cmd({type:'momentary', effect:'strobe_hold', action:'stop'});
+}
+
+function toggleKill(target) {
+  cmd({type:'toggle_kill', target: target});
+}
+
 function buildModes(modes) {
   if (modesReady) return;
   const list = (modes && modes.length) ? modes : DEFAULT_MODES;
@@ -694,7 +747,7 @@ function buildModes(modes) {
   list.forEach(m => {
     const b = document.createElement('button');
     b.className = 'btn mode-btn'; b.dataset.key = m.key;
-    b.innerHTML = `<span class="shortcut">${m.key}</span>${m.display_name}`;
+    b.textContent = m.display_name;
     b.onclick = () => cmd({type:'mode', value:m.key});
     grid.appendChild(b);
   });
@@ -774,6 +827,12 @@ function applyState(s) {
   bo.classList.toggle('active', _blackoutActive);
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
   document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
+
+  // Kill switches
+  ['strobe','derby','laser'].forEach(t => {
+    const el = document.getElementById('dash-kill-' + t);
+    if (el) el.classList.toggle('active', !!s['kill_' + t]);
+  });
 
   // Canvas — always draw regardless of active tab
   if (s.fixtures && Object.keys(s.fixtures).length) {

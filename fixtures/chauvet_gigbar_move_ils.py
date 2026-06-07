@@ -182,6 +182,7 @@ class ChauvetGigBarMoveILS(FixtureBase):
         self._spot_pan_deg  = float(spot_pan_deg)
         self._spot_tilt_dmx = int(spot_tilt_dmx)
         self._laser_enabled = laser_enabled
+        self._derby_enabled = True
 
     # ── Public controls ──────────────────────────────────────────────────
 
@@ -192,6 +193,9 @@ class ChauvetGigBarMoveILS(FixtureBase):
 
     def enable_laser(self, enabled: bool = True) -> None:
         self._laser_enabled = enabled
+
+    def set_derby_enabled(self, enabled: bool) -> None:
+        self._derby_enabled = bool(enabled)
 
     # ── Core render ──────────────────────────────────────────────────────
 
@@ -229,18 +233,20 @@ class ChauvetGigBarMoveILS(FixtureBase):
         par_strobe_dmx = _par_strobe(strobe)
 
         # Derby: same hue as pars; CCW rotation proportional to room energy
-        dr_dmx = apply_gamma_to_dmx(r_f, gamma)
-        dg_dmx = apply_gamma_to_dmx(g_f, gamma)
-        db_dmx = apply_gamma_to_dmx(b_f, gamma)
-        # White fill in derby proportional to W channel
-        dw_dmx = apply_gamma_to_dmx(max(0.0, min(1.0, white * brightness * 0.5)), gamma)
-        derby_strobe_dmx = _par_strobe(strobe)
-        # Rotation: 0=stop; 129–255=CCW slow–fast; scale speed with value
-        if final_v > 0.05:
-            rotation_speed = int(final_v * 126)        # 0–126
-            derby_rot_dmx  = _DERBY_ROTATE_CCW_BASE + rotation_speed
+        if self._derby_enabled:
+            dr_dmx = apply_gamma_to_dmx(r_f, gamma)
+            dg_dmx = apply_gamma_to_dmx(g_f, gamma)
+            db_dmx = apply_gamma_to_dmx(b_f, gamma)
+            dw_dmx = apply_gamma_to_dmx(max(0.0, min(1.0, white * brightness * 0.5)), gamma)
+            derby_strobe_dmx = _par_strobe(strobe)
+            if final_v > 0.05:
+                rotation_speed = int(final_v * 126)
+                derby_rot_dmx  = _DERBY_ROTATE_CCW_BASE + rotation_speed
+            else:
+                derby_rot_dmx = 0
         else:
-            derby_rot_dmx = 0
+            dr_dmx = dg_dmx = db_dmx = dw_dmx = 0
+            derby_strobe_dmx = derby_rot_dmx = 0
 
         # Flash LEDs: low-level ambient white fill
         flash_level = apply_gamma_to_dmx(

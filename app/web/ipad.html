@@ -108,8 +108,8 @@
 
     .btn {
       background: var(--card); border: 2px solid var(--border); color: var(--text);
-      font-family: inherit; font-size: 0.85rem; font-weight: 600;
-      min-height: 60px; padding: 8px 6px;
+      font-family: inherit; font-size: 0.82rem; font-weight: 600;
+      min-height: 44px; padding: 6px 6px;
       cursor: pointer; border-radius: 10px; text-align: center;
       transition: background 0.1s, border-color 0.1s, transform 0.06s;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -118,6 +118,22 @@
     .btn .sub { font-size: 0.6rem; color: var(--dim); font-weight: 400; margin-bottom: 2px; }
     .btn.active { background: #1c1c42; border-color: var(--accent); color: #aaaaff; }
     .btn.active .sub { color: #7777cc; }
+
+    /* ---- Kill switches ---- */
+    .kill-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .btn-kill {
+      min-height: 48px; border-radius: 10px; border: 2px solid #443333;
+      background: var(--card); color: #cc8888;
+      font-family: inherit; font-size: 0.75rem; font-weight: 700;
+      letter-spacing: 0.08em; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 3px; transition: background 0.1s, border-color 0.1s, transform 0.06s;
+    }
+    .btn-kill .kill-icon { font-size: 1rem; line-height: 1; }
+    .btn-kill:active { transform: scale(0.95); }
+    .btn-kill.active {
+      background: #330000; border-color: var(--red); color: var(--red);
+    }
 
     .btn-release {
       background: var(--surface); border-color: var(--amber); color: var(--amber);
@@ -355,7 +371,7 @@
   </div>
 
   <div class="sec-label">Mode</div>
-  <div class="btn-grid cols-2" id="mode-grid"></div>
+  <div class="btn-grid cols-3" id="mode-grid"></div>
 
   <div class="sec-label">Scene Presets</div>
   <div class="btn-grid cols-2" id="scene-grid"></div>
@@ -380,6 +396,19 @@
              oninput="onFader('strobe',this.value)">
       <span class="fader-val" id="fader-strobe-val">100%</span>
     </div>
+  </div>
+
+  <div class="sec-label">Kill Switches</div>
+  <div class="kill-grid">
+    <button class="btn-kill" id="kill-strobe" onclick="toggleKill('strobe')">
+      <span class="kill-icon">&#x26A1;</span>STROBE
+    </button>
+    <button class="btn-kill" id="kill-derby" onclick="toggleKill('derby')">
+      <span class="kill-icon">&#x2B55;</span>DERBY
+    </button>
+    <button class="btn-kill" id="kill-laser" onclick="toggleKill('laser')">
+      <span class="kill-icon">&#x25B6;</span>LASER
+    </button>
   </div>
 
   <div class="sec-label">Momentary</div>
@@ -583,6 +612,10 @@ function onFader(name, pct) {
   send({type: 'set_fader', fader: name, value: parseFloat(pct) / 100});
 }
 
+function toggleKill(target) {
+  send({type: 'toggle_kill', target: target});
+}
+
 function momentaryStart(effect) {
   send({type: 'momentary', effect: effect, action: 'start'});
   if (effect === 'strobe_hold') document.getElementById('btn-strobe').classList.add('held');
@@ -614,7 +647,7 @@ function buildModes(modes) {
   list.forEach(m => {
     const b = document.createElement('button');
     b.className = 'btn mode-btn'; b.dataset.key = m.key;
-    b.innerHTML = `<span class="sub">${m.key}</span>${m.display_name}`;
+    b.textContent = m.display_name;
     b.onclick = () => sendMode(m.key);
     grid.appendChild(b);
   });
@@ -702,6 +735,16 @@ function applyState(s) {
   if (s.test_mode !== undefined) {
     _updateTestUI(!!s.test_mode, s.test_pattern || '');
   }
+
+  // Kill switches
+  _syncKill('strobe', !!s.kill_strobe);
+  _syncKill('derby',  !!s.kill_derby);
+  _syncKill('laser',  !!s.kill_laser);
+}
+
+function _syncKill(target, active) {
+  const el = document.getElementById('kill-' + target);
+  if (el) el.classList.toggle('active', active);
 }
 
 function syncFader(name, val) {
