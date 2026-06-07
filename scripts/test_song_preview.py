@@ -52,11 +52,15 @@ from app.render.waveform   import WaveformDisplay
 from data.lighting_program import LightingProgram, compute_song_fingerprint
 from data.program_store    import ProgramStore
 from data.setlist_store    import SetlistStore as _SetlistStore
+from engine.scenes         import SceneManager
 
-ROOT          = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PALETTES_DIR  = os.path.join(ROOT, "config", "palettes")
-PROGRAMS_DIR  = os.path.join(ROOT, "data", "programs")
-SETLISTS_DIR  = os.path.join(ROOT, "data", "setlists")
+ROOT           = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PALETTES_DIR   = os.path.join(ROOT, "config", "palettes")
+PROGRAMS_DIR   = os.path.join(ROOT, "data", "programs")
+SETLISTS_DIR   = os.path.join(ROOT, "data", "setlists")
+SCENES_DIR     = os.path.join(ROOT, "config", "scenes")
+POSITIONS_FILE = os.path.join(ROOT, "fixtures", "positions.json")
+STATES_FILE    = os.path.join(ROOT, "fixtures", "states.json")
 
 # Window dimensions: standard rig area + waveform strip
 WINDOW_W        = 1200
@@ -324,6 +328,9 @@ def main():
 
     store         = ProgramStore(PROGRAMS_DIR)
     setlist_store = _SetlistStore(SETLISTS_DIR)
+    scene_mgr     = SceneManager(SCENES_DIR, POSITIONS_FILE, STATES_FILE)
+    scene_mgr.load_all()
+    _scene_list   = scene_mgr.list_scenes()  # stable F1–F9 order
     sample_rate   = 44100
     song_file_path = ""
 
@@ -396,6 +403,12 @@ def main():
         pygame.K_b: "banger",
         pygame.K_i: "indian_latin",
         pygame.K_l: "slow_dance",   # L = slow_dance (Ctrl+L = library)
+    }
+
+    _SCENE_FKEYS = {
+        pygame.K_F1:  0, pygame.K_F2:  1, pygame.K_F3: 2,
+        pygame.K_F4:  3, pygame.K_F5:  4, pygame.K_F6: 5,
+        pygame.K_F7:  6, pygame.K_F8:  7, pygame.K_F9: 8,
     }
 
     phrase_times = sorted(
@@ -505,6 +518,20 @@ def main():
                         )
                         _notify(f"Loaded  '{loaded.name}'")
 
+                elif k == pygame.K_F10:
+                    scene_mgr.release_scene()
+                    _notify("Scene released — mode engine")
+
+                elif k in _SCENE_FKEYS and not ctrl:
+                    idx = _SCENE_FKEYS[k]
+                    if idx < len(_scene_list):
+                        scene = _scene_list[idx]
+                        scene_mgr.activate_scene(scene.scene_id)
+                        _notify(f"Scene: {scene.name}")
+                        # Switch playback mode to scene's base_mode if different
+                        if scene.base_mode != current_mode:
+                            _rerun(scene.base_mode, current_seed)
+
                 elif k == pygame.K_s and not ctrl:
                     # bare S = slow_dance mode (legacy)
                     _rerun("slow_dance", current_seed)
@@ -515,6 +542,10 @@ def main():
         # ---- Update playback ----
         rig_state = controller.update()
 
+        # ---- Scene overrides (priority above mode engine) ----
+        if rig_state is not None:
+            rig_state = scene_mgr.apply_to_rig_state(rig_state)
+
         # ---- Render ----
         screen.fill((0, 0, 0))
         if rig_state is not None:
@@ -523,9 +554,12 @@ def main():
         waveform.draw(screen, x=0, y=WAVEFORM_Y,
                       current_time_s=controller.current_time_s)
 
+        _active_scene_name = (scene_mgr.active_scene.name
+                              if scene_mgr.active_scene else "")
         _draw_controls(screen, controller, current_mode, current_seed,
                        font_small, CONTROLS_Y,
-                       notify=_notify_msg if (time.monotonic() - _notify_t) < 3.0 else "")
+                       notify=_notify_msg if (time.monotonic() - _notify_t) < 3.0 else "",
+                       scene_name=_active_scene_name)
 
         pygame.display.flip()
         clock.tick(40)
@@ -534,7 +568,8 @@ def main():
     print("Song Preview closed.")
 
 
-def _draw_controls(screen, controller, mode_key, seed, font, y, notify=""):
+def _draw_controls(screen, controller, mode_key, seed, font, y,
+                   notify="", scene_name=""):
     """Draw a minimal playback controls bar."""
     try:
         w = screen.get_width()
@@ -550,10 +585,13 @@ def _draw_controls(screen, controller, mode_key, seed, font, y, notify=""):
             play_sym = "▶" if not controller.is_playing else "⏸"
             if notify:
                 label = f"{play_sym}  {notify}"
+            elif scene_name:
+                label = (f"{play_sym}  [{scene_name}]  {mode_key:<12}"
+                         f"  F1-F9=scene  F10=release  Space=▶/⏸  Q=quit")
             else:
                 label = (f"{play_sym}  {mode_key:<12}  seed:{seed}"
                          f"  Space=▶/⏸  ←→=5s  []=phrase  R=rerun"
-                         f"  ^S=save  ^L=library  Q=quit")
+                         f"  ^S=save  ^L=library  F1-F9=scene  Q=quit")
             surf = font.render(label, True, (160, 160, 200))
             screen.blit(surf, (4, y + 8))
     except Exception:

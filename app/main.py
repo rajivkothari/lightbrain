@@ -57,6 +57,7 @@ from dmx.output_enttec_pro import EnttecProOutput
 from fixtures.rockwedge import RockWedge
 
 from ui.terminal_debug import TerminalDebugOverlay
+from engine.scenes import SceneManager
 
 try:
     from midi.input import MidiInput
@@ -65,10 +66,28 @@ except ImportError:
 
 
 # ---- constants ----
-CONFIG_PATH  = os.path.join(ROOT, "config", "rig_config.json")
-PALETTES_DIR = os.path.join(ROOT, "config", "palettes")
-TARGET_FPS   = 40
-FRAME_TIME   = 1.0 / TARGET_FPS
+CONFIG_PATH    = os.path.join(ROOT, "config", "rig_config.json")
+PALETTES_DIR   = os.path.join(ROOT, "config", "palettes")
+SCENES_DIR     = os.path.join(ROOT, "config", "scenes")
+POSITIONS_FILE = os.path.join(ROOT, "fixtures", "positions.json")
+STATES_FILE    = os.path.join(ROOT, "fixtures", "states.json")
+TARGET_FPS     = 40
+FRAME_TIME     = 1.0 / TARGET_FPS
+
+# F-key escape sequences → key names (xterm / VT100 / Linux console)
+_ESCAPE_MAP = {
+    "\x1bOP":    "F1",  "\x1b[11~": "F1",
+    "\x1bOQ":    "F2",  "\x1b[12~": "F2",
+    "\x1bOR":    "F3",  "\x1b[13~": "F3",
+    "\x1bOS":    "F4",  "\x1b[14~": "F4",
+    "\x1b[15~":  "F5",
+    "\x1b[17~":  "F6",
+    "\x1b[18~":  "F7",
+    "\x1b[19~":  "F8",
+    "\x1b[20~":  "F9",
+    "\x1b[21~":  "F10",
+}
+_SCENE_FKEYS = {"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9"}
 
 
 def load_config() -> dict:
@@ -99,7 +118,17 @@ def _keyboard_thread_fn() -> None:
                 r, _, _ = select.select([fd], [], [], 0.05)
                 if r:
                     ch = os.read(fd, 1).decode("utf-8", errors="replace")
-                    _key_queue.put_nowait(ch.lower())
+                    if ch == "\x1b":
+                        # Try to read the rest of the escape sequence
+                        r2, _, _ = select.select([fd], [], [], 0.05)
+                        if r2:
+                            rest = os.read(fd, 5).decode("utf-8", errors="replace")
+                            key  = _ESCAPE_MAP.get("\x1b" + rest, "esc")
+                        else:
+                            key = "esc"
+                        _key_queue.put_nowait(key)
+                    else:
+                        _key_queue.put_nowait(ch.lower())
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     except Exception:
@@ -223,6 +252,11 @@ def main():
         else:
             midi_in = None   # graceful degradation
 
+    # ---- scene presets ----
+    scene_mgr = SceneManager(SCENES_DIR, POSITIONS_FILE, STATES_FILE)
+    scene_mgr.load_all()
+    _all_scenes = scene_mgr.list_scenes()
+
     # ---- UI ----
     overlay = TerminalDebugOverlay()
     overlay.init_screen()
@@ -249,6 +283,33 @@ def main():
                     break
                 elif key == " ":
                     safety.toggle_blackout()
+                elif key in _SCENE_FKEYS:
+                    idx = int(key[1:]) - 1  # F1→0 … F9→8
+                    if idx < len(_all_scenes):
+                        scene = _all_scenes[idx]
+                        scene_mgr.activate_scene(scene.scene_id)
+                        print(f"[Scene] {key}: {scene.name}")
+                        # Switch to the scene's base mode
+                        base_mk = scene.base_mode
+                        if base_mk in MODES:
+                            new_mode    = get_mode(base_mk)
+                            new_palette = all_palettes.get(
+                                new_mode.palette_key, current_palette
+                            )
+                            _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                             last_lanes.get("wau_amber", 0.0),
+                                             last_lanes.get("wau_uv",    0.0))
+                            transitioner.switch(new_mode)
+                            current_mode    = new_mode
+                            current_palette = new_palette
+                            safety.update_from_mode(current_mode)
+                            room_lane.set_mode(current_mode)
+                            room_lane.set_palette(current_palette)
+
+                elif key == "F10":
+                    scene_mgr.release_scene()
+                    print("[Scene] Released — back to mode engine")
+
                 elif key in KEYBOARD_MAP:
                     mode_key = KEYBOARD_MAP[key]
                     if mode_key == "quit":
@@ -343,14 +404,31 @@ def main():
             last_lanes["wau_amber"] = eff_amber
             last_lanes["wau_uv"]    = eff_uv
 
+            # --- scene colour override (priority: scene > mode engine) ---
+            _scene_ov = scene_mgr.get_uplight_color_override()
+            if _scene_ov is not None:
+                _sc_rgb, _sc_brt, _sc_reactive = _scene_ov
+                _r_f = _sc_rgb[0] / 255.0
+                _g_f = _sc_rgb[1] / 255.0
+                _b_f = _sc_rgb[2] / 255.0
+                import colorsys as _cs2
+                _sh, _ss, _sv = _cs2.rgb_to_hsv(_r_f, _g_f, _b_f)
+                _render_h = _sh * 360.0
+                _render_s = _ss
+                _render_v = room_out.hsv.v if _sc_reactive else _sc_brt
+            else:
+                _render_h = room_out.hsv.h
+                _render_s = room_out.hsv.s
+                _render_v = room_out.hsv.v
+
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
                 fixture.render_to_universe(
                     universe,
                     brightness=1.0,
-                    hue=room_out.hsv.h,
-                    saturation=room_out.hsv.s,
-                    value=room_out.hsv.v,
+                    hue=_render_h,
+                    saturation=_render_s,
+                    value=_render_v,
                     strobe=room_out.strobe,
                     white=eff_white,
                     amber=eff_amber,
@@ -374,11 +452,17 @@ def main():
                 for label, ch in ch_labels.items()
             }
 
+            _active_scene = scene_mgr.active_scene
+            _mode_display = (
+                f"{current_mode.display_name} [{_active_scene.name}]"
+                if _active_scene else current_mode.display_name
+            )
+
             overlay.update(
                 device_name=device_label,
                 raw_bands=bands_dict,
                 smoothed_lanes=last_lanes,
-                mode_name=current_mode.display_name,
+                mode_name=_mode_display,
                 palette_name=room_lane.palette_name,
                 color_name=room_lane.current_color_name,
                 next_color_name=room_lane.next_color_name,

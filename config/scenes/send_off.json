@@ -1,0 +1,37 @@
+{
+  "scene_id": "send_off",
+  "name": "Send-Off",
+  "description": "Celebratory finale — bright white, beams sweeping both sides",
+  "base_mode": "banger",
+  "groups": [
+    {
+      "fixture_type": "uplight",
+      "groups": ["all"],
+      "state_preset": "clean_white",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "beam",
+      "groups": ["all"],
+      "position_preset": "left_sweep",
+      "state_preset": "wedding_white",
+      "movement_mode": "constrained",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "wash",
+      "groups": ["all"],
+      "state_preset": "clean_white",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "sparkle",
+      "groups": ["all"],
+      "state_preset": "clean_white",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "scene_id": "bouquet_garter",
+  "name": "Bouquet / Garter",
+  "description": "Fun party energy — purple uplights, beams sweeping right",
+  "base_mode": "open_dance",
+  "groups": [
+    {
+      "fixture_type": "uplight",
+      "groups": ["all"],
+      "state_preset": "party_purple",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "beam",
+      "groups": ["all"],
+      "position_preset": "right_sweep",
+      "state_preset": "classic_red",
+      "movement_mode": "constrained",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "sparkle",
+      "groups": ["all"],
+      "state_preset": "party_purple",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    }
+  ]
+}

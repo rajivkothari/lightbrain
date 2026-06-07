@@ -1,0 +1,30 @@
+{
+  "scene_id": "open_dancing",
+  "name": "Open Dancing",
+  "description": "High energy, deep blue and teal, beams sweeping across dance floor",
+  "base_mode": "open_dance",
+  "groups": [
+    {
+      "fixture_type": "uplight",
+      "groups": ["all"],
+      "state_preset": "deep_blue",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "beam",
+      "groups": ["all"],
+      "position_preset": "dance_floor",
+      "state_preset": "ocean_teal",
+      "movement_mode": "constrained",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "sparkle",
+      "groups": ["all"],
+      "state_preset": "deep_blue",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    }
+  ]
+}

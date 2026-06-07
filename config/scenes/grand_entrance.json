@@ -1,0 +1,30 @@
+{
+  "scene_id": "grand_entrance",
+  "name": "Grand Entrance",
+  "description": "Dramatic bright white, beams on entrance, high energy",
+  "base_mode": "banger",
+  "groups": [
+    {
+      "fixture_type": "uplight",
+      "groups": ["all"],
+      "state_preset": "wedding_white",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "beam",
+      "groups": ["all"],
+      "position_preset": "entrance",
+      "state_preset": "wedding_white",
+      "movement_mode": "constrained",
+      "audio_reactive": false
+    },
+    {
+      "fixture_type": "wash",
+      "groups": ["all"],
+      "state_preset": "clean_white",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    }
+  ]
+}

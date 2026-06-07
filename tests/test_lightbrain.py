@@ -47,6 +47,11 @@ from app.render.fixture_state import (
     UplightState, WashState, BeamState, SparkleState, ImpactState, RigVisualState,
 )
 from app.render.scene import SceneLayout
+from engine.scenes import (
+    SceneManager, ScenePreset, GroupOverride, PositionPreset, StatePreset,
+)
+from fixtures.aiming import FixtureAimingTool
+from fixtures.djflx_beam import DJFLXBeam as _DJFLXBeamForAiming
 
 
 # ===========================================================================
@@ -2642,3 +2647,420 @@ class TestDJFLXBeam:
             dmx  = pan_degrees_to_dmx(float(deg))
             back = dmx_to_pan_degrees(dmx)
             assert abs(back - deg) < 1.5, f"Round-trip error: {deg} → {dmx} → {back}"
+
+
+# ===========================================================================
+# Sprint 7 — Preset System
+# ===========================================================================
+
+# Paths to the real preset files in the repo
+_REPO_ROOT     = ROOT
+_SCENES_DIR    = os.path.join(_REPO_ROOT, "config", "scenes")
+_POSITIONS_FILE = os.path.join(_REPO_ROOT, "fixtures", "positions.json")
+_STATES_FILE   = os.path.join(_REPO_ROOT, "fixtures", "states.json")
+
+
+def _make_scene_manager() -> SceneManager:
+    mgr = SceneManager(_SCENES_DIR, _POSITIONS_FILE, _STATES_FILE)
+    mgr.load_all()
+    return mgr
+
+
+def _make_rig_state(
+    uplight_color=(200, 200, 200),
+    uplight_brightness=0.9,
+    beam_angle=45.0,
+    beam_speed=0.5,
+) -> RigVisualState:
+    return RigVisualState(
+        mode="open_dance",
+        palette_name="test",
+        low_energy=0.5, mid_energy=0.5, high_energy=0.5, overall_energy=0.5,
+        room_brightness=0.8, impact_value=0.0,
+        uplights=[UplightState(
+            fixture_id="u1", x=0.0, y=0.0,
+            color_rgb=uplight_color, brightness=uplight_brightness,
+        )],
+        washes=[WashState(
+            fixture_id="w1", x=300.0, y=400.0,
+            color_rgb=(100, 100, 200), brightness=0.7,
+            radius=150.0, pulse_strength=0.3,
+        )],
+        beams=[BeamState(
+            fixture_id="b1", x=175.0, y=670.0,
+            color_rgb=(100, 100, 100), brightness=0.7,
+            angle_degrees=beam_angle, length=400.0, spread=6.0,
+            movement_speed=beam_speed,
+        )],
+        sparkles=[SparkleState(
+            fixture_id="s1", x=600.0, y=400.0,
+            color_rgb=(200, 200, 50), brightness=0.6, sparkle_amount=0.5,
+        )],
+        impacts=[ImpactState(
+            fixture_id="i1", x=600.0, y=200.0,
+            brightness=0.0, flash_active=False,
+        )],
+        blackout_active=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TestPositionPresets
+# ---------------------------------------------------------------------------
+
+class TestPositionPresets:
+
+    def test_positions_file_loads(self):
+        mgr = _make_scene_manager()
+        assert mgr.position_count() >= 5
+
+    def test_default_positions_present(self):
+        mgr = _make_scene_manager()
+        for name in ("center", "park", "ceiling", "left_sweep", "right_sweep"):
+            assert mgr.get_position(name) is not None, f"Missing position: {name}"
+
+    def test_center_pan_is_zero(self):
+        mgr = _make_scene_manager()
+        pos = mgr.get_position("center")
+        assert pos.pan_deg == pytest.approx(0.0)
+
+    def test_park_tilt_is_zero(self):
+        mgr = _make_scene_manager()
+        pos = mgr.get_position("park")
+        assert pos.tilt_dmx == 0
+
+    def test_all_pan_angles_in_range(self):
+        mgr = _make_scene_manager()
+        for name in ("center", "park", "ceiling", "left_sweep", "right_sweep",
+                     "cake_table", "entrance", "dance_floor"):
+            pos = mgr.get_position(name)
+            if pos is not None:
+                assert -90.0 <= pos.pan_deg <= 90.0, \
+                    f"Position '{name}' pan_deg out of range: {pos.pan_deg}"
+
+
+# ---------------------------------------------------------------------------
+# TestStatePresets
+# ---------------------------------------------------------------------------
+
+class TestStatePresets:
+
+    def test_states_file_loads_ten(self):
+        mgr = _make_scene_manager()
+        assert mgr.state_count() == 10
+
+    def test_all_default_states_present(self):
+        mgr = _make_scene_manager()
+        for name in ("blush_pink", "deep_blue", "warm_amber", "wedding_white",
+                     "uv_glow", "classic_red", "ocean_teal", "sunset_gold",
+                     "party_purple", "clean_white"):
+            assert mgr.get_state(name) is not None, f"Missing state: {name}"
+
+    def test_rgb_values_in_valid_range(self):
+        mgr = _make_scene_manager()
+        for state in (mgr.get_state(n) for n in (
+            "blush_pink", "deep_blue", "warm_amber", "wedding_white", "uv_glow",
+            "classic_red", "ocean_teal", "sunset_gold", "party_purple", "clean_white",
+        )):
+            for ch in state.rgb:
+                assert 0 <= ch <= 255, f"RGB channel {ch} out of range in {state.name}"
+
+    def test_brightness_in_valid_range(self):
+        mgr = _make_scene_manager()
+        for name in ("blush_pink", "wedding_white", "clean_white"):
+            sp = mgr.get_state(name)
+            assert 0.0 <= sp.brightness <= 1.0
+
+    def test_wedding_white_is_bright(self):
+        mgr = _make_scene_manager()
+        sp = mgr.get_state("wedding_white")
+        assert sp.brightness == pytest.approx(1.0)
+        r, g, b = sp.rgb
+        assert r > 200 and g > 200 and b > 200
+
+
+# ---------------------------------------------------------------------------
+# TestGroupOverride
+# ---------------------------------------------------------------------------
+
+class TestGroupOverride:
+
+    def test_default_movement_mode(self):
+        ov = GroupOverride(fixture_type="uplight", groups=["all"])
+        assert ov.movement_mode == "inherit"
+        assert ov.audio_reactive is True
+
+    def test_locked_movement_mode(self):
+        ov = GroupOverride(fixture_type="beam", groups=["all"],
+                           movement_mode="locked", audio_reactive=False)
+        assert ov.movement_mode == "locked"
+        assert ov.audio_reactive is False
+
+    def test_scene_preset_fields(self):
+        scene = ScenePreset(
+            scene_id="test_scene",
+            name="Test",
+            base_mode="open_dance",
+            description="A test scene",
+            groups=[GroupOverride(fixture_type="uplight", groups=["all"],
+                                  state_preset="blush_pink")],
+        )
+        assert scene.scene_id == "test_scene"
+        assert scene.base_mode == "open_dance"
+        assert len(scene.groups) == 1
+        assert scene.groups[0].state_preset == "blush_pink"
+
+    def test_position_preset_dataclass(self):
+        pp = PositionPreset(name="test", pan_deg=30.0, tilt_dmx=110, description="hi")
+        assert pp.pan_deg == pytest.approx(30.0)
+        assert pp.tilt_dmx == 110
+
+
+# ---------------------------------------------------------------------------
+# TestSceneManager
+# ---------------------------------------------------------------------------
+
+class TestSceneManager:
+
+    def setup_method(self):
+        self.mgr = _make_scene_manager()
+
+    def test_load_all_counts(self):
+        assert self.mgr.scene_count() == 9
+        assert self.mgr.position_count() >= 5
+        assert self.mgr.state_count() == 10
+
+    def test_activate_scene_valid(self):
+        assert self.mgr.activate_scene("first_dance") is True
+        self.mgr.release_scene()
+
+    def test_activate_scene_invalid(self):
+        assert self.mgr.activate_scene("nonexistent_scene_xyz") is False
+
+    def test_release_scene(self):
+        self.mgr.activate_scene("first_dance")
+        self.mgr.release_scene()
+        assert self.mgr.active_scene is None
+
+    def test_active_scene_id_after_activate(self):
+        self.mgr.activate_scene("first_dance")
+        assert self.mgr.active_scene_id == "first_dance"
+        self.mgr.release_scene()
+
+    def test_active_base_mode_first_dance(self):
+        self.mgr.activate_scene("first_dance")
+        assert self.mgr.active_base_mode == "slow_dance"
+        self.mgr.release_scene()
+
+    def test_apply_no_active_scene_returns_same_object(self):
+        self.mgr.release_scene()
+        state = _make_rig_state()
+        result = self.mgr.apply_to_rig_state(state)
+        assert result is state
+
+    def test_apply_uplight_color_override(self):
+        self.mgr.activate_scene("first_dance")  # blush_pink: (255, 105, 140)
+        state = _make_rig_state(uplight_color=(0, 0, 0))
+        result = self.mgr.apply_to_rig_state(state)
+        assert result.uplights[0].color_rgb == (255, 105, 140)
+        self.mgr.release_scene()
+
+    def test_apply_uplight_brightness_audio_reactive(self):
+        # first_dance uplights: audio_reactive=True → brightness unchanged
+        self.mgr.activate_scene("first_dance")
+        state = _make_rig_state(uplight_brightness=0.42)
+        result = self.mgr.apply_to_rig_state(state)
+        assert result.uplights[0].brightness == pytest.approx(0.42)
+        self.mgr.release_scene()
+
+    def test_apply_uplight_brightness_non_reactive(self):
+        # dinner_service uplights: audio_reactive=False → brightness from preset
+        self.mgr.activate_scene("dinner_service")
+        state = _make_rig_state(uplight_brightness=0.1)
+        result = self.mgr.apply_to_rig_state(state)
+        sp = self.mgr.get_state("warm_amber")
+        assert result.uplights[0].brightness == pytest.approx(sp.brightness)
+        self.mgr.release_scene()
+
+    def test_apply_beam_locked_sets_angle(self):
+        # first_dance beams: position_preset=center, movement_mode=locked
+        self.mgr.activate_scene("first_dance")
+        state = _make_rig_state(beam_angle=45.0, beam_speed=0.8)
+        result = self.mgr.apply_to_rig_state(state)
+        center = self.mgr.get_position("center")
+        assert result.beams[0].angle_degrees == pytest.approx(center.pan_deg)
+        assert result.beams[0].movement_speed == pytest.approx(0.0)
+        self.mgr.release_scene()
+
+    def test_apply_beam_color_override(self):
+        self.mgr.activate_scene("first_dance")  # beam state_preset=blush_pink
+        state = _make_rig_state()
+        result = self.mgr.apply_to_rig_state(state)
+        sp = self.mgr.get_state("blush_pink")
+        assert result.beams[0].color_rgb == sp.rgb
+        self.mgr.release_scene()
+
+    def test_apply_mode_set_to_base_mode(self):
+        self.mgr.activate_scene("dinner_service")
+        state = _make_rig_state()
+        result = self.mgr.apply_to_rig_state(state)
+        assert result.mode == "dinner"
+        self.mgr.release_scene()
+
+    def test_apply_blackout_preserved(self):
+        self.mgr.activate_scene("first_dance")
+        state = _make_rig_state()
+        state.blackout_active = True
+        result = self.mgr.apply_to_rig_state(state)
+        assert result.blackout_active is True
+        self.mgr.release_scene()
+
+    def test_list_scenes_returns_nine(self):
+        assert len(self.mgr.list_scenes()) == 9
+
+    def test_list_scenes_sorted_by_id(self):
+        ids = [s.scene_id for s in self.mgr.list_scenes()]
+        assert ids == sorted(ids)
+
+    def test_get_uplight_color_override_no_scene(self):
+        self.mgr.release_scene()
+        assert self.mgr.get_uplight_color_override() is None
+
+    def test_get_uplight_color_override_active(self):
+        self.mgr.activate_scene("first_dance")
+        ov = self.mgr.get_uplight_color_override()
+        assert ov is not None
+        rgb, brightness, reactive = ov
+        assert len(rgb) == 3
+        assert rgb == (255, 105, 140)   # blush_pink
+        self.mgr.release_scene()
+
+    def test_constrained_beam_clamps_angle(self):
+        # bouquet_garter beams: movement_mode=constrained → angle clamped to ±30°
+        self.mgr.activate_scene("bouquet_garter")
+        state = _make_rig_state(beam_angle=80.0)  # way outside ±30
+        result = self.mgr.apply_to_rig_state(state)
+        assert abs(result.beams[0].angle_degrees) <= 30.0
+        self.mgr.release_scene()
+
+
+# ---------------------------------------------------------------------------
+# TestFixtureAimingTool
+# ---------------------------------------------------------------------------
+
+class TestFixtureAimingTool:
+
+    def _make_tool(self, tmp_path: str) -> FixtureAimingTool:
+        fixture  = _DJFLXBeamForAiming(fixture_id="beam_aim", name="Aim",
+                                        dmx_address=201)
+        universe = DMXUniverse()
+        pos_file = os.path.join(tmp_path, "positions.json")
+        return FixtureAimingTool(fixture, universe, positions_file=pos_file)
+
+    def test_initial_pan_is_zero(self):
+        with tempfile.TemporaryDirectory() as d:
+            tool = self._make_tool(d)
+            assert tool.pan_deg == pytest.approx(0.0)
+
+    def test_set_pan_clamps_max(self):
+        with tempfile.TemporaryDirectory() as d:
+            tool = self._make_tool(d)
+            tool.set_pan(200.0)  # beyond ±90
+            assert tool.pan_deg == pytest.approx(90.0)
+
+    def test_set_pan_clamps_min(self):
+        with tempfile.TemporaryDirectory() as d:
+            tool = self._make_tool(d)
+            tool.set_pan(-200.0)
+            assert tool.pan_deg == pytest.approx(-90.0)
+
+    def test_nudge_pan_accumulates(self):
+        with tempfile.TemporaryDirectory() as d:
+            tool = self._make_tool(d)
+            tool.set_pan(10.0)
+            tool.nudge_pan(5.0)
+            assert tool.pan_deg == pytest.approx(15.0)
+
+    def test_set_tilt_clamps(self):
+        with tempfile.TemporaryDirectory() as d:
+            tool = self._make_tool(d)
+            tool.set_tilt(300)
+            assert tool.tilt_dmx == 255
+            tool.set_tilt(-10)
+            assert tool.tilt_dmx == 0
+
+    def test_save_and_load_position(self):
+        with tempfile.TemporaryDirectory() as d:
+            tool = self._make_tool(d)
+            tool.set_pan(30.0)
+            tool.set_tilt(120)
+            tool.save_position("my_spot", "Test position")
+
+            # Reload via go_to_preset
+            tool.set_pan(0.0)
+            tool.set_tilt(0)
+            result = tool.go_to_preset("my_spot")
+            assert result is True
+            assert tool.pan_deg == pytest.approx(30.0)
+            assert tool.tilt_dmx == 120
+
+    def test_delete_position(self):
+        with tempfile.TemporaryDirectory() as d:
+            tool = self._make_tool(d)
+            tool.set_pan(20.0)
+            tool.save_position("temp_pos")
+            assert tool.delete_position("temp_pos") is True
+            assert tool.go_to_preset("temp_pos") is False
+
+    def test_flush_writes_to_universe(self):
+        with tempfile.TemporaryDirectory() as d:
+            fixture  = _DJFLXBeamForAiming(fixture_id="b", name="B", dmx_address=1)
+            universe = DMXUniverse()
+            tool = FixtureAimingTool(fixture, universe,
+                                     positions_file=os.path.join(d, "p.json"))
+            tool.set_pan(0.0)
+            # Dimmer should be on at aim level
+            assert universe.get_channel(8) == 128  # CH_DIMMER = 7 (0-indexed) → ch8
+
+
+# ---------------------------------------------------------------------------
+# TestSceneIntegration
+# ---------------------------------------------------------------------------
+
+class TestSceneIntegration:
+
+    def test_all_nine_scenes_loadable(self):
+        mgr = _make_scene_manager()
+        assert mgr.scene_count() == 9
+
+    def test_all_scene_ids_are_unique(self):
+        mgr = _make_scene_manager()
+        ids = [s.scene_id for s in mgr.list_scenes()]
+        assert len(ids) == len(set(ids))
+
+    def test_first_dance_applies_to_rig(self):
+        mgr = _make_scene_manager()
+        mgr.activate_scene("first_dance")
+        state  = _make_rig_state()
+        result = mgr.apply_to_rig_state(state)
+        assert result is not state
+        assert result.uplights[0].color_rgb == (255, 105, 140)  # blush_pink
+        assert result.mode == "slow_dance"
+
+    def test_release_returns_original_state(self):
+        mgr = _make_scene_manager()
+        mgr.activate_scene("first_dance")
+        mgr.release_scene()
+        state  = _make_rig_state()
+        result = mgr.apply_to_rig_state(state)
+        assert result is state
+
+    def test_scene_covers_all_expected_ids(self):
+        mgr = _make_scene_manager()
+        expected = {
+            "first_dance", "cake_cutting", "toasts", "bouquet_garter",
+            "grand_entrance", "dinner_service", "open_dancing",
+            "last_dance", "send_off",
+        }
+        loaded = {s.scene_id for s in mgr.list_scenes()}
+        assert loaded == expected

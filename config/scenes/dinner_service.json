@@ -1,0 +1,30 @@
+{
+  "scene_id": "dinner_service",
+  "name": "Dinner Service",
+  "description": "Warm amber ambience, static beams parked — elegant and unobtrusive",
+  "base_mode": "dinner",
+  "groups": [
+    {
+      "fixture_type": "uplight",
+      "groups": ["all"],
+      "state_preset": "warm_amber",
+      "movement_mode": "inherit",
+      "audio_reactive": false
+    },
+    {
+      "fixture_type": "beam",
+      "groups": ["all"],
+      "position_preset": "park",
+      "state_preset": "warm_amber",
+      "movement_mode": "locked",
+      "audio_reactive": false
+    },
+    {
+      "fixture_type": "wash",
+      "groups": ["all"],
+      "state_preset": "warm_amber",
+      "movement_mode": "inherit",
+      "audio_reactive": false
+    }
+  ]
+}

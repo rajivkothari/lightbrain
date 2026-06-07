@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "positions": {
+    "center": {
+      "pan_deg": 0.0,
+      "tilt_dmx": 110,
+      "description": "Centre stage, angled down toward dance floor"
+    },
+    "park": {
+      "pan_deg": 0.0,
+      "tilt_dmx": 0,
+      "description": "Straight up — safe storage / reset position"
+    },
+    "ceiling": {
+      "pan_deg": 0.0,
+      "tilt_dmx": 128,
+      "description": "Horizontal, illuminates ceiling above audience"
+    },
+    "left_sweep": {
+      "pan_deg": -60.0,
+      "tilt_dmx": 90,
+      "description": "Left side of dance floor"
+    },
+    "right_sweep": {
+      "pan_deg": 60.0,
+      "tilt_dmx": 90,
+      "description": "Right side of dance floor"
+    },
+    "cake_table": {
+      "pan_deg": 30.0,
+      "tilt_dmx": 130,
+      "description": "Angled toward typical cake table position (stage right)"
+    },
+    "entrance": {
+      "pan_deg": -45.0,
+      "tilt_dmx": 100,
+      "description": "Aimed at entrance / door area (stage left)"
+    },
+    "dance_floor": {
+      "pan_deg": 0.0,
+      "tilt_dmx": 145,
+      "description": "Steeply down toward centre dance floor"
+    }
+  }
+}

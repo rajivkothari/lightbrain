@@ -145,6 +145,27 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
+## Phase 7 — Sprint 7: Preset System
+
+**Status: Complete — 344 tests passing**
+
+### Delivered
+
+- [x] `fixtures/positions.json` — 8 named pan/tilt positions (center, park, ceiling, left_sweep, right_sweep, cake_table, entrance, dance_floor)
+- [x] `fixtures/states.json` — 10 named colour/intensity states (blush_pink, deep_blue, warm_amber, wedding_white, uv_glow, classic_red, ocean_teal, sunset_gold, party_purple, clean_white)
+- [x] `config/scenes/` — 9 default wedding/event scene JSON files: first_dance, cake_cutting, toasts, bouquet_garter, grand_entrance, dinner_service, open_dancing, last_dance, send_off
+- [x] `engine/scenes.py` — `SceneManager` (load_all, activate_scene, release_scene, apply_to_rig_state, get_uplight_color_override, list_scenes); `ScenePreset`, `GroupOverride`, `PositionPreset`, `StatePreset` dataclasses
+- [x] `fixtures/aiming.py` — `FixtureAimingTool`: set_pan/set_tilt, nudge_pan/nudge_tilt, go_to_preset, save_position, delete_position
+- [x] `app/main.py` — F-key escape sequence parsing (xterm / VT100 / Linux console); SceneManager wired; F1-F9 activate scenes 1-9, F10 releases; scene colour override applied to RockWedge HSV render path; active scene shown in terminal overlay
+- [x] `scripts/test_song_preview.py` — pygame.K_F1–K_F9 activate scenes; pygame.K_F10 releases; scene_mgr.apply_to_rig_state() called on every frame before visualizer draw; scene name shown in controls bar
+
+### Renderer priority chain (implemented)
+
+    blackout → safety → scene overrides → MIDI momentary → MIDI continuous →
+    mode engine → audio reactivity
+
+---
+
 ## Phase 5 — Advanced Future (Remaining Backlog)
 
 **Status: Research / Backlog**
@@ -200,3 +221,4 @@ Short version: same file + same mode + same settings + same seed = identical pre
 | 4 | 223 ✅ | LightingProgram save/load, fingerprinting, serialization roundtrip |
 | 5 | 261 ✅ | HybridEngine blend, Art-Net packet structure, auto song matching |
 | 6 | 298 ✅ | Setlist model/store, DJFLXBeam 10-ch pan/tilt mapper, setlist auto-detection |
+| 7 | 344 ✅ | Scene presets, position/state presets, SceneManager, FixtureAimingTool, F1-F9 shortcuts |

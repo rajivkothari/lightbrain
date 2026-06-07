@@ -1,0 +1,30 @@
+{
+  "scene_id": "first_dance",
+  "name": "First Dance",
+  "description": "Soft romantic uplighting, beams locked on centre stage",
+  "base_mode": "slow_dance",
+  "groups": [
+    {
+      "fixture_type": "uplight",
+      "groups": ["all"],
+      "state_preset": "blush_pink",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    },
+    {
+      "fixture_type": "beam",
+      "groups": ["all"],
+      "position_preset": "center",
+      "state_preset": "blush_pink",
+      "movement_mode": "locked",
+      "audio_reactive": false
+    },
+    {
+      "fixture_type": "wash",
+      "groups": ["all"],
+      "state_preset": "blush_pink",
+      "movement_mode": "inherit",
+      "audio_reactive": true
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "scene_id": "toasts",
+  "name": "Toasts",
+  "description": "Neutral white uplights, beams parked — non-distracting for speeches",
+  "base_mode": "dinner",
+  "groups": [
+    {
+      "fixture_type": "uplight",
+      "groups": ["all"],
+      "state_preset": "wedding_white",
+      "movement_mode": "inherit",
+      "audio_reactive": false
+    },
+    {
+      "fixture_type": "beam",
+      "groups": ["all"],
+      "position_preset": "park",
+      "state_preset": "clean_white",
+      "movement_mode": "locked",
+      "audio_reactive": false
+    },
+    {
+      "fixture_type": "wash",
+      "groups": ["all"],
+      "state_preset": "wedding_white",
+      "movement_mode": "inherit",
+      "audio_reactive": false
+    }
+  ]
+}

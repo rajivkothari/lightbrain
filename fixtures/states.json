@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "states": {
+    "blush_pink": {
+      "rgb": [255, 105, 140],
+      "brightness": 0.85,
+      "strobe_rate": 0
+    },
+    "deep_blue": {
+      "rgb": [20, 40, 220],
+      "brightness": 0.9,
+      "strobe_rate": 0
+    },
+    "warm_amber": {
+      "rgb": [255, 160, 40],
+      "brightness": 0.9,
+      "strobe_rate": 0
+    },
+    "wedding_white": {
+      "rgb": [255, 250, 240],
+      "brightness": 1.0,
+      "strobe_rate": 0
+    },
+    "uv_glow": {
+      "rgb": [80, 0, 200],
+      "brightness": 1.0,
+      "strobe_rate": 0
+    },
+    "classic_red": {
+      "rgb": [220, 20, 20],
+      "brightness": 0.85,
+      "strobe_rate": 0
+    },
+    "ocean_teal": {
+      "rgb": [0, 180, 160],
+      "brightness": 0.9,
+      "strobe_rate": 0
+    },
+    "sunset_gold": {
+      "rgb": [255, 140, 20],
+      "brightness": 0.9,
+      "strobe_rate": 0
+    },
+    "party_purple": {
+      "rgb": [160, 20, 200],
+      "brightness": 0.95,
+      "strobe_rate": 0
+    },
+    "clean_white": {
+      "rgb": [255, 255, 255],
+      "brightness": 1.0,
+      "strobe_rate": 0
+    }
+  }
+}
