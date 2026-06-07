@@ -73,6 +73,10 @@ class RoomLane:
         self._mode = mode
         self._blender.set_hold_ms(mode.hold_ms)
 
+    def reset_time(self, now: float) -> None:
+        """Reset palette blender clock for deterministic replay (Sprint 3)."""
+        self._blender.reset_time(now)
+
     def render(
         self,
         smoothed_room: float,
@@ -81,10 +85,15 @@ class RoomLane:
         master_dimmer: float = 1.0,
         group_intensity: float = 1.0,
         beat_trigger: bool = False,
+        now: Optional[float] = None,
     ) -> RoomLaneOutput:
-        """Render one frame of Room Lane output."""
+        """Render one frame of Room Lane output.
+
+        now — optional clock override for deterministic replay (Sprint 3)
+        """
         mode  = self._mode
-        color = self._blender.update(energy=smoothed_room, beat_trigger=beat_trigger)
+        color = self._blender.update(energy=smoothed_room,
+                                     beat_trigger=beat_trigger, now=now)
 
         if mode is not None:
             base_br = (mode.base_brightness

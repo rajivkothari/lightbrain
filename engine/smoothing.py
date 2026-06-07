@@ -42,20 +42,17 @@ class EnvelopeFollower:
         self._peak_value:  float = 0.0    # smoothed value recorded at peak
         self._last_raw:    float = 0.0    # raw input from previous frame
 
-    def update(self, raw: float) -> float:
+    def update(self, raw: float, now: Optional[float] = None) -> float:
         """
         Feed a new raw value and return the smoothed output.
 
-        raw   — normalized 0.0–1.0 input value
+        raw — normalized 0.0–1.0 input value
+        now — optional clock override (Sprint 3: pass frame.time_s for deterministic
+              replay; omit for live operation to use time.monotonic())
         returns smoothed 0.0–1.0 output value
-
-        TODO Song Preview (Sprint 3): add optional `now: float = None` parameter.
-        When now is provided (from AnalysisTimeline frame.time_s), use it instead
-        of time.monotonic() so DeterministicEngine can replay with fixed timing.
-        Existing callers pass nothing and behavior is unchanged.
-        See docs/SONG_PREVIEW_MODE.md → Clock injection pattern.
         """
-        now = time.monotonic()
+        if now is None:
+            now = time.monotonic()
         dt_s = now - self._last_update
         self._last_update = now
 
@@ -96,12 +93,14 @@ class EnvelopeFollower:
         self.value = max(0.0, min(1.0, self.value))
         return self.value
 
-    def reset(self, value: float = 0.0) -> None:
-        self.value       = value
-        self._last_update = time.monotonic()
-        self._peak_time  = 0.0
-        self._peak_value = 0.0
-        self._last_raw   = 0.0
+    def reset(self, value: float = 0.0, now: Optional[float] = None) -> None:
+        """Reset follower state. Pass now to initialize clock for deterministic use."""
+        t = now if now is not None else time.monotonic()
+        self.value        = value
+        self._last_update = t
+        self._peak_time   = t
+        self._peak_value  = 0.0
+        self._last_raw    = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -159,11 +158,12 @@ class LaneSmoother:
         self.beam    = EnvelopeFollower(BEAM_CONFIG)     # TODO Sprint 2
         self.sparkle = EnvelopeFollower(SPARKLE_CONFIG)  # TODO Sprint 2
 
-    def update(self, bands: dict) -> dict:
+    def update(self, bands: dict, now: Optional[float] = None) -> dict:
         """
         Update all lane followers from the raw audio band dict.
 
         bands keys: low_energy, mid_energy, high_energy, overall_energy
+        now   — optional clock override for deterministic replay (Sprint 3)
         returns dict of smoothed lane values
         """
         overall = bands.get("overall_energy", 0.0)
@@ -178,14 +178,15 @@ class LaneSmoother:
         room_raw = low * 0.4 + mid * 0.35 + high * 0.25
 
         return {
-            "impact":  self.impact.update(impact_raw),
-            "room":    self.room.update(room_raw),
-            "floor":   self.floor.update(low),           # TODO Sprint 2
-            "beam":    self.beam.update(mid),             # TODO Sprint 2
-            "sparkle": self.sparkle.update(high),         # TODO Sprint 2
+            "impact":  self.impact.update(impact_raw, now=now),
+            "room":    self.room.update(room_raw,    now=now),
+            "floor":   self.floor.update(low,        now=now),
+            "beam":    self.beam.update(mid,          now=now),
+            "sparkle": self.sparkle.update(high,      now=now),
         }
 
-    def reset_all(self) -> None:
+    def reset_all(self, now: Optional[float] = None) -> None:
+        """Reset all followers. Pass now to initialize clocks for deterministic use."""
         for follower in (self.impact, self.room, self.floor,
                          self.beam, self.sparkle):
-            follower.reset()
+            follower.reset(now=now)

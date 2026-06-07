@@ -1282,3 +1282,434 @@ class TestPaletteBlenderBeatTrigger:
             blender.update(energy=0.5, beat_trigger=False)
         # Hold should still be active (60s hold, only a few ms elapsed)
         assert blender.hold_remaining_ms > 0.0
+
+
+# =============================================================================
+# Sprint 3: Song Preview Mode
+# =============================================================================
+
+from audio.offline_analyzer import OfflineAnalyzer, AnalysisTimeline, AnalysisFrame, EventMarker
+from engine.deterministic   import DeterministicEngine
+from engine.settings_snapshot import SettingsSnapshot
+from app.render.fixture_state import FixtureStateTimeline, TimedFrame
+from app.render.playback import PlaybackController
+
+
+# ---------------------------------------------------------------------------
+# TestSettingsSnapshot
+# ---------------------------------------------------------------------------
+
+class TestSettingsSnapshot:
+    def test_instantiation_with_required_fields(self):
+        s = SettingsSnapshot(mode_key="banger", palette_key="banger")
+        assert s.mode_key == "banger"
+        assert s.palette_key == "banger"
+
+    def test_master_dimmer_default(self):
+        s = SettingsSnapshot(mode_key="dinner", palette_key="dinner")
+        assert s.master_dimmer == 1.0
+
+    def test_all_overrides_default_to_none(self):
+        s = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        assert s.base_brightness_override is None
+        assert s.max_brightness_override is None
+        assert s.pulse_amount_override is None
+        assert s.saturation_scale_override is None
+
+    def test_overrides_can_be_set(self):
+        s = SettingsSnapshot(
+            mode_key="banger",
+            palette_key="banger",
+            base_brightness_override=0.5,
+            max_brightness_override=0.8,
+        )
+        assert s.base_brightness_override == pytest.approx(0.5)
+        assert s.max_brightness_override == pytest.approx(0.8)
+
+    def test_created_at_is_recent(self):
+        before = time.time()
+        s = SettingsSnapshot(mode_key="banger", palette_key="banger")
+        after = time.time()
+        assert before <= s.created_at <= after
+
+
+# ---------------------------------------------------------------------------
+# TestOfflineAnalyzer
+# ---------------------------------------------------------------------------
+
+def _make_sine_audio(freq_hz=440, duration_s=2.0, sample_rate=44100,
+                     amplitude=0.5) -> np.ndarray:
+    """Generate a mono float32 sine wave array."""
+    t = np.linspace(0, duration_s, int(duration_s * sample_rate), endpoint=False)
+    return (np.sin(2 * np.pi * freq_hz * t) * amplitude).astype(np.float32)
+
+
+def _make_silence(duration_s=1.0, sample_rate=44100) -> np.ndarray:
+    return np.zeros(int(duration_s * sample_rate), dtype=np.float32)
+
+
+class TestOfflineAnalyzer:
+    def test_empty_audio_returns_empty_timeline(self):
+        az = OfflineAnalyzer()
+        tl = az.analyze(np.array([], dtype=np.float32))
+        assert tl.frames == []
+        assert tl.events == []
+        assert tl.duration_s == 0.0
+
+    def test_frame_count_matches_audio_length(self):
+        az = OfflineAnalyzer(block_size=1024)
+        audio = _make_sine_audio(duration_s=2.0)
+        tl = az.analyze(audio, sample_rate=44100)
+        expected = (len(audio) - 1024) // 1024 + 1
+        assert len(tl.frames) == expected
+
+    def test_analysis_is_deterministic(self):
+        az = OfflineAnalyzer()
+        audio = _make_sine_audio(duration_s=3.0)
+        tl1 = az.analyze(audio, sample_rate=44100)
+        tl2 = az.analyze(audio, sample_rate=44100)
+        assert len(tl1.frames) == len(tl2.frames)
+        for f1, f2 in zip(tl1.frames, tl2.frames):
+            assert f1.time_s == f2.time_s
+            assert f1.overall_energy == pytest.approx(f2.overall_energy)
+
+    def test_energy_values_in_0_to_1(self):
+        az = OfflineAnalyzer()
+        audio = _make_sine_audio(duration_s=2.0)
+        tl = az.analyze(audio, sample_rate=44100)
+        for f in tl.frames:
+            assert 0.0 <= f.low_energy    <= 1.0
+            assert 0.0 <= f.mid_energy    <= 1.0
+            assert 0.0 <= f.high_energy   <= 1.0
+            assert 0.0 <= f.overall_energy <= 1.0
+
+    def test_onset_strength_in_0_to_1(self):
+        az = OfflineAnalyzer()
+        audio = _make_sine_audio(duration_s=2.0)
+        tl = az.analyze(audio, sample_rate=44100)
+        for f in tl.frames:
+            assert 0.0 <= f.onset_strength <= 1.0
+
+    def test_silence_has_no_onsets(self):
+        az = OfflineAnalyzer()
+        audio = _make_silence(duration_s=2.0)
+        tl = az.analyze(audio, sample_rate=44100)
+        onsets = [f for f in tl.frames if f.is_onset]
+        assert len(onsets) == 0
+
+    def test_onset_times_respect_min_interval(self):
+        az = OfflineAnalyzer(min_onset_interval_s=0.15)
+        audio = _make_sine_audio(duration_s=5.0)
+        tl = az.analyze(audio, sample_rate=44100)
+        onset_times = [f.time_s for f in tl.frames if f.is_onset]
+        for i in range(1, len(onset_times)):
+            assert onset_times[i] - onset_times[i - 1] >= 0.14  # small float tolerance
+
+    def test_bpm_estimate_in_range_or_none(self):
+        az = OfflineAnalyzer()
+        audio = _make_sine_audio(duration_s=5.0)
+        tl = az.analyze(audio, sample_rate=44100)
+        if tl.bpm_estimate is not None:
+            assert 60 <= tl.bpm_estimate <= 180
+
+    def test_timeline_metadata(self):
+        az = OfflineAnalyzer(block_size=1024)
+        audio = _make_sine_audio(duration_s=2.0, sample_rate=44100)
+        tl = az.analyze(audio, sample_rate=44100)
+        assert tl.sample_rate == 44100
+        assert tl.hop_size == 1024
+        assert tl.duration_s == pytest.approx(2.0, abs=0.05)
+
+    def test_stereo_audio_handled_gracefully(self):
+        az = OfflineAnalyzer()
+        mono = _make_sine_audio(duration_s=2.0)
+        stereo = np.stack([mono, mono], axis=1)
+        tl = az.analyze(stereo, sample_rate=44100)
+        assert len(tl.frames) > 0
+
+
+# ---------------------------------------------------------------------------
+# TestFixtureStateTimeline
+# ---------------------------------------------------------------------------
+
+def _make_rig_state():
+    return RigVisualState(
+        mode="test", palette_name="test",
+        low_energy=0.0, mid_energy=0.0, high_energy=0.0, overall_energy=0.0,
+        room_brightness=0.0, impact_value=0.0,
+        uplights=[], washes=[], beams=[], sparkles=[], impacts=[],
+        blackout_active=False,
+    )
+
+
+class TestFixtureStateTimeline:
+    def test_empty_timeline_frame_at_returns_none(self):
+        tl = FixtureStateTimeline()
+        assert tl.frame_at(0.0) is None
+
+    def test_frame_at_returns_closest_frame(self):
+        s1 = _make_rig_state(); s2 = _make_rig_state()
+        tl = FixtureStateTimeline(
+            frames=[TimedFrame(0.0, s1), TimedFrame(1.0, s2)],
+            duration_s=1.0,
+        )
+        assert tl.frame_at(0.3) is s1
+        assert tl.frame_at(0.6) is s2
+
+    def test_frame_at_before_start(self):
+        s = _make_rig_state()
+        tl = FixtureStateTimeline(frames=[TimedFrame(0.5, s)], duration_s=1.0)
+        assert tl.frame_at(0.0) is s
+
+    def test_frame_at_past_end(self):
+        s = _make_rig_state()
+        tl = FixtureStateTimeline(frames=[TimedFrame(0.0, s)], duration_s=1.0)
+        assert tl.frame_at(99.0) is s
+
+    def test_frame_at_exact_match(self):
+        s = _make_rig_state()
+        tl = FixtureStateTimeline(frames=[TimedFrame(0.5, s)], duration_s=1.0)
+        assert tl.frame_at(0.5) is s
+
+
+# ---------------------------------------------------------------------------
+# TestPlaybackController
+# ---------------------------------------------------------------------------
+
+def _make_fx_timeline(n_frames=10, duration_s=1.0):
+    frames = [
+        TimedFrame(i * duration_s / n_frames, _make_rig_state())
+        for i in range(n_frames)
+    ]
+    return FixtureStateTimeline(frames=frames, duration_s=duration_s)
+
+
+class TestPlaybackController:
+    def test_initial_state_is_paused(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline())
+        assert not ctrl.is_playing
+
+    def test_initial_time_is_zero(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline())
+        assert ctrl.current_time_s == pytest.approx(0.0)
+
+    def test_play_sets_playing(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline())
+        ctrl.play()
+        assert ctrl.is_playing
+
+    def test_pause_stops_playing(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline())
+        ctrl.play()
+        ctrl.pause()
+        assert not ctrl.is_playing
+
+    def test_toggle_play_pause(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline())
+        ctrl.toggle_play_pause()
+        assert ctrl.is_playing
+        ctrl.toggle_play_pause()
+        assert not ctrl.is_playing
+
+    def test_seek_clamps_to_duration(self):
+        ctrl = PlaybackController()
+        tl = _make_fx_timeline(duration_s=5.0)
+        ctrl.load(tl)
+        ctrl.seek(100.0)
+        assert ctrl.current_time_s == pytest.approx(5.0)
+        ctrl.seek(-5.0)
+        assert ctrl.current_time_s == pytest.approx(0.0)
+
+    def test_step_relative_seek(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline(duration_s=10.0))
+        ctrl.seek(3.0)
+        ctrl.step(2.0)
+        assert ctrl.current_time_s == pytest.approx(5.0)
+
+    def test_update_advances_time_while_playing(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline(duration_s=10.0))
+        ctrl.play()
+        time.sleep(0.05)
+        ctrl.update()
+        assert ctrl.current_time_s > 0.0
+
+    def test_update_does_not_advance_while_paused(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline(duration_s=10.0))
+        # Don't call play()
+        time.sleep(0.05)
+        ctrl.update()
+        assert ctrl.current_time_s == pytest.approx(0.0)
+
+    def test_progress_property(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline(duration_s=10.0))
+        ctrl.seek(5.0)
+        assert ctrl.progress == pytest.approx(0.5)
+
+    def test_update_returns_rig_state(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline())
+        state = ctrl.update()
+        assert isinstance(state, RigVisualState)
+
+    def test_no_timeline_update_returns_none(self):
+        ctrl = PlaybackController()
+        assert ctrl.update() is None
+
+    def test_playback_stops_at_end(self):
+        ctrl = PlaybackController()
+        ctrl.load(_make_fx_timeline(duration_s=0.1))
+        ctrl.play()
+        time.sleep(0.15)
+        ctrl.update()
+        assert not ctrl.is_playing
+        assert ctrl.current_time_s == pytest.approx(0.1)
+
+
+# ---------------------------------------------------------------------------
+# TestDeterministicEngine
+# ---------------------------------------------------------------------------
+
+def _make_analysis_timeline(duration_s=2.0, sample_rate=44100, block_size=1024):
+    audio = _make_sine_audio(duration_s=duration_s, sample_rate=sample_rate)
+    return OfflineAnalyzer(block_size=block_size).analyze(audio, sample_rate)
+
+
+def _make_palettes():
+    return load_all_palettes(os.path.join(ROOT, "config", "palettes"))
+
+
+class TestDeterministicEngine:
+    def test_generates_nonempty_timeline(self):
+        tl = _make_analysis_timeline(duration_s=1.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        engine = DeterministicEngine(settings, seed=42)
+        fx_tl = engine.generate(tl, palettes)
+        assert len(fx_tl.frames) > 0
+
+    def test_frame_count_matches_analysis(self):
+        tl = _make_analysis_timeline(duration_s=1.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        engine = DeterministicEngine(settings, seed=42)
+        fx_tl = engine.generate(tl, palettes)
+        assert len(fx_tl.frames) == len(tl.frames)
+
+    def test_same_input_same_output(self):
+        tl = _make_analysis_timeline(duration_s=2.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="banger", palette_key="banger")
+        engine1 = DeterministicEngine(settings, seed=7)
+        engine2 = DeterministicEngine(settings, seed=7)
+        fx1 = engine1.generate(tl, palettes)
+        fx2 = engine2.generate(tl, palettes)
+        assert len(fx1.frames) == len(fx2.frames)
+        for f1, f2 in zip(fx1.frames, fx2.frames):
+            assert f1.time_s == pytest.approx(f2.time_s)
+            assert f1.state.room_brightness == pytest.approx(f2.state.room_brightness, abs=1e-5)
+
+    def test_different_seeds_can_differ(self):
+        tl = _make_analysis_timeline(duration_s=2.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="banger", palette_key="banger")
+        fx1 = DeterministicEngine(settings, seed=1).generate(tl, palettes)
+        fx2 = DeterministicEngine(settings, seed=999).generate(tl, palettes)
+        # Timings must match; seeds may or may not affect the output
+        assert len(fx1.frames) == len(fx2.frames)
+
+    def test_all_modes_produce_valid_output(self):
+        tl = _make_analysis_timeline(duration_s=1.0)
+        palettes = _make_palettes()
+        for mode_key in MODES:
+            mode = get_mode(mode_key)
+            settings = SettingsSnapshot(mode_key=mode_key, palette_key=mode.palette_key)
+            engine = DeterministicEngine(settings, seed=42)
+            fx_tl = engine.generate(tl, palettes)
+            assert len(fx_tl.frames) > 0, f"Mode {mode_key} produced no frames"
+
+    def test_brightness_in_bounds(self):
+        tl = _make_analysis_timeline(duration_s=1.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        fx_tl = DeterministicEngine(settings, seed=42).generate(tl, palettes)
+        for frame in fx_tl.frames:
+            assert 0.0 <= frame.state.room_brightness <= 1.0, \
+                f"room_brightness out of range: {frame.state.room_brightness}"
+
+    def test_empty_analysis_produces_empty_timeline(self):
+        tl = AnalysisTimeline(
+            frames=[], events=[], duration_s=0.0,
+            sample_rate=44100, hop_size=1024, window_size=1024,
+        )
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        fx_tl = DeterministicEngine(settings, seed=42).generate(tl, palettes)
+        assert len(fx_tl.frames) == 0
+
+    def test_duration_preserved(self):
+        tl = _make_analysis_timeline(duration_s=2.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        fx_tl = DeterministicEngine(settings, seed=42).generate(tl, palettes)
+        assert fx_tl.duration_s == pytest.approx(tl.duration_s, abs=0.05)
+
+
+# ---------------------------------------------------------------------------
+# TestClockInjection
+# ---------------------------------------------------------------------------
+
+class TestClockInjection:
+    def test_envelope_follower_injected_clock(self):
+        from engine.smoothing import EnvelopeFollower, EnvelopeConfig
+        cfg = EnvelopeConfig(attack_ms=10, decay_ms=50, cooldown_ms=0)
+        ef = EnvelopeFollower(cfg)
+        ef.reset(now=0.0)
+        # Feed a value at t=0.1s with injected clock
+        v = ef.update(1.0, now=0.1)
+        assert 0.0 < v <= 1.0
+
+    def test_envelope_follower_injected_clock_deterministic(self):
+        from engine.smoothing import EnvelopeFollower, EnvelopeConfig
+        cfg = EnvelopeConfig(attack_ms=20, decay_ms=100, cooldown_ms=0)
+        ef1 = EnvelopeFollower(cfg); ef1.reset(now=0.0)
+        ef2 = EnvelopeFollower(cfg); ef2.reset(now=0.0)
+        times  = [0.05, 0.10, 0.15, 0.20]
+        values = [0.8,  0.6,  0.4,  0.2]
+        out1 = [ef1.update(v, now=t) for v, t in zip(values, times)]
+        out2 = [ef2.update(v, now=t) for v, t in zip(values, times)]
+        assert out1 == pytest.approx(out2)
+
+    def test_lane_smoother_injected_clock(self):
+        from engine.smoothing import LaneSmoother
+        ls = LaneSmoother(); ls.reset_all(now=0.0)
+        bands = {"low_energy": 0.5, "mid_energy": 0.3, "high_energy": 0.2, "overall_energy": 0.4}
+        lanes = ls.update(bands, now=0.1)
+        assert "room" in lanes
+        assert "impact" in lanes
+
+    def test_palette_blender_injected_clock(self):
+        palette = load_palette(os.path.join(ROOT, "config", "palettes", "open_dance.json"))
+        blender = PaletteBlender(palette)
+        blender.reset_time(now=0.0)
+        color = blender.update(energy=0.5, beat_trigger=False, now=0.1)
+        assert isinstance(color, HSVColor)
+
+    def test_deterministic_engine_clock_consistency(self):
+        """Two runs on the same timeline must produce frame times that match exactly."""
+        tl = _make_analysis_timeline(duration_s=1.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        fx1 = DeterministicEngine(settings, seed=42).generate(tl, palettes)
+        fx2 = DeterministicEngine(settings, seed=42).generate(tl, palettes)
+        times1 = [f.time_s for f in fx1.frames]
+        times2 = [f.time_s for f in fx2.frames]
+        assert times1 == pytest.approx(times2)

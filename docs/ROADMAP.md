@@ -39,7 +39,7 @@ The foundation is working and tested (115 tests passing).
 
 ## Phase 2 — Sprint 2: Near-Term Polish
 
-**Status: Planned**
+**Status: Complete — 143 tests passing**
 
 ### Priority items
 
@@ -76,21 +76,20 @@ The foundation is working and tested (115 tests passing).
 
 ## Phase 3 — Sprint 3: Song Preview MVP
 
-**Status: Planned — see `docs/SONG_PREVIEW_MODE.md` for full spec**
-
-This is the next major feature. It allows a DJ to load an audio file and
-preview the likely lighting behavior before the gig.
+**Status: Complete — 189 tests passing**
 
 ### Core deliverables
 
-- [ ] `audio/file_loader.py` — WAV/MP3/FLAC → numpy array using scipy.io.wavfile or librosa
-- [ ] `audio/offline_analyzer.py` — batch FFT across full song + onset detection + phrase/drop/silence markers → `AnalysisTimeline`
-- [ ] `engine/deterministic.py` — drives existing smoothers and lanes from `AnalysisTimeline` with fixed clock + seeded RNG → `FixtureStateTimeline`
-- [ ] `app/render/playback.py` — plays back `FixtureStateTimeline` with a playhead cursor
-- [ ] `app/render/waveform.py` — waveform + low/mid/high/energy lane display in visualizer
-- [ ] `scripts/test_song_preview.py` — song preview runner (CLI: `python scripts/test_song_preview.py --file song.wav --mode banger`)
-- [ ] Visualizer keyboard: `[` / `]` scrub, `Space` play/pause, `R` re-run preview
-- [ ] Settings panel: mode, palette, intensity, seed selection before/during preview
+- [x] `audio/file_loader.py` — WAV/FLAC → numpy array via soundfile (scipy fallback)
+- [x] `audio/offline_analyzer.py` — batch FFT, spectral-flux onset detection, phrase/drop detection, BPM estimate → `AnalysisTimeline`
+- [x] `engine/settings_snapshot.py` — `SettingsSnapshot` dataclass captures all generation params
+- [x] `engine/deterministic.py` — drives smoothers + lanes from `AnalysisTimeline` with injected clock + seeded RNG → `FixtureStateTimeline`
+- [x] Clock injection — all time-dependent components accept `now=` parameter; deterministic engine passes `frame.time_s`
+- [x] `app/render/playback.py` — `PlaybackController`: wall-clock playhead through `FixtureStateTimeline`
+- [x] `app/render/waveform.py` — static surface (energy lanes, onset markers, event labels) + per-frame playhead
+- [x] `app/render/fixture_state.py` — `frame_at()` upgraded to O(log n) bisect
+- [x] `scripts/test_song_preview.py` — full pygame song preview runner
+- [x] Visualizer keyboard: Space play/pause, ←→ ±5s, `[`/`]` phrase seek, R re-run, O/D/B/I/S/L mode switch, Q quit
 
 ### Determinism requirements
 
@@ -175,6 +174,6 @@ guide while still reacting live.
 | Sprint | Tests | Coverage focus |
 |--------|-------|---------------|
 | 1 / 1B | 115 ✅ | Engine correctness, fixture state, scene layout |
-| 2 | ~140 | Beat detection, phrase detection, MIDI |
-| 3 | ~180 | OfflineAnalyzer, DeterministicEngine, determinism contract |
+| 2 | 143 ✅ | Beat detection, WAU channels, MIDI, ModeTransitioner |
+| 3 | 189 ✅ | OfflineAnalyzer, DeterministicEngine, determinism contract, PlaybackController |
 | 4 | ~220 | LightingProgram save/load, replay correctness |

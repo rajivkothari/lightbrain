@@ -13,6 +13,7 @@ Architecture overview: docs/ARCHITECTURE.md
 Song Preview plan:     docs/SONG_PREVIEW_MODE.md
 """
 
+import bisect
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -143,8 +144,17 @@ class FixtureStateTimeline:
     settings_key:    str              = ""   # serialized SettingsSnapshot hash
 
     def frame_at(self, time_s: float) -> Optional[RigVisualState]:
-        """Return the RigVisualState closest to the given playback time."""
+        """Return the RigVisualState closest to the given playback time (O(log n))."""
         if not self.frames:
             return None
-        best = min(self.frames, key=lambda f: abs(f.time_s - time_s))
-        return best.state
+        times = [f.time_s for f in self.frames]
+        idx   = bisect.bisect_left(times, time_s)
+        if idx >= len(self.frames):
+            return self.frames[-1].state
+        if idx == 0:
+            return self.frames[0].state
+        before = self.frames[idx - 1]
+        after  = self.frames[idx]
+        if (time_s - before.time_s) <= (after.time_s - time_s):
+            return before.state
+        return after.state

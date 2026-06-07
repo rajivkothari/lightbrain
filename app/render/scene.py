@@ -15,7 +15,7 @@ import colorsys
 import math
 import time
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from app.render.fixture_state import (
     UplightState, WashState, BeamState, SparkleState, ImpactState,
@@ -147,6 +147,11 @@ class SceneLayout:
         self._beam_phase  = 0.0        # driving sine for beam sweep
         self._last_update = time.monotonic()
 
+    def reset_time(self, now: float) -> None:
+        """Reset internal clock and beam phase for deterministic replay (Sprint 3)."""
+        self._last_update = now
+        self._beam_phase  = 0.0
+
     def update_and_build(
         self,
         bands:          dict,    # raw band energies
@@ -159,14 +164,15 @@ class SceneLayout:
         mode_key:       str,
         palette_name:   str,
         blackout:       bool,
-        # TODO Song Preview (Sprint 3): add `now: Optional[float] = None` so
-        # DeterministicEngine can drive beam_phase from AnalysisTimeline time_s
-        # instead of time.monotonic(). Sparkle randomness also needs seed injection.
-        # See docs/SONG_PREVIEW_MODE.md → Clock injection pattern.
+        now:            Optional[float] = None,   # Sprint 3: inject clock
     ) -> RigVisualState:
-        """Build a complete RigVisualState for one render frame."""
+        """Build a complete RigVisualState for one render frame.
 
-        now = time.monotonic()
+        now — optional clock override for deterministic replay (Sprint 3);
+              pass frame.time_s from AnalysisTimeline for deterministic beam animation.
+        """
+        if now is None:
+            now = time.monotonic()
         dt  = min(now - self._last_update, 0.1)
         self._last_update = now
 

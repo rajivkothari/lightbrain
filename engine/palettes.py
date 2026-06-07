@@ -147,34 +147,36 @@ class PaletteBlender:
         self._last_time        = time.monotonic()
         self._state            = _HOLDING if hold_ms > 0 else _TRANSITIONING
 
-    def set_palette(self, palette: Palette) -> None:
+    def set_palette(self, palette: Palette, now: Optional[float] = None) -> None:
         """Switch to a new palette — restart blend from color index 0."""
         self._palette          = palette
         self._color_idx        = 0
         self._next_idx         = 1 % max(len(palette.colors), 1)
         self._blend_t          = 0.0
         self._hold_elapsed_ms  = 0.0
-        self._last_time        = time.monotonic()
+        self._last_time        = now if now is not None else time.monotonic()
         self._state            = _HOLDING if self._hold_ms > 0 else _TRANSITIONING
 
     def set_hold_ms(self, hold_ms: float) -> None:
         """Update hold time (takes effect at the next state transition)."""
         self._hold_ms = hold_ms
 
-    def update(self, energy: float = 0.5, beat_trigger: bool = False) -> HSVColor:
+    def reset_time(self, now: float) -> None:
+        """Reset internal clock to now for deterministic replay (Sprint 3)."""
+        self._last_time = now
+
+    def update(self, energy: float = 0.5, beat_trigger: bool = False,
+               now: Optional[float] = None) -> HSVColor:
         """
         Advance the blend and return the current blended color.
 
-        energy        — room energy 0.0–1.0 (wired in for energy-triggered changes).
-        beat_trigger  — Sprint 2: when True, immediately releases the hold phase for
-                        palettes with change_rule "energy_trigger" or "fast_beat".
-
-        TODO Song Preview (Sprint 3): add optional `now: float = None` parameter.
-        When now is provided (from AnalysisTimeline frame.time_s), use it instead
-        of time.monotonic() so DeterministicEngine gets deterministic blend timing.
-        See docs/SONG_PREVIEW_MODE.md → Clock injection pattern.
+        energy        — room energy 0.0–1.0
+        beat_trigger  — when True, releases hold phase for energy_trigger/fast_beat palettes
+        now           — optional clock override for deterministic replay (Sprint 3);
+                        omit for live operation (uses time.monotonic())
         """
-        now   = time.monotonic()
+        if now is None:
+            now = time.monotonic()
         dt_ms = min((now - self._last_time) * 1000.0, 100.0)
         self._last_time = now
 
