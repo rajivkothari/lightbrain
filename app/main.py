@@ -58,6 +58,7 @@ from fixtures.rockwedge import RockWedge
 
 from ui.terminal_debug import TerminalDebugOverlay
 from engine.scenes import SceneManager
+from app.web import server as _web
 
 try:
     from midi.input import MidiInput
@@ -167,6 +168,10 @@ def main():
                         help="print every changed DMX channel to console")
     parser.add_argument("--midi",        type=str,  default=None,
                         help="MIDI input port name (default: first available)")
+    parser.add_argument("--web",         action="store_true",
+                        help="start web dashboard (requires fastapi + uvicorn)")
+    parser.add_argument("--web-port",    type=int,  default=8765,
+                        help="web dashboard port (default: 8765)")
     args = parser.parse_args()
 
     config = load_config()
@@ -257,6 +262,21 @@ def main():
     scene_mgr.load_all()
     _all_scenes = scene_mgr.list_scenes()
 
+    # ---- web dashboard ----
+    if args.web:
+        _web.set_catalog(
+            modes  = [{"key": m.key, "display_name": m.display_name}
+                      for m in [get_mode(k) for k in MODES if k != "blackout"]],
+            scenes = [{"id": s.scene_id, "name": s.name, "index": i}
+                      for i, s in enumerate(_all_scenes)],
+        )
+        _web.start(port=args.web_port)
+
+    # ---- fps counter ----
+    _fps_frames = 0
+    _fps_last_t = time.monotonic()
+    _fps_display = 0
+
     # ---- UI ----
     overlay = TerminalDebugOverlay()
     overlay.init_screen()
@@ -331,6 +351,50 @@ def main():
                         safety.update_from_mode(current_mode)
                         room_lane.set_mode(current_mode)
                         room_lane.set_palette(current_palette)
+
+            # --- web commands ---
+            for _wcmd in _web.get_all_commands():
+                _wtype = _wcmd.get("type", "")
+                if _wtype == "mode":
+                    _wval = _wcmd.get("value", "")
+                    if _wval in MODES:
+                        new_mode    = get_mode(_wval)
+                        new_palette = all_palettes.get(
+                            new_mode.palette_key, current_palette
+                        )
+                        _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                         last_lanes.get("wau_amber", 0.0),
+                                         last_lanes.get("wau_uv",    0.0))
+                        transitioner.switch(new_mode)
+                        current_mode    = new_mode
+                        current_palette = new_palette
+                        mode_key        = _wval
+                        safety.update_from_mode(current_mode)
+                        room_lane.set_mode(current_mode)
+                        room_lane.set_palette(current_palette)
+                elif _wtype == "scene":
+                    _sid = _wcmd.get("value", "")
+                    if scene_mgr.activate_scene(_sid):
+                        _base = scene_mgr.active_base_mode
+                        if _base and _base in MODES:
+                            new_mode    = get_mode(_base)
+                            new_palette = all_palettes.get(
+                                new_mode.palette_key, current_palette
+                            )
+                            _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                             last_lanes.get("wau_amber", 0.0),
+                                             last_lanes.get("wau_uv",    0.0))
+                            transitioner.switch(new_mode)
+                            current_mode    = new_mode
+                            current_palette = new_palette
+                            mode_key        = _base
+                            safety.update_from_mode(current_mode)
+                            room_lane.set_mode(current_mode)
+                            room_lane.set_palette(current_palette)
+                elif _wtype == "release_scene":
+                    scene_mgr.release_scene()
+                elif _wtype == "blackout":
+                    safety.toggle_blackout()
 
             # --- MIDI ---
             if midi_in is not None:
@@ -480,6 +544,33 @@ def main():
                 safety_strobe_ok=safety.state.strobe_allowed,
                 error=error_msg or getattr(capture, "last_error", None),
             )
+
+            # --- fps counter ---
+            _fps_frames += 1
+            _fps_now = time.monotonic()
+            if _fps_now - _fps_last_t >= 1.0:
+                _fps_display = _fps_frames
+                _fps_frames  = 0
+                _fps_last_t  = _fps_now
+
+            # --- web state push ---
+            if args.web:
+                _active_s = scene_mgr.active_scene
+                _web.update_state(
+                    mode=            mode_key,
+                    mode_display=    current_mode.display_name,
+                    scene=           scene_mgr.active_scene_id,
+                    scene_name=      _active_s.name if _active_s else "",
+                    blackout=        safety.state.blackout_active,
+                    bpm=             float(last_lanes.get("bpm", 0.0)),
+                    beat=            bool(last_lanes.get("beat", False)),
+                    low_energy=      float(bands_dict.get("low_energy",    0.0)),
+                    mid_energy=      float(bands_dict.get("mid_energy",    0.0)),
+                    high_energy=     float(bands_dict.get("high_energy",   0.0)),
+                    overall_energy=  float(bands_dict.get("overall_energy",0.0)),
+                    fps=             _fps_display,
+                    dmx_output=      dmx_out.output_type,
+                )
 
             # --- frame rate cap ---
             elapsed = time.monotonic() - frame_start

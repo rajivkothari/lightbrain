@@ -145,6 +145,26 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
+## Phase 8 — Sprint 8: Web Dashboard
+
+**Status: Complete — 359 tests passing**
+
+### Delivered
+
+- [x] `app/web/server.py` — FastAPI server with `GET /` (dashboard HTML), `GET /api/state` (JSON snapshot), `POST /api/command` (mode/scene/blackout control), `WS /ws` (live state push at ~10 fps); runs in a daemon thread alongside `app.main`
+- [x] `app/web/dashboard.html` — single-page dashboard: live energy bars, mode buttons, 3×3 scene grid (F1–F9), release scene, blackout toggle; WebSocket with auto-reconnect; works on phone/tablet on the same network
+- [x] `app/main.py` — `--web` / `--web-port` flags; web command loop (mode, scene, release_scene, blackout); per-frame state push; fps counter
+- [x] `requirements.txt` — added `fastapi>=0.110.0` and `uvicorn[standard]>=0.29.0`
+
+### Usage
+
+```
+python -m app.main --demo --web
+# Open http://localhost:8765/ in any browser
+```
+
+---
+
 ## Phase 7 — Sprint 7: Preset System
 
 **Status: Complete — 344 tests passing**
@@ -222,3 +242,4 @@ Short version: same file + same mode + same settings + same seed = identical pre
 | 5 | 261 ✅ | HybridEngine blend, Art-Net packet structure, auto song matching |
 | 6 | 298 ✅ | Setlist model/store, DJFLXBeam 10-ch pan/tilt mapper, setlist auto-detection |
 | 7 | 344 ✅ | Scene presets, position/state presets, SceneManager, FixtureAimingTool, F1-F9 shortcuts |
+| 8 | 359 ✅ | Web dashboard (FastAPI + WebSocket), live energy bars, mode/scene/blackout control |

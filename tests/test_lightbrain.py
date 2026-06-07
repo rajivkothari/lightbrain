@@ -52,6 +52,7 @@ from engine.scenes import (
 )
 from fixtures.aiming import FixtureAimingTool
 from fixtures.djflx_beam import DJFLXBeam as _DJFLXBeamForAiming
+from app.web import server as _web_server
 
 
 # ===========================================================================
@@ -3064,3 +3065,110 @@ class TestSceneIntegration:
         }
         loaded = {s.scene_id for s in mgr.list_scenes()}
         assert loaded == expected
+
+
+# ===========================================================================
+# Sprint 8 — Web Dashboard
+# ===========================================================================
+
+class TestWebServerState:
+    """State dict and command queue — no running server needed."""
+
+    def setup_method(self):
+        # Reset to clean baseline before each test
+        _web_server._engine_state.update({
+            "mode": "open_dance", "mode_display": "Open Dance",
+            "scene": None, "scene_name": "", "blackout": False,
+            "bpm": 0.0, "beat": False,
+            "low_energy": 0.0, "mid_energy": 0.0,
+            "high_energy": 0.0, "overall_energy": 0.0,
+            "fps": 0, "dmx_output": "MOCK",
+            "scenes": [], "modes": [],
+        })
+        _web_server.get_all_commands()   # drain queue
+
+    def test_initial_state_has_required_keys(self):
+        keys = {"mode", "mode_display", "scene", "scene_name", "blackout",
+                "bpm", "beat", "low_energy", "mid_energy", "high_energy",
+                "overall_energy", "fps", "dmx_output", "scenes", "modes"}
+        assert keys.issubset(_web_server._engine_state.keys())
+
+    def test_update_state_modifies_dict(self):
+        _web_server.update_state(mode="banger", bpm=128.0)
+        assert _web_server._engine_state["mode"] == "banger"
+        assert _web_server._engine_state["bpm"] == pytest.approx(128.0)
+
+    def test_update_state_energy_levels(self):
+        _web_server.update_state(low_energy=0.8, mid_energy=0.5,
+                                  high_energy=0.3, overall_energy=0.6)
+        assert _web_server._engine_state["low_energy"]     == pytest.approx(0.8)
+        assert _web_server._engine_state["overall_energy"] == pytest.approx(0.6)
+
+    def test_update_state_blackout(self):
+        _web_server.update_state(blackout=True)
+        assert _web_server._engine_state["blackout"] is True
+
+    def test_update_state_scene(self):
+        _web_server.update_state(scene="first_dance", scene_name="First Dance")
+        assert _web_server._engine_state["scene"] == "first_dance"
+        assert _web_server._engine_state["scene_name"] == "First Dance"
+
+    def test_set_catalog_populates_modes_and_scenes(self):
+        modes  = [{"key": "open_dance", "display_name": "Open Dance"}]
+        scenes = [{"id": "first_dance", "name": "First Dance", "index": 0}]
+        _web_server.set_catalog(modes=modes, scenes=scenes)
+        assert _web_server._engine_state["modes"]  == modes
+        assert _web_server._engine_state["scenes"] == scenes
+
+    def test_state_is_json_serializable(self):
+        import json
+        json.dumps(_web_server._engine_state)   # must not raise
+
+    def test_get_command_empty_returns_none(self):
+        assert _web_server.get_command() is None
+
+    def test_command_queue_roundtrip(self):
+        _web_server._command_queue.put_nowait({"type": "blackout"})
+        cmd = _web_server.get_command()
+        assert cmd == {"type": "blackout"}
+        assert _web_server.get_command() is None
+
+    def test_get_all_commands_drains_queue(self):
+        _web_server._command_queue.put_nowait({"type": "mode",  "value": "banger"})
+        _web_server._command_queue.put_nowait({"type": "blackout"})
+        cmds = _web_server.get_all_commands()
+        assert len(cmds) == 2
+        assert cmds[0]["type"] == "mode"
+        assert cmds[1]["type"] == "blackout"
+        assert _web_server.get_command() is None   # fully drained
+
+    def test_get_all_commands_empty(self):
+        assert _web_server.get_all_commands() == []
+
+    def test_multiple_scene_commands(self):
+        _web_server._command_queue.put_nowait({"type": "scene", "value": "first_dance"})
+        _web_server._command_queue.put_nowait({"type": "release_scene"})
+        cmds = _web_server.get_all_commands()
+        assert cmds[0] == {"type": "scene", "value": "first_dance"}
+        assert cmds[1] == {"type": "release_scene"}
+
+    def test_update_state_beat_flag(self):
+        _web_server.update_state(beat=True, bpm=120.0)
+        assert _web_server._engine_state["beat"] is True
+        assert _web_server._engine_state["bpm"] == pytest.approx(120.0)
+
+    def test_update_state_fps(self):
+        _web_server.update_state(fps=40, dmx_output="ARTNET")
+        assert _web_server._engine_state["fps"] == 40
+        assert _web_server._engine_state["dmx_output"] == "ARTNET"
+
+    def test_dashboard_html_exists(self):
+        html_path = os.path.join(
+            ROOT, "app", "web", "dashboard.html"
+        )
+        assert os.path.exists(html_path)
+        with open(html_path, encoding="utf-8") as f:
+            content = f.read()
+        assert "LightBrain" in content
+        assert "/ws" in content          # WebSocket endpoint referenced
+        assert "/api/command" in content  # command endpoint referenced
