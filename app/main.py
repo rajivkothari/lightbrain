@@ -713,13 +713,13 @@ def main():
             )
             _eff_strobe = _strobe_rate * _strobe_master if safety.state.strobe_allowed else 0.0
 
-            # --- strobe burst override (gated by safety) ---
-            if time.monotonic() < _strobe_burst_end and safety.state.strobe_allowed and not safety.state.blackout_active:
-                _eff_strobe = 1.0
+            # --- strobe burst override (DJ manual override — bypasses strobe_allowed) ---
+            if time.monotonic() < _strobe_burst_end and not safety.state.blackout_active:
+                _eff_strobe = _strobe_master
 
-            # --- strobe hold (iPad hold-to-strobe button) ---
-            if _strobe_hold and safety.state.strobe_allowed and not safety.state.blackout_active:
-                _eff_strobe = 1.0
+            # --- strobe hold (iPad hold-to-strobe button — DJ manual override) ---
+            if _strobe_hold and not safety.state.blackout_active:
+                _eff_strobe = _strobe_master
 
             # --- prepare per-frame render values ---
             _frame_brt = _master_dimmer
