@@ -166,6 +166,11 @@ class PaletteBlender:
         Advance the blend and return the current blended color.
 
         energy — room energy 0.0–1.0 (wired in for future energy-triggered changes).
+
+        TODO Song Preview (Sprint 3): add optional `now: float = None` parameter.
+        When now is provided (from AnalysisTimeline frame.time_s), use it instead
+        of time.monotonic() so DeterministicEngine gets deterministic blend timing.
+        See docs/SONG_PREVIEW_MODE.md → Clock injection pattern.
         """
         now   = time.monotonic()
         dt_ms = min((now - self._last_time) * 1000.0, 100.0)

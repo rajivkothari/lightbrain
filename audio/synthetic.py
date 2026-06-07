@@ -40,9 +40,16 @@ class SyntheticAudioSource:
         self,
         sample_rate: int = 44100,
         block_size: int = 1024,
+        seed_offset: int = 0,
+        # TODO Song Preview (Sprint 3): accept start_phase to resume from a
+        #      specific point in the synthetic signal for deterministic preview.
+        #      DeterministicEngine will set start_phase = frame.time_s * sample_rate.
     ):
-        self.sample_rate = sample_rate
-        self.block_size  = block_size
+        self.sample_rate  = sample_rate
+        self.block_size   = block_size
+        # seed_offset shifts the per-block RNG seed so different instances or
+        # preview runs produce different (but still deterministic) randomness.
+        self._seed_offset = seed_offset
 
         self._running    = False
         self._phase      = 0.0        # continuous sample counter
@@ -102,7 +109,7 @@ class SyntheticAudioSource:
         mid = (mid_env * 0.5 * np.sin(2 * math.pi * 800.0 * samples)).astype(np.float32)
 
         # --- High: 6 kHz burst riding noise ---
-        rng       = np.random.default_rng(int(self._phase) // n)
+        rng       = np.random.default_rng(self._seed_offset + int(self._phase) // n)
         noise     = rng.standard_normal(n).astype(np.float32) * 0.15
         hi_sine   = (high_env * 0.3 * np.sin(2 * math.pi * 6000.0 * samples)).astype(np.float32)
         highs     = hi_sine + noise * high_env.astype(np.float32)

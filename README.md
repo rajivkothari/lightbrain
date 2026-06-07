@@ -390,18 +390,48 @@ python scripts/test_mock_rockwedge.py --demo
 
 ---
 
-## Not yet built (Sprint 2+)
+## Behavior Modes
 
-- Impact Lane (strobe/flash behaviors on real DMX)
-- White / Amber / UV channel control
-- GigBAR beam lines in visualizer
-- Individual uplight addressing (currently all 18 show the same color)
+LightBrain supports three behavior levels (see `docs/SONG_PREVIEW_MODE.md`):
+
+| Mode | Description | Determinism |
+|------|-------------|-------------|
+| **Live Reactive** | Real-time audio → real-time lighting. Same song may look similar but not identical each time. Responds to DJ cuts, loops, scratches. | Non-deterministic by design |
+| **Deterministic Preview** *(Sprint 3)* | Audio file → offline analysis → seeded engine → fixed output. Same file + same mode + same settings + same seed = identical result every run. | Fully deterministic |
+| **Saved Program** *(Sprint 4)* | Generated lighting pass saved as a `LightingProgram`. Replay exactly or use as a hybrid guide while still reacting live. | Exact replay |
+
+Full architecture: `docs/ARCHITECTURE.md`
+Roadmap: `docs/ROADMAP.md`
+Song Preview spec: `docs/SONG_PREVIEW_MODE.md`
+
+---
+
+## Not yet built (see docs/ROADMAP.md for full plan)
+
+### Sprint 2 (near-term)
 - Floor / Beam / Sparkle lanes wired to DMX
-- Wash effects, moving heads, GigBAR full ILS control
-- MIDI control input
+- White / Amber / UV channel control
+- Beat / phrase detection for palette transitions
+- Individual uplight addressing
+- MIDI controller input
+- Full GigBAR, Wash FX, DJFLX channel maps
+
+### Sprint 3 — Song Preview Mode
+- Load audio file (WAV/MP3/FLAC) into the visualizer
+- Offline analysis → `AnalysisTimeline` (energy, onsets, phrases, drops)
+- `DeterministicEngine` with fixed seed and clock injection
+- `FixtureStateTimeline` playback with playhead and waveform display
+- Mode / palette / intensity controls before preview
+- `scripts/test_song_preview.py` runner
+
+### Sprint 4 — Saved Program Mode
+- `LightingProgram` model (see `docs/SONG_PREVIEW_MODE.md`)
+- Save / load generated lighting shows
+- Exact replay or hybrid live mode
+
+### Later
 - Art-Net / sACN network output
 - Raspberry Pi deployment
-- GUI / web dashboard
-- Multi-fixture group management
-- Fixture wizard / channel mode configurator
-- Beat / phrase detection for palette transitions
+- Web dashboard / mobile app
+- Fixture wizard
+- Song fingerprint library auto-matching

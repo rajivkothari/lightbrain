@@ -48,6 +48,12 @@ class EnvelopeFollower:
 
         raw   — normalized 0.0–1.0 input value
         returns smoothed 0.0–1.0 output value
+
+        TODO Song Preview (Sprint 3): add optional `now: float = None` parameter.
+        When now is provided (from AnalysisTimeline frame.time_s), use it instead
+        of time.monotonic() so DeterministicEngine can replay with fixed timing.
+        Existing callers pass nothing and behavior is unchanged.
+        See docs/SONG_PREVIEW_MODE.md → Clock injection pattern.
         """
         now = time.monotonic()
         dt_s = now - self._last_update

@@ -159,6 +159,10 @@ class SceneLayout:
         mode_key:       str,
         palette_name:   str,
         blackout:       bool,
+        # TODO Song Preview (Sprint 3): add `now: Optional[float] = None` so
+        # DeterministicEngine can drive beam_phase from AnalysisTimeline time_s
+        # instead of time.monotonic(). Sparkle randomness also needs seed injection.
+        # See docs/SONG_PREVIEW_MODE.md → Clock injection pattern.
     ) -> RigVisualState:
         """Build a complete RigVisualState for one render frame."""
 
