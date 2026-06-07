@@ -247,6 +247,7 @@ const BL = 430, BT = 620, BR = 770, BB = 700;  // DJ booth
 
 let _lastFixtures = null;
 let _blackoutActive = false;
+let _beatFlash = 0;   // 0–1, set to 1 on beat, decays each draw frame
 
 function _initCanvas() {
   const c = document.getElementById('rig-canvas');
@@ -266,33 +267,60 @@ function _drawRig(fixtures, blackout) {
   if (!c) return;
   const ctx = c.getContext('2d');
   const W = c.width, H = c.height;
-  const s = W / ORIG_W;   // scale factor
+  const s = W / ORIG_W;
+
+  // Decay beat flash each frame
+  _beatFlash = Math.max(0, _beatFlash - 0.25);
 
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#080810';
+  ctx.fillStyle = '#060610';
   ctx.fillRect(0, 0, W, H);
 
-  // Dance floor
-  ctx.fillStyle = '#0d0d18';
+  // Dance floor fill + subtle grid
+  ctx.fillStyle = '#0c0c1a';
   ctx.fillRect(FL*s, FT*s, (FR-FL)*s, (FB-FT)*s);
-  ctx.strokeStyle = '#1a1a30'; ctx.lineWidth = 1;
+  const grid = 80*s;
+  ctx.strokeStyle = 'rgba(20,20,38,0.9)'; ctx.lineWidth = 0.5;
+  for (let gx = FL*s + grid; gx < FR*s; gx += grid) {
+    ctx.beginPath(); ctx.moveTo(gx, FT*s); ctx.lineTo(gx, FB*s); ctx.stroke();
+  }
+  for (let gy = FT*s + grid; gy < FB*s; gy += grid) {
+    ctx.beginPath(); ctx.moveTo(FL*s, gy); ctx.lineTo(FR*s, gy); ctx.stroke();
+  }
+  ctx.strokeStyle = '#1c1c32'; ctx.lineWidth = 1;
   ctx.strokeRect(FL*s, FT*s, (FR-FL)*s, (FB-FT)*s);
 
+  // Truss — horizontal bar running full width where bottom fixtures hang
+  const ty = 663*s;
+  ctx.strokeStyle = 'rgba(38,38,72,0.9)'; ctx.lineWidth = Math.max(2, 3.5*s);
+  ctx.beginPath(); ctx.moveTo(60*s, ty); ctx.lineTo(1140*s, ty); ctx.stroke();
+  // Truss highlight edge
+  ctx.strokeStyle = 'rgba(55,55,100,0.4)'; ctx.lineWidth = Math.max(0.5, 1*s);
+  ctx.beginPath(); ctx.moveTo(60*s, ty - 2*s); ctx.lineTo(1140*s, ty - 2*s); ctx.stroke();
+
   // DJ booth
-  ctx.fillStyle = '#0f0f1e';
+  ctx.fillStyle = '#0e0e1c';
   ctx.fillRect(BL*s, BT*s, (BR-BL)*s, (BB-BT)*s);
-  ctx.strokeStyle = '#1e1e38';
+  ctx.strokeStyle = '#1c1c36'; ctx.lineWidth = 1;
   ctx.strokeRect(BL*s, BT*s, (BR-BL)*s, (BB-BT)*s);
-  ctx.fillStyle = '#252540'; ctx.font = `${Math.max(8, 10*s)}px monospace`;
+  ctx.fillStyle = '#20203a';
+  ctx.font = `bold ${Math.max(8, 11*s)}px monospace`;
   ctx.textAlign = 'center';
-  ctx.fillText('DJ', (BL+BR)/2*s, (BT+(BB-BT)*0.6)*s);
+  ctx.fillText('DJ BOOTH', (BL+BR)/2*s, (BT+(BB-BT)*0.62)*s);
   ctx.textAlign = 'left';
 
-  // Always draw fixture housings so the rig layout is visible even in blackout
+  // Floor label
+  ctx.fillStyle = 'rgba(30,30,55,0.7)';
+  ctx.font = `${Math.max(7, 9*s)}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText('DANCE FLOOR', (FL+FR)/2*s, (FT+18)*s);
+  ctx.textAlign = 'left';
+
+  // Draw fixtures (housings always, effects only when not blacked out)
   if (fixtures) {
-    (fixtures.beams    || []).forEach(b => _drawBeam(ctx, b, s));
-    (fixtures.washes   || []).forEach(w => _drawWash(ctx, w, s));
-    (fixtures.uplights || []).forEach(u => _drawUplight(ctx, u, s));
+    (fixtures.beams    || []).forEach(b  => _drawBeam(ctx, b, s));
+    (fixtures.washes   || []).forEach(w  => _drawWash(ctx, w, s));
+    (fixtures.uplights || []).forEach(u  => _drawUplight(ctx, u, s));
     if (!blackout) {
       (fixtures.sparkles || []).forEach(sp => _drawSparkle(ctx, sp, s));
       (fixtures.impacts  || []).forEach(im => _drawImpact(ctx, im, s, W, H));
@@ -322,39 +350,98 @@ function _drawUplight(ctx, u, s) {
   const hw = r * 0.65;
   ctx.strokeRect(x - hw, y - hw, hw*2, hw*2);
   if (!on) return;
-  const [R,G,B] = u.rgb, a = Math.max(0.3, u.brt);
-  const g1 = ctx.createRadialGradient(x, y, 0, x, y, r*4.5);
-  g1.addColorStop(0, `rgba(${R},${G},${B},${(a*0.55).toFixed(2)})`);
+  const [R,G,B] = u.rgb;
+  const a = Math.min(1, Math.max(0.3, u.brt) * (1 + _beatFlash * 0.5));
+  const g1 = ctx.createRadialGradient(x, y, 0, x, y, r*5);
+  g1.addColorStop(0, `rgba(${R},${G},${B},${Math.min(1, a*0.6).toFixed(2)})`);
+  g1.addColorStop(0.5, `rgba(${R},${G},${B},${Math.min(1, a*0.2).toFixed(2)})`);
   g1.addColorStop(1, `rgba(${R},${G},${B},0)`);
   ctx.fillStyle = g1;
-  ctx.beginPath(); ctx.arc(x, y, r*4.5, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = `rgba(${Math.min(255,R+90)},${Math.min(255,G+90)},${Math.min(255,B+90)},${(a*0.95).toFixed(2)})`;
+  ctx.beginPath(); ctx.arc(x, y, r*5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = `rgba(${Math.min(255,R+90)},${Math.min(255,G+90)},${Math.min(255,B+90)},${Math.min(1, a*0.95).toFixed(2)})`;
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
 }
 
 function _drawWash(ctx, w, s) {
+  if (w.id === 'gigbar_wash') { _drawGigbarWash(ctx, w, s); return; }
   const x = w.x*s, y = w.y*s;
   const on = w.active && w.brt > 0.01;
-  const isGigbar = w.id === 'gigbar_wash';
-  const fr = (isGigbar ? 10 : 12) * s;
-  // Housing: concentric double ring
+  const fr = 12*s;
   ctx.strokeStyle = on ? _H_ON : _H_OFF;
   ctx.lineWidth = Math.max(1, 1.5*s);
-  ctx.beginPath(); ctx.arc(x, y, fr,      0, Math.PI*2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(x, y, fr*0.45, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, fr,       0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, fr*0.45,  0, Math.PI*2); ctx.stroke();
   if (on) {
-    const brt = Math.max(0.2, w.brt);
+    const brt = Math.max(0.2, w.brt) * (1 + _beatFlash * 0.4);
     const r = (w.radius + w.pulse * 70) * s;
     const [R,G,B] = w.rgb;
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0,   `rgba(${R},${G},${B},${(brt*0.5).toFixed(2)})`);
-    g.addColorStop(0.4, `rgba(${R},${G},${B},${(brt*0.2).toFixed(2)})`);
+    g.addColorStop(0,   `rgba(${R},${G},${B},${Math.min(1, brt*0.55).toFixed(2)})`);
+    g.addColorStop(0.4, `rgba(${R},${G},${B},${Math.min(1, brt*0.22).toFixed(2)})`);
     g.addColorStop(1,   `rgba(${R},${G},${B},0)`);
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
   }
-  const lbl = isGigbar ? 'GIGBAR' : (w.id === 'wash_00' ? 'WASH L' : 'WASH R');
+  const lbl = w.id === 'wash_00' ? 'WASH L' : 'WASH R';
   _fixtureLabel(ctx, lbl, x, y + fr + 11*s, s, on);
+}
+
+// GigBAR Move+ILS drawn as a 5-head horizontal bar fixture
+function _drawGigbarWash(ctx, w, s) {
+  const cx = w.x*s, cy = w.y*s;
+  const on = w.active && w.brt > 0.01;
+  const barW = 110*s;
+  const nHeads = 5;
+  const headLabels = ['W', 'W', 'D', 'W', 'W'];  // W=wash, D=derby center
+
+  // Bar chassis
+  ctx.strokeStyle = on ? _H_ON : _H_OFF;
+  ctx.lineWidth = Math.max(1.5, 3*s);
+  ctx.beginPath(); ctx.moveTo(cx - barW/2, cy); ctx.lineTo(cx + barW/2, cy); ctx.stroke();
+  // Truss mount bracket at top
+  ctx.lineWidth = Math.max(1, 1.5*s);
+  ctx.beginPath(); ctx.moveTo(cx - 8*s, cy - 6*s); ctx.lineTo(cx + 8*s, cy - 6*s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy - 6*s); ctx.stroke();
+
+  // Individual heads
+  const headXs = [];
+  for (let i = 0; i < nHeads; i++) headXs.push(cx - barW/2 + barW * i/(nHeads-1));
+
+  headXs.forEach((hx, i) => {
+    const hr = (i === 2 ? 7 : 5) * s;  // center derby head slightly larger
+    ctx.strokeStyle = on ? _H_ON : _H_OFF;
+    ctx.lineWidth = Math.max(1, 1.2*s);
+    ctx.beginPath(); ctx.arc(hx, cy, hr, 0, Math.PI*2); ctx.stroke();
+    if (i !== 2) {
+      // Wash heads: inner ring
+      ctx.beginPath(); ctx.arc(hx, cy, hr*0.45, 0, Math.PI*2); ctx.stroke();
+    } else {
+      // Derby head: crosshair to distinguish it
+      ctx.beginPath(); ctx.moveTo(hx - hr, cy); ctx.lineTo(hx + hr, cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(hx, cy - hr); ctx.lineTo(hx, cy + hr); ctx.stroke();
+    }
+    if (on) {
+      const [R,G,B] = w.rgb;
+      ctx.fillStyle = `rgba(${R},${G},${B},0.5)`;
+      ctx.beginPath(); ctx.arc(hx, cy, hr*0.28, 0, Math.PI*2); ctx.fill();
+    }
+  });
+
+  if (on) {
+    const brt = Math.max(0.2, w.brt) * (1 + _beatFlash * 0.4);
+    const [R,G,B] = w.rgb;
+    // Per-head glow
+    headXs.forEach((hx, i) => {
+      const gr = (i === 2 ? 80 : 100) * s + w.pulse * 40 * s;
+      const g = ctx.createRadialGradient(hx, cy, 0, hx, cy, gr);
+      g.addColorStop(0, `rgba(${R},${G},${B},${Math.min(1, brt*0.45).toFixed(2)})`);
+      g.addColorStop(1, `rgba(${R},${G},${B},0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(hx, cy, gr, 0, Math.PI*2); ctx.fill();
+    });
+  }
+
+  _fixtureLabel(ctx, 'GIGBAR (5-HEAD)', cx, cy + 22*s, s, on);
 }
 
 function _drawBeam(ctx, b, s) {
@@ -378,17 +465,35 @@ function _drawBeam(ctx, b, s) {
     const tx = ox + dx*len, ty = oy + dy*len;
     const px = -dy, py = dx;
     const [R,G,B] = b.rgb;
-    const brt = Math.max(0.4, b.brt);
+    const brt = Math.min(1, Math.max(0.45, b.brt) * (1 + _beatFlash * 0.3));
+    // Outer soft glow pass
+    const gOuter = ctx.createLinearGradient(ox, oy, tx, ty);
+    gOuter.addColorStop(0, `rgba(${R},${G},${B},${(brt*0.35).toFixed(2)})`);
+    gOuter.addColorStop(1, `rgba(${R},${G},${B},0)`);
+    ctx.fillStyle = gOuter;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(tx - px*halfSpread*2.2, ty - py*halfSpread*2.2);
+    ctx.lineTo(tx + px*halfSpread*2.2, ty + py*halfSpread*2.2);
+    ctx.closePath(); ctx.fill();
+    // Core bright cone
     const g = ctx.createLinearGradient(ox, oy, tx, ty);
-    g.addColorStop(0,   `rgba(${R},${G},${B},${(brt*0.92).toFixed(2)})`);
-    g.addColorStop(0.55,`rgba(${R},${G},${B},${(brt*0.35).toFixed(2)})`);
-    g.addColorStop(1,   `rgba(${R},${G},${B},0)`);
+    g.addColorStop(0,    `rgba(${R},${G},${B},${Math.min(1, brt*0.95).toFixed(2)})`);
+    g.addColorStop(0.5,  `rgba(${R},${G},${B},${(brt*0.4).toFixed(2)})`);
+    g.addColorStop(1,    `rgba(${R},${G},${B},0)`);
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.moveTo(ox, oy);
     ctx.lineTo(tx - px*halfSpread, ty - py*halfSpread);
     ctx.lineTo(tx + px*halfSpread, ty + py*halfSpread);
     ctx.closePath(); ctx.fill();
+    // Edge lines for crispness
+    ctx.strokeStyle = `rgba(${Math.min(255,R+60)},${Math.min(255,G+60)},${Math.min(255,B+60)},${(brt*0.4).toFixed(2)})`;
+    ctx.lineWidth = Math.max(0.5, 1*s);
+    ctx.beginPath();
+    ctx.moveTo(ox, oy); ctx.lineTo(tx - px*halfSpread, ty - py*halfSpread); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ox, oy); ctx.lineTo(tx + px*halfSpread, ty + py*halfSpread); ctx.stroke();
   }
   const lbl = b.id === 'beam_l' ? 'BEAM L' : 'BEAM R';
   _fixtureLabel(ctx, lbl, ox, oy + pr + 13*s, s, on);
@@ -426,10 +531,10 @@ function _drawLegend(ctx, s, W) {
   ctx.fillStyle = 'rgba(60,60,100,0.7)';
   ctx.fillRect(x0 - 6*s, y0 - lh, 84*s, lh*5.4);
   const items = [
-    ['□', 'Uplight (×18)'],
-    ['⊚', 'Wash / GigBAR'],
+    ['□', 'Uplight  ×18'],
+    ['⊚', 'Wash L / R'],
+    ['⊟', 'GigBAR 5-head'],
     ['◎', 'Moving Beam'],
-    ['·', 'Derby Sparkle'],
   ];
   items.forEach(([icon, label], i) => {
     ctx.fillStyle = 'rgba(100,100,160,0.9)';
@@ -491,10 +596,14 @@ function buildScenes(scenes) {
 }
 
 function applyState(s) {
-  // BPM
+  // BPM + beat flash
   const bpmEl = document.getElementById('bpm');
   bpmEl.textContent = s.bpm > 1 ? `${Math.round(s.bpm)} BPM` : '-- BPM';
-  if (s.beat) { bpmEl.style.color='#fff'; setTimeout(()=>bpmEl.style.color='',80); }
+  if (s.beat) {
+    bpmEl.style.color='#fff';
+    setTimeout(()=>bpmEl.style.color='',80);
+    _beatFlash = 1.0;
+  }
 
   // Status
   document.getElementById('status-text').textContent =

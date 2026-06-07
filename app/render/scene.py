@@ -248,9 +248,9 @@ class SceneLayout:
         # ------------------------------------------------------------------
         # Beams (2 DJFLX) — angles sweep via sine
         # ------------------------------------------------------------------
-        # Left beam sweeps from -55° to -15°, right from +15° to +55°
+        # Beams (2 DJFLX) — mirror-symmetric sweep so both converge/diverge together
         sweep_l = -35.0 + math.sin(self._beam_phase) * 22.0
-        sweep_r =  35.0 - math.sin(self._beam_phase + math.pi) * 22.0
+        sweep_r =  35.0 - math.sin(self._beam_phase) * 22.0
 
         beam_len = 400.0 + impact * 80.0   # pulses slightly with impact
 
