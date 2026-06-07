@@ -79,6 +79,7 @@ POSITIONS_FILE  = os.path.join(ROOT, "fixtures", "positions.json")
 STATES_FILE     = os.path.join(ROOT, "fixtures", "states.json")
 TARGET_FPS      = 40
 FRAME_TIME      = 1.0 / TARGET_FPS
+BLACKOUT_FADE_S = 0.8      # seconds to fade out when blackout is activated
 
 
 def _load_app_config() -> dict:
@@ -331,6 +332,19 @@ def main():
     _uplight_dimmer    = 1.0    # 0–1, uplight-only brightness
     _flash_frames      = 0      # countdown frames for manual flash hit
     _strobe_burst_end  = 0.0    # monotonic time when strobe burst expires
+    _strobe_hold       = False   # iPad hold-to-strobe button state
+    _blackout_fading   = False   # True while blackout fade-out is in progress
+    _blackout_fade_start = 0.0   # monotonic time when fade began
+    _blackout_fade_alpha = 1.0   # 1.0=full, 0.0=dark
+    _fade_v_snap       = 0.0    # _render_v snapshot at fade start
+    _fade_brt_snap     = 1.0    # _master_dimmer snapshot at fade start
+    _fade_w_snap       = 0.0    # eff_white snapshot at fade start
+    _fade_a_snap       = 0.0    # eff_amber snapshot at fade start
+    _fade_uv_snap      = 0.0    # eff_uv snapshot at fade start
+    _last_render_v     = 0.0    # end-of-frame _render_v for next snapshot
+    _last_eff_white    = 0.0
+    _last_eff_amber    = 0.0
+    _last_eff_uv       = 0.0
 
     try:
         while not quit_flag:
@@ -344,7 +358,20 @@ def main():
                     quit_flag = True
                     break
                 elif key == " ":
+                    _was_bo = safety.state.blackout_active
                     safety.toggle_blackout()
+                    if not _was_bo:
+                        _blackout_fading   = True
+                        _blackout_fade_start = time.monotonic()
+                        _blackout_fade_alpha = 1.0
+                        _fade_v_snap   = _last_render_v
+                        _fade_brt_snap = _master_dimmer
+                        _fade_w_snap   = _last_eff_white
+                        _fade_a_snap   = _last_eff_amber
+                        _fade_uv_snap  = _last_eff_uv
+                    else:
+                        _blackout_fading   = False
+                        _blackout_fade_alpha = 1.0
                 elif key in _SCENE_FKEYS:
                     idx = int(key[1:]) - 1  # F1→0 … F9→8
                     if idx < len(_all_scenes):
@@ -378,7 +405,20 @@ def main():
                         quit_flag = True
                         break
                     elif mode_key == "blackout":
+                        _was_bo = safety.state.blackout_active
                         safety.toggle_blackout()
+                        if not _was_bo:
+                            _blackout_fading   = True
+                            _blackout_fade_start = time.monotonic()
+                            _blackout_fade_alpha = 1.0
+                            _fade_v_snap   = _last_render_v
+                            _fade_brt_snap = _master_dimmer
+                            _fade_w_snap   = _last_eff_white
+                            _fade_a_snap   = _last_eff_amber
+                            _fade_uv_snap  = _last_eff_uv
+                        else:
+                            _blackout_fading   = False
+                            _blackout_fade_alpha = 1.0
                     else:
                         new_mode    = get_mode(mode_key)
                         new_palette = all_palettes.get(
@@ -436,7 +476,20 @@ def main():
                 elif _wtype == "release_scene":
                     scene_mgr.release_scene()
                 elif _wtype == "blackout":
+                    _was_bo = safety.state.blackout_active
                     safety.toggle_blackout()
+                    if not _was_bo:
+                        _blackout_fading   = True
+                        _blackout_fade_start = time.monotonic()
+                        _blackout_fade_alpha = 1.0
+                        _fade_v_snap   = _last_render_v
+                        _fade_brt_snap = _master_dimmer
+                        _fade_w_snap   = _last_eff_white
+                        _fade_a_snap   = _last_eff_amber
+                        _fade_uv_snap  = _last_eff_uv
+                    else:
+                        _blackout_fading   = False
+                        _blackout_fade_alpha = 1.0
                 elif _wtype == "strobe_master":
                     try:
                         _strobe_master = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
@@ -497,6 +550,8 @@ def main():
                         _flash_frames = 3
                     elif _eff == "strobe_burst" and _act == "start":
                         _strobe_burst_end = time.monotonic() + 2.0
+                    elif _eff == "strobe_hold":
+                        _strobe_hold = (_act == "start")
 
             # --- MIDI ---
             if midi_in is not None:
@@ -519,9 +574,19 @@ def main():
                         if evt.value > 0.5:
                             if not safety.state.blackout_active:
                                 safety.toggle_blackout()
+                                _blackout_fading   = True
+                                _blackout_fade_start = time.monotonic()
+                                _blackout_fade_alpha = 1.0
+                                _fade_v_snap   = _last_render_v
+                                _fade_brt_snap = _master_dimmer
+                                _fade_w_snap   = _last_eff_white
+                                _fade_a_snap   = _last_eff_amber
+                                _fade_uv_snap  = _last_eff_uv
                         else:
                             if safety.state.blackout_active:
                                 safety.toggle_blackout()
+                                _blackout_fading   = False
+                                _blackout_fade_alpha = 1.0
 
             if quit_flag:
                 break
@@ -599,12 +664,22 @@ def main():
             if time.monotonic() < _strobe_burst_end and safety.state.strobe_allowed and not safety.state.blackout_active:
                 _eff_strobe = 1.0
 
+            # --- strobe hold (iPad hold-to-strobe button) ---
+            if _strobe_hold and safety.state.strobe_allowed and not safety.state.blackout_active:
+                _eff_strobe = 1.0
+
             # --- prepare per-frame render values ---
             _frame_brt = _master_dimmer
             _frame_h   = _render_h
             _frame_s   = _render_s
             _frame_v   = _render_v
             _frame_w   = eff_white
+
+            # snapshot clean values each frame so blackout fade can start from them
+            _last_render_v  = _render_v
+            _last_eff_white = eff_white
+            _last_eff_amber = eff_amber
+            _last_eff_uv    = eff_uv
 
             if _flash_frames > 0 and not safety.state.blackout_active:
                 _flash_frames -= 1
@@ -614,6 +689,19 @@ def main():
                 _frame_w   = 1.0
             elif _flash_frames > 0:
                 _flash_frames = 0
+
+            # --- blackout fade override ---
+            if _blackout_fading:
+                _elapsed_fade = time.monotonic() - _blackout_fade_start
+                _blackout_fade_alpha = max(0.0, 1.0 - _elapsed_fade / BLACKOUT_FADE_S)
+                if _blackout_fade_alpha <= 0.0:
+                    _blackout_fading = False
+                _frame_v    = _fade_v_snap   * _blackout_fade_alpha
+                _frame_brt  = _fade_brt_snap * _blackout_fade_alpha
+                _frame_w    = _fade_w_snap   * _blackout_fade_alpha
+                eff_amber   = _fade_a_snap   * _blackout_fade_alpha
+                eff_uv      = _fade_uv_snap  * _blackout_fade_alpha
+                _eff_strobe = 0.0
 
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
@@ -629,8 +717,8 @@ def main():
                     uv=eff_uv,
                 )
 
-            # --- universe-level blackout guard ---
-            if safety.state.blackout_active:
+            # --- universe-level blackout guard (skip while fade is in progress) ---
+            if safety.state.blackout_active and not _blackout_fading:
                 universe.blackout()
 
             # --- DMX send ---

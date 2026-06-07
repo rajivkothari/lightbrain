@@ -149,6 +149,11 @@
       transition: transform 0.06s, filter 0.06s;
     }
     .btn-moment:active { transform: scale(0.95); filter: brightness(1.3); }
+    .btn-strobe.held {
+      background: linear-gradient(135deg, #665500, #887700);
+      border-color: #ffcc00; filter: brightness(1.4);
+      transform: scale(0.95);
+    }
     .btn-flash {
       background: linear-gradient(135deg, #333355, #444488);
       border-color: #5555aa; color: #ccccff;
@@ -309,8 +314,9 @@
       FLASH
     </button>
     <button class="btn-moment btn-strobe" id="btn-strobe"
-            ontouchstart="momentaryStart('strobe_burst')" ontouchend="momentaryEnd('strobe_burst')"
-            onmousedown="momentaryStart('strobe_burst')" onmouseup="momentaryEnd('strobe_burst')">
+            ontouchstart="momentaryStart('strobe_hold')" ontouchend="momentaryEnd('strobe_hold')"
+            ontouchcancel="momentaryEnd('strobe_hold')"
+            onmousedown="momentaryStart('strobe_hold')" onmouseup="momentaryEnd('strobe_hold')">
       STROBE
     </button>
   </div>
@@ -448,10 +454,12 @@ function onFader(name, pct) {
 
 function momentaryStart(effect) {
   send({type: 'momentary', effect: effect, action: 'start'});
+  if (effect === 'strobe_hold') document.getElementById('btn-strobe').classList.add('held');
 }
 
 function momentaryEnd(effect) {
   send({type: 'momentary', effect: effect, action: 'stop'});
+  if (effect === 'strobe_hold') document.getElementById('btn-strobe').classList.remove('held');
 }
 
 function savePosition() {
