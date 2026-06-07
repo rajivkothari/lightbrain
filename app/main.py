@@ -1,9 +1,17 @@
 """
-LightBrain Sprint 1B — main application entry point.
+LightBrain Sprint 2 — main application entry point.
 
 Pipeline:
-  audio input → FFT analysis → EMA smoothing → room lane →
-  RockWedge mapper → DMX universe → mock output → terminal overlay
+  audio input → FFT analysis → beat detection → EMA smoothing →
+  room lane (with WAU channels) → RockWedge mapper → DMX universe →
+  mock/hardware output → terminal overlay
+
+New in Sprint 2:
+  - White/Amber/UV channel control (palette-driven per mode)
+  - Beat detection with BPM estimation
+  - Smooth mode crossfade via ModeTransitioner
+  - MIDI CC input (requires mido[ports-rtmidi])
+  - Multi-fixture support (all fixtures from rig_config.json)
 
 Run from the repo root:
   python -m app.main --demo               # synthetic audio, no mic
@@ -31,14 +39,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from audio.analyzer  import AudioAnalyzer, AudioBands
-from audio.synthetic import SyntheticAudioSource
+from audio.analyzer    import AudioAnalyzer, AudioBands
+from audio.synthetic   import SyntheticAudioSource
+from audio.beat_detector import BeatDetector
 
-from engine.smoothing import LaneSmoother
-from engine.palettes  import load_all_palettes, PaletteBlender
-from engine.lanes     import RoomLane
-from engine.modes     import get_mode, MODES, KEYBOARD_MAP
-from engine.safety    import SafetyEngine
+from engine.smoothing  import LaneSmoother
+from engine.palettes   import load_all_palettes, PaletteBlender
+from engine.lanes      import RoomLane
+from engine.modes      import get_mode, MODES, KEYBOARD_MAP
+from engine.safety     import SafetyEngine
+from engine.transitions import ModeTransitioner
 
 from dmx.universe          import DMXUniverse
 from dmx.output_mock       import MockDMXOutput
@@ -47,6 +57,11 @@ from dmx.output_enttec_pro import EnttecProOutput
 from fixtures.rockwedge import RockWedge
 
 from ui.terminal_debug import TerminalDebugOverlay
+
+try:
+    from midi.input import MidiInput
+except ImportError:
+    MidiInput = None
 
 
 # ---- constants ----
@@ -107,7 +122,7 @@ def _stop_keyboard(thread: threading.Thread) -> None:
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="LightBrain Sprint 1B")
+    parser = argparse.ArgumentParser(description="LightBrain Sprint 2")
     parser.add_argument("--device",      type=int,  default=None,
                         help="sounddevice input device index")
     parser.add_argument("--demo",        "--simulate", dest="demo",
@@ -121,6 +136,8 @@ def main():
                         help="serial port for DMXking (e.g. /dev/ttyUSB0)")
     parser.add_argument("--verbose-dmx", action="store_true",
                         help="print every changed DMX channel to console")
+    parser.add_argument("--midi",        type=str,  default=None,
+                        help="MIDI input port name (default: first available)")
     args = parser.parse_args()
 
     config = load_config()
@@ -159,27 +176,33 @@ def main():
             error_msg    = f"Audio start failed: {e}"
             device_label = "no device"
 
-    analyzer = AudioAnalyzer()
+    analyzer     = AudioAnalyzer()
+    beat_detector = BeatDetector()
 
     # ---- engine ----
-    smoother = LaneSmoother()
-    safety   = SafetyEngine()
+    smoother    = LaneSmoother()
+    safety      = SafetyEngine()
     safety.update_from_mode(current_mode)
-    room_lane = RoomLane(current_palette, mode=current_mode)
+    room_lane   = RoomLane(current_palette, mode=current_mode)
+    transitioner = ModeTransitioner(current_mode)
 
-    # ---- fixture ----
-    fixture_cfg = config["fixtures"][0]
-    rockwedge   = RockWedge(
-        fixture_id=fixture_cfg["id"],
-        name=fixture_cfg["name"],
-        dmx_address=fixture_cfg["dmx_address"],
-        lane=fixture_cfg["lane"],
-        group=fixture_cfg["group"],
-    )
+    # ---- fixtures ----
+    universe  = DMXUniverse()
+    fixtures  = []
+    for fx_cfg in config.get("fixtures", []):
+        if fx_cfg.get("type") == "rockwedge":
+            fixtures.append(RockWedge(
+                fixture_id=fx_cfg["id"],
+                name=fx_cfg["name"],
+                dmx_address=fx_cfg["dmx_address"],
+                lane=fx_cfg.get("lane", "room"),
+                group=fx_cfg.get("group", "all"),
+            ))
+    if not fixtures:
+        print("[ERROR] No fixtures found in rig_config.json")
+        sys.exit(1)
 
     # ---- DMX output ----
-    universe = DMXUniverse()
-
     if args.serial:
         try:
             dmx_out = EnttecProOutput()
@@ -191,6 +214,15 @@ def main():
     else:
         dmx_out = MockDMXOutput(verbose=args.verbose_dmx)
 
+    # ---- MIDI ----
+    midi_in = None
+    if MidiInput is not None:
+        midi_in = MidiInput(port_name=args.midi)
+        if midi_in.open():
+            print(f"[MIDI] Listening on: {MidiInput.list_ports()[:1]}")
+        else:
+            midi_in = None   # graceful degradation
+
     # ---- UI ----
     overlay = TerminalDebugOverlay()
     overlay.init_screen()
@@ -198,8 +230,11 @@ def main():
     # ---- keyboard thread ----
     kbd_thread = _start_keyboard()
 
+    # Sprint 2: WAU crossfade snapshot (captured at each mode switch)
+    _wau_snapshot = (0.0, 0.0, 0.0)
+
     last_bands = AudioBands()
-    last_lanes = {"impact": 0.0, "room": 0.0}
+    last_lanes: dict = {"impact": 0.0, "room": 0.0}
     quit_flag  = False
 
     try:
@@ -222,13 +257,44 @@ def main():
                     elif mode_key == "blackout":
                         safety.toggle_blackout()
                     else:
-                        current_mode    = get_mode(mode_key)
-                        current_palette = all_palettes.get(
-                            current_mode.palette_key, current_palette
+                        new_mode    = get_mode(mode_key)
+                        new_palette = all_palettes.get(
+                            new_mode.palette_key, current_palette
                         )
+                        _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                         last_lanes.get("wau_amber", 0.0),
+                                         last_lanes.get("wau_uv",    0.0))
+                        transitioner.switch(new_mode)
+                        current_mode    = new_mode
+                        current_palette = new_palette
                         safety.update_from_mode(current_mode)
                         room_lane.set_mode(current_mode)
                         room_lane.set_palette(current_palette)
+
+            # --- MIDI ---
+            if midi_in is not None:
+                for evt in midi_in.get_events():
+                    if evt.type == "mode":
+                        new_mode    = get_mode(evt.value)
+                        new_palette = all_palettes.get(new_mode.palette_key, current_palette)
+                        _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                         last_lanes.get("wau_amber", 0.0),
+                                         last_lanes.get("wau_uv",    0.0))
+                        transitioner.switch(new_mode)
+                        current_mode    = new_mode
+                        current_palette = new_palette
+                        safety.update_from_mode(current_mode)
+                        room_lane.set_mode(current_mode)
+                        room_lane.set_palette(current_palette)
+                    elif evt.type == "dimmer":
+                        pass  # TODO: route to master_dimmer
+                    elif evt.type == "blackout":
+                        if evt.value > 0.5:
+                            if not safety.state.blackout_active:
+                                safety.toggle_blackout()
+                        else:
+                            if safety.state.blackout_active:
+                                safety.toggle_blackout()
 
             if quit_flag:
                 break
@@ -242,8 +308,15 @@ def main():
 
             bands_dict = last_bands.as_dict()
 
+            # --- beat detection ---
+            beat_detected, beat_strength = beat_detector.update(
+                bands_dict.get("low_energy", 0.0)
+            )
+
             # --- smoothing ---
             last_lanes = smoother.update(bands_dict)
+            last_lanes["bpm"]  = beat_detector.bpm
+            last_lanes["beat"] = beat_detected
 
             # --- lane render ---
             room_out = room_lane.render(
@@ -252,35 +325,55 @@ def main():
                 safety=safety,
                 master_dimmer=1.0,
                 group_intensity=1.0,
+                beat_trigger=beat_detected,
             )
 
-            # --- fixture write ---
-            rockwedge.render_to_universe(
-                universe,
-                brightness=1.0,
-                hue=room_out.hsv.h,
-                saturation=room_out.hsv.s,
-                value=room_out.hsv.v,
-                strobe=room_out.strobe,
-            )
+            # --- Sprint 2: WAU crossfade ---
+            blend_t = transitioner.update()
+            if blend_t < 1.0:
+                sw, sa, su = _wau_snapshot
+                eff_white = sw + (room_out.white - sw) * blend_t
+                eff_amber = sa + (room_out.amber - sa) * blend_t
+                eff_uv    = su + (room_out.uv    - su) * blend_t
+            else:
+                eff_white, eff_amber, eff_uv = room_out.white, room_out.amber, room_out.uv
+
+            # Persist for next-frame snapshot
+            last_lanes["wau_white"] = eff_white
+            last_lanes["wau_amber"] = eff_amber
+            last_lanes["wau_uv"]    = eff_uv
+
+            # --- fixture write (all fixtures get same lane output) ---
+            for fixture in fixtures:
+                fixture.render_to_universe(
+                    universe,
+                    brightness=1.0,
+                    hue=room_out.hsv.h,
+                    saturation=room_out.hsv.s,
+                    value=room_out.hsv.v,
+                    strobe=room_out.strobe,
+                    white=eff_white,
+                    amber=eff_amber,
+                    uv=eff_uv,
+                )
 
             # --- DMX send ---
             dmx_out.send(universe)
 
-            # --- build RGB for overlay ---
+            # --- overlay prep ---
             h_norm = room_out.hsv.h / 360.0
             r_f, g_f, b_f = colorsys.hsv_to_rgb(
                 h_norm, room_out.hsv.s, room_out.hsv.v
             )
             rgb_out = (int(r_f * 255), int(g_f * 255), int(b_f * 255))
 
-            ch_labels   = rockwedge.get_channel_labels()
-            dmx_ch_vals = {
+            primary_fixture = fixtures[0]
+            ch_labels       = primary_fixture.get_channel_labels()
+            dmx_ch_vals     = {
                 label: universe.get_channel(ch)
                 for label, ch in ch_labels.items()
             }
 
-            # --- overlay render ---
             overlay.update(
                 device_name=device_label,
                 raw_bands=bands_dict,
@@ -295,8 +388,8 @@ def main():
                 rgb=rgb_out,
                 brightness_base=room_out.base_brightness,
                 brightness_pulse=room_out.pulse_brightness,
-                fixture_name=rockwedge.name,
-                dmx_address=rockwedge.dmx_address,
+                fixture_name=primary_fixture.name,
+                dmx_address=primary_fixture.dmx_address,
                 dmx_channels=dmx_ch_vals,
                 dmx_output_type=dmx_out.output_type,
                 safety_blackout=safety.state.blackout_active,
@@ -314,6 +407,8 @@ def main():
         pass
     finally:
         _stop_keyboard(kbd_thread)
+        if midi_in is not None:
+            midi_in.close()
         universe.blackout()
         dmx_out.send(universe)
         dmx_out.close()

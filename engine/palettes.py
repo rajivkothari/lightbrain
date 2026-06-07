@@ -161,11 +161,13 @@ class PaletteBlender:
         """Update hold time (takes effect at the next state transition)."""
         self._hold_ms = hold_ms
 
-    def update(self, energy: float = 0.5) -> HSVColor:
+    def update(self, energy: float = 0.5, beat_trigger: bool = False) -> HSVColor:
         """
         Advance the blend and return the current blended color.
 
-        energy — room energy 0.0–1.0 (wired in for future energy-triggered changes).
+        energy        — room energy 0.0–1.0 (wired in for energy-triggered changes).
+        beat_trigger  — Sprint 2: when True, immediately releases the hold phase for
+                        palettes with change_rule "energy_trigger" or "fast_beat".
 
         TODO Song Preview (Sprint 3): add optional `now: float = None` parameter.
         When now is provided (from AnalysisTimeline frame.time_s), use it instead
@@ -187,10 +189,16 @@ class PaletteBlender:
         t_ms = self._palette.transition_ms or 2000.0
 
         if self._state == _HOLDING:
-            self._hold_elapsed_ms += dt_ms
-            if self._hold_elapsed_ms >= self._hold_ms:
+            beat_release = (beat_trigger
+                            and self._palette.change_rule in ("energy_trigger", "fast_beat"))
+            if beat_release:
                 self._state   = _TRANSITIONING
                 self._blend_t = 0.0
+            else:
+                self._hold_elapsed_ms += dt_ms
+                if self._hold_elapsed_ms >= self._hold_ms:
+                    self._state   = _TRANSITIONING
+                    self._blend_t = 0.0
             c = colors[self._color_idx]
             return HSVColor(h=c.h, s=c.s, v=c.v, name=c.name)
 

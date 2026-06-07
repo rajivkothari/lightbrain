@@ -205,6 +205,13 @@ class TerminalDebugOverlay:
         lines.append(_lane("IMPACT", "impact"))
         lines.append(_lane("ROOM",   "room"))
 
+        # Sprint 2: beat detector BPM display
+        _bpm  = smoothed_lanes.get("bpm",  0.0)
+        _beat = bool(smoothed_lanes.get("beat", False))
+        beat_tag  = f" {FG_RED}●{RESET}" if _beat else f"  {DIM}·{RESET}"
+        bpm_str   = f"{_bpm:5.1f} BPM" if _bpm > 0 else " -- BPM"
+        lines.append(f"  {FG_WHITE}BEAT    {RESET}{beat_tag} {FG_YELLOW}{bpm_str}{RESET}")
+
         # ── Mode / palette ──────────────────────────────────────────────
         lines.append(_section("MODE / PALETTE"))
 

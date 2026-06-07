@@ -60,6 +60,9 @@ class RockWedge(FixtureBase):
         saturation: float = 1.0,   # 0.0–1.0
         value: float = 1.0,        # 0.0–1.0 (color value, separate from brightness)
         strobe: float = 0.0,       # 0.0–1.0 (0 = off)
+        white: float = 0.0,        # Sprint 2: Ch5 White  0.0–1.0
+        amber: float = 0.0,        # Sprint 2: Ch6 Amber  0.0–1.0
+        uv: float = 0.0,           # Sprint 2: Ch7 UV     0.0–1.0
         gamma: float = 2.2,
     ) -> None:
         """
@@ -68,8 +71,11 @@ class RockWedge(FixtureBase):
         brightness — overall dimmer (combined with HSV value)
         hue        — color hue 0–360
         saturation — color saturation 0.0–1.0
-        value      — color value from lane output (already has brightness baked in)
+        value      — color value from lane output (brightness baked in)
         strobe     — strobe intensity (always 0 in Sprint 1)
+        white      — white channel level 0.0–1.0 (palette-driven Sprint 2)
+        amber      — amber channel level 0.0–1.0 (palette-driven Sprint 2)
+        uv         — UV channel level 0.0–1.0 (palette-driven Sprint 2)
         """
         addr = self.dmx_address
         if addr + NUM_CHANNELS - 1 > 512:
@@ -97,7 +103,12 @@ class RockWedge(FixtureBase):
         g_dmx = apply_gamma_to_dmx(g_norm, gamma)
         b_dmx = apply_gamma_to_dmx(b_norm, gamma)
 
-        # Strobe: 0 in Sprint 1 (will use fixture-specific strobe table later)
+        # Sprint 2: White/Amber/UV channels driven by palette rules
+        white_dmx = apply_gamma_to_dmx(max(0.0, min(1.0, white)), gamma)
+        amber_dmx = apply_gamma_to_dmx(max(0.0, min(1.0, amber)), gamma)
+        uv_dmx    = apply_gamma_to_dmx(max(0.0, min(1.0, uv)),    gamma)
+
+        # Strobe: disabled in Sprint 1 (strobe table per fixture Sprint 2+)
         strobe_dmx = 0
 
         universe.set_channels(addr, [
@@ -105,9 +116,9 @@ class RockWedge(FixtureBase):
             r_dmx,        # Ch2 Red
             g_dmx,        # Ch3 Green
             b_dmx,        # Ch4 Blue
-            0,            # Ch5 White  — TODO palette-driven Sprint 2
-            0,            # Ch6 Amber  — TODO palette-driven Sprint 2
-            0,            # Ch7 UV     — TODO palette-driven Sprint 2
+            white_dmx,    # Ch5 White
+            amber_dmx,    # Ch6 Amber
+            uv_dmx,       # Ch7 UV
             strobe_dmx,   # Ch8 Strobe — disabled Sprint 1
         ])
 

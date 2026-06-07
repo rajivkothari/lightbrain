@@ -30,6 +30,10 @@ class RoomLaneOutput:
     raw_impact_energy: float
     base_brightness: float = 0.0   # brightness from mode mapping (before pulse)
     pulse_brightness: float = 0.0  # additive bass lift contribution
+    # Sprint 2: palette-driven channel levels (0.0–1.0, zeroed on blackout)
+    white: float = 0.0
+    amber: float = 0.0
+    uv: float = 0.0
 
 
 class RoomLane:
@@ -76,25 +80,37 @@ class RoomLane:
         safety: SafetyEngine,
         master_dimmer: float = 1.0,
         group_intensity: float = 1.0,
+        beat_trigger: bool = False,
     ) -> RoomLaneOutput:
         """Render one frame of Room Lane output."""
         mode  = self._mode
-        color = self._blender.update(energy=smoothed_room)
+        color = self._blender.update(energy=smoothed_room, beat_trigger=beat_trigger)
 
         if mode is not None:
             base_br = (mode.base_brightness
                        + smoothed_room * (mode.max_brightness - mode.base_brightness))
             pulse   = impact * mode.pulse_amount
             sat     = min(1.0, color.s * mode.saturation_scale)
+            # Sprint 2: compute WAU channel levels from mode parameters
+            white = min(1.0, mode.white_base
+                        + smoothed_room * mode.white_scale
+                        + impact * mode.white_impact)
+            amber = min(1.0, mode.amber_base + smoothed_room * mode.amber_scale)
+            uv    = min(1.0, mode.uv_base    + smoothed_room * mode.uv_scale)
         else:
             base_br = smoothed_room * self._FALLBACK_MAX + self._FALLBACK_BASE
             pulse   = impact * self._FALLBACK_PULSE
             sat     = min(1.0, color.s * self._FALLBACK_SAT)
+            white   = amber = uv = 0.0
 
         raw_brightness = min(1.0, base_br + pulse) * group_intensity
 
         safe_brightness, safe_strobe = safety.apply(raw_brightness)
         final_brightness = min(1.0, safe_brightness * master_dimmer)
+
+        # Blackout zeros WAU channels too
+        if safety.state.blackout_active:
+            white = amber = uv = 0.0
 
         output_color = HSVColor(
             h=color.h,
@@ -111,6 +127,9 @@ class RoomLane:
             raw_impact_energy=impact,
             base_brightness=base_br,
             pulse_brightness=pulse,
+            white=white,
+            amber=amber,
+            uv=uv,
         )
 
     # ------------------------------------------------------------------
