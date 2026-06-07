@@ -17,6 +17,19 @@ Enttec Pro frame format:
   [512 bytes]   — DMX channel data (channels 1–512)
   0xE7          — End of message
 
+Driver requirement — VCP, NOT D2XX
+------------------------------------
+This module uses pure pyserial over the OS Virtual COM Port (VCP) driver.
+The DMXking (FTDI chip) must be enumerated as a VCP device:
+  - Linux / Raspberry Pi: kernel ftdi_sio driver → /dev/ttyUSBx  (automatic)
+  - macOS: Apple FTDI kext or FTDI VCP driver  → /dev/cu.usbserial-*
+  - Windows: FTDI VCP driver (CDM) → COMx
+
+Do NOT install FTDI's proprietary D2XX driver — it replaces the VCP entry
+and makes the port unreachable to pyserial.  If the port disappears in
+Device Manager after installing an FTDI driver, switch the device back to
+VCP mode using FTDI's FT_Prog utility or by reinstalling the CDM VCP driver.
+
 Do NOT run test_dmxking_rockwedge.py without a DMX fixture connected
 and correctly addressed in the right channel mode.
 """
@@ -85,19 +98,31 @@ class EnttecProOutput:
         """
         Open the serial connection to the DMXking / Enttec Pro device.
 
+        Parameters are chosen for a plain VCP connection with no flow control:
+          - rtscts / dsrdtr / xonxoff all False: explicitly disables all three
+            flow-control modes so pyserial never toggles RTS/DTR lines or waits
+            for CTS/DSR.  FTDI VCP adapters don't need handshaking; leaving these
+            at their pyserial defaults can cause silent hangs on some platforms.
+          - write_timeout=0.1: caps blocking I/O time at 100ms.  A 518-byte
+            Enttec frame at 250 kbaud takes ~16ms; 100ms gives 6× headroom while
+            ensuring the DMX daemon thread never stalls indefinitely if the USB
+            cable is disconnected mid-write.
+
         Raises serial.SerialException if the port cannot be opened.
         """
-        self._port = port
+        self._port   = port
         self._serial = serial.Serial(
-            port=port,
-            baudrate=baud_rate,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_TWO,
-            timeout=1.0,
+            port          = port,
+            baudrate      = baud_rate,
+            bytesize      = serial.EIGHTBITS,
+            parity        = serial.PARITY_NONE,
+            stopbits      = serial.STOPBITS_TWO,
+            timeout       = 0,        # non-blocking reads (we never read)
+            write_timeout = 0.1,      # fail fast if USB stalls
+            rtscts        = False,    # no RTS/CTS hardware flow control
+            dsrdtr        = False,    # no DSR/DTR hardware flow control
+            xonxoff       = False,    # no XON/XOFF software flow control
         )
-        if not self._serial.is_open:
-            self._serial.open()
 
     def send(self, universe: DMXUniverse) -> None:
         """Send a DMX universe frame to the device."""
