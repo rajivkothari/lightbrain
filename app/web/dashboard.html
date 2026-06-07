@@ -134,11 +134,10 @@
     .btn-release { border-color: var(--amber); color: var(--amber); }
     .btn-release:hover { background: #1a1400; border-color: var(--amber); color: var(--amber); }
 
-    /* ---- Blackout overlay ---- */
-    #blackout-overlay {
-      display: none; position: fixed; inset: 0; background: #000; z-index: 999;
-      align-items: center; justify-content: center; flex-direction: column;
-      gap: 14px; cursor: pointer;
+    /* ---- Canvas blackout state ---- */
+    #rig-canvas.blacked-out {
+      border-color: #550000;
+      box-shadow: 0 0 0 1px #330000 inset;
     }
 
     /* ---- Scene editor ---- */
@@ -279,12 +278,6 @@
 
 </div>
 
-<!-- Blackout overlay -->
-<div id="blackout-overlay" onclick="cmd({type:'blackout'})">
-  <div style="color:#ff2222;font-size:2rem;font-family:monospace;letter-spacing:.3em">■ BLACKOUT</div>
-  <div style="color:#662222;font-size:.8rem;font-family:monospace">click to restore</div>
-</div>
-
 <script>
 // ============================================================
 // CANVAS VISUALIZER
@@ -376,6 +369,13 @@ function _drawRig(fixtures, blackout) {
     }
   }
   _drawLegend(ctx, s, W);
+  if (blackout) {
+    ctx.font = `bold ${Math.max(11, 14*s)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(180,20,20,0.7)';
+    ctx.fillText('■  BLACKOUT', W/2, H/2);
+    ctx.textAlign = 'left';
+  }
 }
 
 // Fixture housing colours — always drawn so the rig layout is visible even when dark
@@ -709,8 +709,7 @@ function applyState(s) {
   const bo = document.getElementById('blackout-btn');
   bo.classList.toggle('active', _blackoutActive);
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
-  const ov = document.getElementById('blackout-overlay');
-  ov.style.display = _blackoutActive ? 'flex' : 'none';
+  document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
 
   // Canvas — always draw regardless of active tab
   if (s.fixtures && Object.keys(s.fixtures).length) {
