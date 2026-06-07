@@ -2345,3 +2345,300 @@ class TestHybridIntegration:
             found = store.find_by_fingerprint(fp)
             assert found is not None
             assert found.settings.mode_key == "dinner"
+
+
+# =============================================================================
+# Sprint 6: Setlist Mode + Moving Head DMX
+# =============================================================================
+
+from data.setlist import Setlist, SetlistEntry, SetlistSummary
+from data.setlist_store import SetlistStore
+from fixtures.djflx_beam import DJFLXBeam, pan_degrees_to_dmx, dmx_to_pan_degrees, NUM_CHANNELS as BEAM_NUM_CHANNELS
+
+
+# ---------------------------------------------------------------------------
+# TestSetlist
+# ---------------------------------------------------------------------------
+
+class TestSetlist:
+    def test_create_assigns_uuid(self):
+        sl = Setlist.create("Friday Night")
+        assert len(sl.setlist_id) == 36
+        assert sl.name == "Friday Night"
+
+    def test_create_starts_empty(self):
+        sl = Setlist.create("Empty")
+        assert sl.entry_count() == 0
+        assert sl.entries == []
+
+    def test_add_entry_appends_and_numbers(self):
+        sl = Setlist.create("Show")
+        e1 = sl.add_entry("Track 1", song_fingerprint="fp1")
+        e2 = sl.add_entry("Track 2", song_fingerprint="fp2")
+        assert e1.position == 1
+        assert e2.position == 2
+        assert sl.entry_count() == 2
+
+    def test_add_entry_stores_fingerprint(self):
+        sl = Setlist.create("Show")
+        e = sl.add_entry("Song A", song_fingerprint="abc123", program_id="prog-1")
+        assert e.song_fingerprint == "abc123"
+        assert e.program_id == "prog-1"
+
+    def test_remove_entry_reduces_count(self):
+        sl = Setlist.create("Show")
+        e1 = sl.add_entry("T1"); e2 = sl.add_entry("T2")
+        ok = sl.remove_entry(e1.entry_id)
+        assert ok
+        assert sl.entry_count() == 1
+        assert sl.entries[0].entry_id == e2.entry_id
+
+    def test_remove_nonexistent_returns_false(self):
+        sl = Setlist.create("Show")
+        assert not sl.remove_entry("ghost-id")
+
+    def test_remove_renumbers(self):
+        sl = Setlist.create("Show")
+        e1 = sl.add_entry("T1"); sl.add_entry("T2"); sl.add_entry("T3")
+        sl.remove_entry(e1.entry_id)
+        assert all(e.position == i + 1 for i, e in enumerate(sl.entries))
+
+    def test_move_entry_up(self):
+        sl = Setlist.create("Show")
+        sl.add_entry("T1"); sl.add_entry("T2"); e3 = sl.add_entry("T3")
+        sl.move_entry(e3.entry_id, 1)
+        assert sl.entries[0].entry_id == e3.entry_id
+        assert sl.entries[0].position == 1
+        assert sl.entries[1].position == 2
+
+    def test_move_entry_down(self):
+        sl = Setlist.create("Show")
+        e1 = sl.add_entry("T1"); sl.add_entry("T2"); sl.add_entry("T3")
+        sl.move_entry(e1.entry_id, 3)
+        assert sl.entries[-1].entry_id == e1.entry_id
+        assert sl.entries[-1].position == 3
+
+    def test_move_nonexistent_returns_false(self):
+        sl = Setlist.create("Show")
+        assert not sl.move_entry("ghost", 1)
+
+    def test_find_by_fingerprint_hit(self):
+        sl = Setlist.create("Show")
+        sl.add_entry("Song A", song_fingerprint="fp_a")
+        found = sl.find_by_fingerprint("fp_a")
+        assert found is not None
+        assert found.name == "Song A"
+
+    def test_find_by_fingerprint_miss(self):
+        sl = Setlist.create("Show")
+        sl.add_entry("Song A", song_fingerprint="fp_a")
+        assert sl.find_by_fingerprint("fp_x") is None
+
+    def test_all_fingerprints(self):
+        sl = Setlist.create("Show")
+        sl.add_entry("A", song_fingerprint="fp1")
+        sl.add_entry("B", song_fingerprint="")     # no fingerprint
+        sl.add_entry("C", song_fingerprint="fp3")
+        fps = sl.all_fingerprints()
+        assert "fp1" in fps
+        assert "fp3" in fps
+        assert "" not in fps
+
+    def test_to_summary(self):
+        sl = Setlist.create("Show")
+        sl.add_entry("T1"); sl.add_entry("T2")
+        summary = sl.to_summary()
+        assert isinstance(summary, SetlistSummary)
+        assert summary.setlist_id == sl.setlist_id
+        assert summary.entry_count == 2
+
+    def test_update_entry_program(self):
+        sl = Setlist.create("Show")
+        e = sl.add_entry("T1", program_id="")
+        sl.update_entry_program(e.entry_id, "new-prog-id")
+        assert sl.entries[0].program_id == "new-prog-id"
+
+    def test_updated_at_bumped_on_add(self):
+        sl = Setlist.create("Show")
+        before = sl.updated_at
+        time.sleep(0.01)
+        sl.add_entry("T1")
+        assert sl.updated_at > before
+
+
+# ---------------------------------------------------------------------------
+# TestSetlistStore
+# ---------------------------------------------------------------------------
+
+class TestSetlistStore:
+    def _make_setlist(self, name="Test"):
+        sl = Setlist.create(name)
+        sl.add_entry("Track 1", song_fingerprint="fp1")
+        sl.add_entry("Track 2", song_fingerprint="fp2")
+        return sl
+
+    def test_save_creates_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            sl = self._make_setlist()
+            path = store.save(sl)
+            assert os.path.exists(path)
+
+    def test_load_roundtrip_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            sl = self._make_setlist("Saturday Night")
+            store.save(sl)
+            loaded = store.load(sl.setlist_id)
+            assert loaded.name == "Saturday Night"
+
+    def test_load_roundtrip_entries(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            sl = self._make_setlist()
+            store.save(sl)
+            loaded = store.load(sl.setlist_id)
+            assert len(loaded.entries) == 2
+            assert loaded.entries[0].song_fingerprint == "fp1"
+            assert loaded.entries[1].name == "Track 2"
+
+    def test_load_missing_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            with pytest.raises(FileNotFoundError):
+                store.load("no-such-id")
+
+    def test_list_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            assert SetlistStore(d).list_setlists() == []
+
+    def test_list_returns_summaries(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            store.save(self._make_setlist("Show 1"))
+            summaries = store.list_setlists()
+            assert len(summaries) == 1
+            assert isinstance(summaries[0], SetlistSummary)
+
+    def test_delete_removes_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            sl = self._make_setlist()
+            path = store.save(sl)
+            store.delete(sl.setlist_id)
+            assert not os.path.exists(path)
+            assert store.count() == 0
+
+    def test_delete_nonexistent_is_silent(self):
+        with tempfile.TemporaryDirectory() as d:
+            SetlistStore(d).delete("ghost-id")  # must not raise
+
+    def test_find_by_fingerprint_hit(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            sl = self._make_setlist()
+            store.save(sl)
+            result = store.find_by_fingerprint("fp1")
+            assert result is not None
+            found_sl, found_entry = result
+            assert found_entry.name == "Track 1"
+
+    def test_find_by_fingerprint_miss(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            store.save(self._make_setlist())
+            assert store.find_by_fingerprint("no-such-fp") is None
+
+    def test_count(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SetlistStore(d)
+            store.save(self._make_setlist("A"))
+            store.save(self._make_setlist("B"))
+            assert store.count() == 2
+
+
+# ---------------------------------------------------------------------------
+# TestDJFLXBeam
+# ---------------------------------------------------------------------------
+
+class TestDJFLXBeam:
+    def _make_fixture(self, address=201):
+        return DJFLXBeam(fixture_id="beam_l", name="Left Beam", dmx_address=address)
+
+    def _make_beam_state(self, angle=0.0, brt=0.8, rgb=(200, 100, 50),
+                          speed=0.5, active=True):
+        return BeamState(
+            fixture_id="beam_l", x=175.0, y=670.0,
+            color_rgb=rgb, brightness=brt,
+            angle_degrees=angle, length=400.0, spread=6.0,
+            movement_speed=speed, active=active,
+        )
+
+    def test_num_channels(self):
+        f = self._make_fixture()
+        assert f.num_channels == BEAM_NUM_CHANNELS
+        assert BEAM_NUM_CHANNELS == 10
+
+    def test_pan_centre_at_zero_degrees(self):
+        uni = DMXUniverse()
+        f = self._make_fixture(address=201)
+        f.render_to_universe(uni, self._make_beam_state(angle=0.0))
+        pan = uni.get_channel(201)
+        assert 124 <= pan <= 131   # ≈128
+
+    def test_pan_right_positive_angle(self):
+        uni = DMXUniverse()
+        f = self._make_fixture(address=201)
+        f.render_to_universe(uni, self._make_beam_state(angle=45.0))
+        pan = uni.get_channel(201)
+        assert pan > 160   # right of centre
+
+    def test_pan_left_negative_angle(self):
+        uni = DMXUniverse()
+        f = self._make_fixture(address=201)
+        f.render_to_universe(uni, self._make_beam_state(angle=-45.0))
+        pan = uni.get_channel(201)
+        assert pan < 100   # left of centre
+
+    def test_pan_clamped_at_extremes(self):
+        assert pan_degrees_to_dmx(-180) == 0
+        assert pan_degrees_to_dmx(180)  == 255
+
+    def test_dimmer_channel_reflects_brightness(self):
+        uni = DMXUniverse()
+        f = self._make_fixture(address=201)
+        # High brightness
+        f.render_to_universe(uni, self._make_beam_state(brt=1.0))
+        assert uni.get_channel(208) > 200   # Ch8 = dimmer
+        # Low brightness
+        uni2 = DMXUniverse()
+        f.render_to_universe(uni2, self._make_beam_state(brt=0.1))
+        assert uni2.get_channel(208) < uni.get_channel(208)
+
+    def test_color_channels_set(self):
+        uni = DMXUniverse()
+        f = self._make_fixture(address=201)
+        f.render_to_universe(uni, self._make_beam_state(rgb=(200, 100, 50)))
+        assert uni.get_channel(205) == 200  # Ch5 R
+        assert uni.get_channel(206) == 100  # Ch6 G
+        assert uni.get_channel(207) == 50   # Ch7 B
+
+    def test_inactive_zeros_dimmer(self):
+        uni = DMXUniverse()
+        f = self._make_fixture(address=201)
+        f.render_to_universe(uni, self._make_beam_state(brt=1.0, active=False))
+        assert uni.get_channel(208) == 0   # dimmer off when inactive
+
+    def test_speed_inverted(self):
+        uni_fast = DMXUniverse(); uni_slow = DMXUniverse()
+        f = self._make_fixture(address=201)
+        f.render_to_universe(uni_fast, self._make_beam_state(speed=1.0))  # fast
+        f.render_to_universe(uni_slow, self._make_beam_state(speed=0.0))  # slow
+        # Ch9 = speed: 0=fastest → low DMX, 1=slowest → high DMX (inverted)
+        assert uni_fast.get_channel(209) < uni_slow.get_channel(209)
+
+    def test_pan_round_trip_accuracy(self):
+        for deg in [-90, -45, 0, 45, 90]:
+            dmx  = pan_degrees_to_dmx(float(deg))
+            back = dmx_to_pan_degrees(dmx)
+            assert abs(back - deg) < 1.5, f"Round-trip error: {deg} → {dmx} → {back}"

@@ -51,10 +51,12 @@ from app.render.waveform   import WaveformDisplay
 
 from data.lighting_program import LightingProgram, compute_song_fingerprint
 from data.program_store    import ProgramStore
+from data.setlist_store    import SetlistStore as _SetlistStore
 
-ROOT         = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PALETTES_DIR = os.path.join(ROOT, "config", "palettes")
-PROGRAMS_DIR = os.path.join(ROOT, "data", "programs")
+ROOT          = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PALETTES_DIR  = os.path.join(ROOT, "config", "palettes")
+PROGRAMS_DIR  = os.path.join(ROOT, "data", "programs")
+SETLISTS_DIR  = os.path.join(ROOT, "data", "setlists")
 
 # Window dimensions: standard rig area + waveform strip
 WINDOW_W        = 1200
@@ -320,8 +322,9 @@ def main():
         print("[ERROR] No palettes found in config/palettes/")
         sys.exit(1)
 
-    store        = ProgramStore(PROGRAMS_DIR)
-    sample_rate  = 44100
+    store         = ProgramStore(PROGRAMS_DIR)
+    setlist_store = _SetlistStore(SETLISTS_DIR)
+    sample_rate   = 44100
     song_file_path = ""
 
     if args.file and not args.simulate:
@@ -341,6 +344,14 @@ def main():
     if _auto_match:
         print(f"[Preview] Auto-matched saved program: '{_auto_match.name}' "
               f"(mode={_auto_match.settings.mode_key if _auto_match.settings else '?'})")
+
+    # Setlist auto-detection: report track position if song is in any setlist
+    _fp_for_setlist = compute_song_fingerprint(audio, sample_rate)
+    _setlist_hit = setlist_store.find_by_fingerprint(_fp_for_setlist)
+    if _setlist_hit:
+        sl, sl_entry = _setlist_hit
+        print(f"[Preview] Setlist: '{sl.name}' — "
+              f"Track {sl_entry.position}/{sl.entry_count()}: {sl_entry.name}")
 
     current_mode = args.mode if args.mode in MODES else "open_dance"
     current_seed = args.seed

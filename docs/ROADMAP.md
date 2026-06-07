@@ -130,6 +130,21 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
+---
+
+## Phase 6 — Sprint 6: Setlist Mode + Moving Head DMX
+
+**Status: Complete — 298 tests passing**
+
+### Delivered
+
+- [x] `data/setlist.py` — `Setlist` + `SetlistEntry` + `SetlistSummary`; `add_entry`, `remove_entry`, `move_entry`, `find_by_fingerprint`, `update_entry_program`, `_renumber`; all mutations bump `updated_at`
+- [x] `data/setlist_store.py` — `SetlistStore`: JSON save/load/delete/list; index stores per-setlist fingerprint lists for fast `find_by_fingerprint` without loading full data
+- [x] `fixtures/djflx_beam.py` — 10-channel moving beam mapper; `BeamState.angle_degrees` → pan (±90° → 0–255 centre=128); brightness → gamma-corrected dimmer; RGB direct; movement_speed → inverted speed channel; inactive state zeros dimmer
+- [x] `scripts/test_song_preview.py` — setlist auto-detection on audio load; reports "Track N/M of '<setlist>'" when song fingerprint matches a saved setlist entry
+
+---
+
 ## Phase 5 — Advanced Future (Remaining Backlog)
 
 **Status: Research / Backlog**
@@ -184,3 +199,4 @@ Short version: same file + same mode + same settings + same seed = identical pre
 | 3 | 189 ✅ | OfflineAnalyzer, DeterministicEngine, determinism contract, PlaybackController |
 | 4 | 223 ✅ | LightingProgram save/load, fingerprinting, serialization roundtrip |
 | 5 | 261 ✅ | HybridEngine blend, Art-Net packet structure, auto song matching |
+| 6 | 298 ✅ | Setlist model/store, DJFLXBeam 10-ch pan/tilt mapper, setlist auto-detection |
