@@ -334,6 +334,14 @@ def main():
         print(f"[Preview] Generating {args.duration:.0f}s synthetic audio …")
         audio = _build_synthetic_audio(args.duration, sample_rate)
 
+    # Auto-match: check if we already have a saved program for this audio
+    _auto_match = store.find_by_fingerprint(
+        compute_song_fingerprint(audio, sample_rate)
+    )
+    if _auto_match:
+        print(f"[Preview] Auto-matched saved program: '{_auto_match.name}' "
+              f"(mode={_auto_match.settings.mode_key if _auto_match.settings else '?'})")
+
     current_mode = args.mode if args.mode in MODES else "open_dance"
     current_seed = args.seed
 
@@ -341,11 +349,22 @@ def main():
         audio, sample_rate, current_mode, current_seed, palettes
     )
 
+    # Use auto-matched program if found (override freshly-generated timeline)
+    if _auto_match:
+        if _auto_match.analysis_timeline:
+            analysis_tl = _auto_match.analysis_timeline
+        if _auto_match.fixture_state_timeline:
+            fx_tl = _auto_match.fixture_state_timeline
+        if _auto_match.settings:
+            current_settings = _auto_match.settings
+            current_mode     = _auto_match.settings.mode_key
+        current_seed = _auto_match.random_seed
+
     # ---- Pygame setup ----
     pygame.init()
     pygame.font.init()
     screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
-    pygame.display.set_caption("LightBrain Song Preview — Sprint 4")
+    pygame.display.set_caption("LightBrain Song Preview — Sprint 5")
     clock  = pygame.time.Clock()
 
     visualizer = Visualizer(WINDOW_W, WINDOW_H)

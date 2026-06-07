@@ -118,13 +118,25 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
-## Phase 5 — Advanced Future
+## Phase 5 — Sprint 5: Hybrid Playback + Art-Net Output + Auto Song Matching
+
+**Status: Complete — 261 tests passing**
+
+### Delivered
+
+- [x] `app/hybrid.py` — `HybridEngine`: blends a saved `FixtureStateTimeline` with the live audio engine output; blend=0→pure live, blend=1→pure program; `blend_rig_states()` lerps all scalar and RGB fields, handles mismatched fixture counts, propagates blackout from either source
+- [x] `dmx/output_artnet.py` — Art-Net 4 ArtDmx UDP output; configurable unicast/broadcast target IP and 15-bit universe; compliant packet layout (spec §9.1); `connect()`/`disconnect()` lifecycle + context manager
+- [x] Auto song matching in `scripts/test_song_preview.py` — on file load, SHA-256 fingerprint is checked against `ProgramStore`; matching program auto-loads (timelines + settings) before showing the visualizer
+
+---
+
+## Phase 5 — Advanced Future (Remaining Backlog)
 
 **Status: Research / Backlog**
 
 ### Intelligence
 
-- [ ] Song fingerprint library — auto-match loaded song to saved program
+- [ ] Song fingerprint library — auto-match loaded song to saved program (basic version shipped in Sprint 5)
 - [ ] Auto-detected preferred lighting profiles per song/genre
 - [ ] Energy curve normalization across songs (so Banger always hits at the right level)
 - [ ] Crowd/venue adaptation (ambient light sensor, crowd noise gate)
@@ -171,3 +183,4 @@ Short version: same file + same mode + same settings + same seed = identical pre
 | 2 | 143 ✅ | Beat detection, WAU channels, MIDI, ModeTransitioner |
 | 3 | 189 ✅ | OfflineAnalyzer, DeterministicEngine, determinism contract, PlaybackController |
 | 4 | 223 ✅ | LightingProgram save/load, fingerprinting, serialization roundtrip |
+| 5 | 261 ✅ | HybridEngine blend, Art-Net packet structure, auto song matching |

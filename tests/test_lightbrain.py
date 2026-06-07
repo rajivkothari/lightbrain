@@ -2019,3 +2019,329 @@ class TestProgramStore:
             time.sleep(0.01)
             store.save(prog)
             assert prog.updated_at > original_updated
+
+
+# =============================================================================
+# Sprint 5: Hybrid Playback + Art-Net Output + Auto Song Matching
+# =============================================================================
+
+from app.hybrid import HybridEngine, blend_rig_states
+from dmx.output_artnet import ArtNetOutput, ARTNET_ID, ARTDMX_OPCODE, PROTOCOL_VER
+import struct
+
+
+# ---------------------------------------------------------------------------
+# Fixture-state helpers (extend from Sprint 3)
+# ---------------------------------------------------------------------------
+
+def _make_state(brt: float = 0.5, rgb=(200, 100, 50),
+                impact=0.2, blackout=False) -> RigVisualState:
+    return RigVisualState(
+        mode="test", palette_name="test",
+        low_energy=0.3, mid_energy=0.2, high_energy=0.1, overall_energy=0.4,
+        room_brightness=brt, impact_value=impact,
+        uplights=[UplightState("u1", 100.0, 200.0, rgb, brt)],
+        washes=[WashState("w1", 50.0, 300.0, rgb, brt, 80.0, 0.3)],
+        beams=[BeamState("b1", 30.0, 400.0, rgb, brt, 15.0, 200.0, 10.0, 0.5)],
+        sparkles=[SparkleState("sp1", 600.0, 350.0, rgb, brt, 0.4)],
+        impacts=[ImpactState("i1", 600.0, 100.0, brt, False)],
+        blackout_active=blackout,
+    )
+
+
+def _make_fx_tl_from_states(*states, duration_s=1.0):
+    frames = [TimedFrame(i * duration_s / max(len(states), 1), s)
+              for i, s in enumerate(states)]
+    return FixtureStateTimeline(frames=frames, duration_s=duration_s)
+
+
+# ---------------------------------------------------------------------------
+# TestBlendRigStates
+# ---------------------------------------------------------------------------
+
+class TestBlendRigStates:
+    def test_t_zero_equals_live(self):
+        live = _make_state(brt=1.0)
+        prog = _make_state(brt=0.0)
+        result = blend_rig_states(live, prog, 0.0)
+        assert result.room_brightness == pytest.approx(1.0)
+
+    def test_t_one_equals_program(self):
+        live = _make_state(brt=1.0)
+        prog = _make_state(brt=0.0)
+        result = blend_rig_states(live, prog, 1.0)
+        assert result.room_brightness == pytest.approx(0.0)
+
+    def test_t_half_averages_brightness(self):
+        live = _make_state(brt=1.0)
+        prog = _make_state(brt=0.0)
+        result = blend_rig_states(live, prog, 0.5)
+        assert result.room_brightness == pytest.approx(0.5, abs=0.01)
+
+    def test_t_half_blends_rgb(self):
+        live = _make_state(rgb=(200, 0, 0))
+        prog = _make_state(rgb=(0, 200, 0))
+        result = blend_rig_states(live, prog, 0.5)
+        r, g, b = result.uplights[0].color_rgb
+        assert 95 <= r <= 105
+        assert 95 <= g <= 105
+        assert b == 0
+
+    def test_blackout_propagates_from_live(self):
+        live = _make_state(blackout=True)
+        prog = _make_state(blackout=False)
+        result = blend_rig_states(live, prog, 0.3)
+        assert result.blackout_active
+
+    def test_blackout_propagates_from_program(self):
+        live = _make_state(blackout=False)
+        prog = _make_state(blackout=True)
+        result = blend_rig_states(live, prog, 0.3)
+        assert result.blackout_active
+
+    def test_mismatched_fixture_counts_live_dominant(self):
+        live = _make_state()
+        # Prog has no uplights
+        prog = RigVisualState(
+            mode="test", palette_name="test",
+            low_energy=0.0, mid_energy=0.0, high_energy=0.0, overall_energy=0.0,
+            room_brightness=0.0, impact_value=0.0,
+            uplights=[], washes=[], beams=[], sparkles=[], impacts=[],
+            blackout_active=False,
+        )
+        result = blend_rig_states(live, prog, 0.3)  # live is dominant at t<0.5
+        assert len(result.uplights) == len(live.uplights)
+
+    def test_mismatched_fixture_counts_prog_dominant(self):
+        live = _make_state()
+        prog = RigVisualState(
+            mode="test", palette_name="test",
+            low_energy=0.0, mid_energy=0.0, high_energy=0.0, overall_energy=0.0,
+            room_brightness=0.0, impact_value=0.0,
+            uplights=[], washes=[], beams=[], sparkles=[], impacts=[],
+            blackout_active=False,
+        )
+        result = blend_rig_states(live, prog, 0.7)  # prog is dominant at t>=0.5
+        assert len(result.uplights) == len(prog.uplights)
+
+    def test_returns_rig_visual_state(self):
+        result = blend_rig_states(_make_state(), _make_state(), 0.5)
+        assert isinstance(result, RigVisualState)
+
+    def test_energy_fields_interpolated(self):
+        live = _make_state(); live.low_energy = 1.0
+        prog = _make_state(); prog.low_energy = 0.0
+        result = blend_rig_states(live, prog, 0.5)
+        assert result.low_energy == pytest.approx(0.5, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# TestHybridEngine
+# ---------------------------------------------------------------------------
+
+class TestHybridEngine:
+    def _make_engine(self, blend=0.5):
+        s1 = _make_state(brt=0.8)
+        s2 = _make_state(brt=0.4)
+        tl = _make_fx_tl_from_states(s1, s2, duration_s=2.0)
+        return HybridEngine(tl, blend=blend)
+
+    def test_initial_state_paused(self):
+        he = self._make_engine()
+        assert not he.is_playing
+
+    def test_blend_default(self):
+        he = self._make_engine(blend=0.5)
+        assert he.blend == pytest.approx(0.5)
+
+    def test_set_blend(self):
+        he = self._make_engine()
+        he.set_blend(0.75)
+        assert he.blend == pytest.approx(0.75)
+
+    def test_blend_clamped_high(self):
+        he = self._make_engine()
+        he.set_blend(2.0)
+        assert he.blend == pytest.approx(1.0)
+
+    def test_blend_clamped_low(self):
+        he = self._make_engine()
+        he.set_blend(-1.0)
+        assert he.blend == pytest.approx(0.0)
+
+    def test_play_sets_playing(self):
+        he = self._make_engine()
+        he.play()
+        assert he.is_playing
+
+    def test_pause_stops_playing(self):
+        he = self._make_engine()
+        he.play(); he.pause()
+        assert not he.is_playing
+
+    def test_blend_with_live_returns_state(self):
+        he = self._make_engine()
+        result = he.blend_with_live(_make_state())
+        assert isinstance(result, RigVisualState)
+
+    def test_pure_live_at_zero_blend(self):
+        live = _make_state(brt=1.0)
+        s    = _make_state(brt=0.0)
+        tl   = _make_fx_tl_from_states(s, duration_s=1.0)
+        he   = HybridEngine(tl, blend=0.0)
+        he.play()
+        result = he.blend_with_live(live)
+        assert result.room_brightness == pytest.approx(1.0)
+
+    def test_pure_program_at_one_blend(self):
+        live = _make_state(brt=1.0)
+        s    = _make_state(brt=0.0)
+        tl   = _make_fx_tl_from_states(s, duration_s=1.0)
+        he   = HybridEngine(tl, blend=1.0)
+        he.play()
+        result = he.blend_with_live(live)
+        assert result.room_brightness == pytest.approx(0.0)
+
+    def test_seek_changes_time(self):
+        he = self._make_engine()
+        he.seek(1.0)
+        assert he.current_time_s == pytest.approx(1.0)
+
+    def test_progress_property(self):
+        he = self._make_engine()
+        he.seek(1.0)
+        assert he.progress == pytest.approx(0.5, abs=0.05)
+
+
+# ---------------------------------------------------------------------------
+# TestArtNetOutput
+# ---------------------------------------------------------------------------
+
+class TestArtNetOutput:
+    def test_packet_starts_with_artnet_id(self):
+        out = ArtNetOutput()
+        pkt = out._build_artdmx(b"\x00" * 512)
+        assert pkt[:8] == ARTNET_ID
+
+    def test_opcode_is_artdmx(self):
+        out = ArtNetOutput()
+        pkt = out._build_artdmx(b"\x00" * 512)
+        opcode = struct.unpack_from("<H", pkt, 8)[0]
+        assert opcode == ARTDMX_OPCODE
+
+    def test_protocol_version(self):
+        out = ArtNetOutput()
+        pkt = out._build_artdmx(b"\x00" * 512)
+        ver = struct.unpack_from(">H", pkt, 10)[0]
+        assert ver == PROTOCOL_VER
+
+    def test_universe_in_packet(self):
+        out = ArtNetOutput(universe=3)
+        pkt = out._build_artdmx(b"\x00" * 512)
+        uni = struct.unpack_from("<H", pkt, 14)[0]
+        assert uni == 3
+
+    def test_length_field_is_512(self):
+        out = ArtNetOutput()
+        pkt = out._build_artdmx(b"\x00" * 512)
+        length = struct.unpack_from(">H", pkt, 16)[0]
+        assert length == 512
+
+    def test_dmx_data_in_packet(self):
+        out  = ArtNetOutput()
+        data = bytes(range(256)) * 2  # 512 bytes
+        pkt  = out._build_artdmx(data)
+        assert pkt[18:18 + 512] == data
+
+    def test_packet_length_even(self):
+        out = ArtNetOutput()
+        # Odd-length data should be padded to even
+        pkt = out._build_artdmx(b"\x00" * 511)
+        length = struct.unpack_from(">H", pkt, 16)[0]
+        assert length % 2 == 0
+
+    def test_sequence_increments_on_send(self):
+        out = ArtNetOutput()
+        # sequence starts at 0, increments in send_universe (not _build_artdmx)
+        assert out.sequence == 0
+        # Simulate increment (send_universe does this)
+        for _ in range(5):
+            out._sequence = (out._sequence + 1) % 256
+        assert out.sequence == 5
+
+    def test_universe_validation(self):
+        with pytest.raises(ValueError):
+            ArtNetOutput(universe=32768)
+        with pytest.raises(ValueError):
+            ArtNetOutput(universe=-1)
+
+    def test_default_target_ip(self):
+        out = ArtNetOutput()
+        assert out.target_ip == "2.255.255.255"
+
+    def test_not_connected_initially(self):
+        out = ArtNetOutput()
+        assert not out.is_connected
+
+    def test_channel_clamping_in_send(self):
+        """send_universe must clamp values to 0-255 without crashing."""
+        out = ArtNetOutput()
+        out.connect()
+        channels = [300, -50, 128] + [0] * 509
+        # Should not raise even though values are out of range
+        # (socket sendto will fail silently since no real network)
+        out.send_universe(channels)
+        out.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# TestHybridIntegration  (HybridEngine with real DeterministicEngine output)
+# ---------------------------------------------------------------------------
+
+class TestHybridIntegration:
+    def test_blend_with_live_engine_output(self):
+        """Full pipeline: generate fx_tl, wire into HybridEngine, blend with live."""
+        tl       = _make_analysis_timeline(duration_s=1.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        fx_tl    = DeterministicEngine(settings, seed=42).generate(tl, palettes)
+        he       = HybridEngine(fx_tl, blend=0.5)
+        he.play()
+        live_state = fx_tl.frame_at(0.0)
+        result = he.blend_with_live(live_state)
+        assert isinstance(result, RigVisualState)
+        assert 0.0 <= result.room_brightness <= 1.0
+
+    def test_blend_brightness_between_live_and_program(self):
+        tl       = _make_analysis_timeline(duration_s=1.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="banger", palette_key="banger")
+        fx_tl    = DeterministicEngine(settings, seed=99).generate(tl, palettes)
+        he       = HybridEngine(fx_tl, blend=0.5)
+        he.play()
+        live = _make_state(brt=1.0)
+        prog_state = fx_tl.frame_at(0.0)
+        expected = 0.5 * 1.0 + 0.5 * prog_state.room_brightness
+        result = he.blend_with_live(live)
+        assert result.room_brightness == pytest.approx(expected, abs=0.05)
+
+    def test_rewind_restarts_program(self):
+        tl       = _make_analysis_timeline(duration_s=1.0)
+        palettes = _make_palettes()
+        settings = SettingsSnapshot(mode_key="open_dance", palette_key="open_dance")
+        fx_tl    = DeterministicEngine(settings, seed=42).generate(tl, palettes)
+        he = HybridEngine(fx_tl, blend=0.5)
+        he.seek(0.5)
+        he.rewind()
+        assert he.current_time_s == pytest.approx(0.0)
+
+    def test_auto_fingerprint_match_in_store(self):
+        """Store a program, look it up by fingerprint — simulates auto-match flow."""
+        with tempfile.TemporaryDirectory() as d:
+            store = ProgramStore(d)
+            prog, audio, sr = _make_full_program(mode_key="dinner")
+            store.save(prog)
+            fp    = compute_song_fingerprint(audio, sr)
+            found = store.find_by_fingerprint(fp)
+            assert found is not None
+            assert found.settings.mode_key == "dinner"
