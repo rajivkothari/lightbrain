@@ -288,89 +288,155 @@ function _drawRig(fixtures, blackout) {
   ctx.fillText('DJ', (BL+BR)/2*s, (BT+(BB-BT)*0.6)*s);
   ctx.textAlign = 'left';
 
-  if (blackout || !fixtures) return;
+  // Always draw fixture housings so the rig layout is visible even in blackout
+  if (fixtures) {
+    (fixtures.beams    || []).forEach(b => _drawBeam(ctx, b, s));
+    (fixtures.washes   || []).forEach(w => _drawWash(ctx, w, s));
+    (fixtures.uplights || []).forEach(u => _drawUplight(ctx, u, s));
+    if (!blackout) {
+      (fixtures.sparkles || []).forEach(sp => _drawSparkle(ctx, sp, s));
+      (fixtures.impacts  || []).forEach(im => _drawImpact(ctx, im, s, W, H));
+    }
+  }
+  _drawLegend(ctx, s, W);
+}
 
-  // Draw order: beams → washes → uplights → sparkles → impacts
-  (fixtures.beams    || []).forEach(b => _drawBeam(ctx, b, s));
-  (fixtures.washes   || []).forEach(w => _drawWash(ctx, w, s));
-  (fixtures.uplights || []).forEach(u => _drawUplight(ctx, u, s));
-  (fixtures.sparkles || []).forEach(sp => _drawSparkle(ctx, sp, s));
-  (fixtures.impacts  || []).forEach(im => _drawImpact(ctx, im, s, W, H));
+// Fixture housing colours — always drawn so the rig layout is visible even when dark
+const _H_OFF = 'rgba(55,55,95,0.8)';   // inactive housing stroke
+const _H_ON  = 'rgba(150,150,210,0.5)'; // active housing stroke
+
+function _fixtureLabel(ctx, text, x, y, s, active) {
+  ctx.font = `${Math.max(7, Math.round(9*s))}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = active ? 'rgba(170,170,220,0.85)' : 'rgba(60,60,100,0.65)';
+  ctx.fillText(text, x, y);
+  ctx.textAlign = 'left';
 }
 
 function _drawUplight(ctx, u, s) {
-  const x = u.x*s, y = u.y*s, r = 11*s;
-  if (!u.active || u.brt < 0.01) {
-    ctx.fillStyle = '#111120';
-    ctx.beginPath(); ctx.arc(x, y, r*0.5, 0, Math.PI*2); ctx.fill();
-    return;
-  }
-  const [R,G,B] = u.rgb, a = u.brt;
-  const g1 = ctx.createRadialGradient(x, y, 0, x, y, r*3.5);
-  g1.addColorStop(0, `rgba(${R},${G},${B},${(a*0.5).toFixed(2)})`);
+  const x = u.x*s, y = u.y*s, r = 10*s;
+  const on = u.active && u.brt > 0.02;
+  // Housing: small square bracket on the wall
+  ctx.strokeStyle = on ? _H_ON : _H_OFF;
+  ctx.lineWidth = Math.max(0.5, 1.2*s);
+  const hw = r * 0.65;
+  ctx.strokeRect(x - hw, y - hw, hw*2, hw*2);
+  if (!on) return;
+  const [R,G,B] = u.rgb, a = Math.max(0.3, u.brt);
+  const g1 = ctx.createRadialGradient(x, y, 0, x, y, r*4.5);
+  g1.addColorStop(0, `rgba(${R},${G},${B},${(a*0.55).toFixed(2)})`);
   g1.addColorStop(1, `rgba(${R},${G},${B},0)`);
   ctx.fillStyle = g1;
-  ctx.beginPath(); ctx.arc(x, y, r*3.5, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = `rgba(${Math.min(255,R+80)},${Math.min(255,G+80)},${Math.min(255,B+80)},${a})`;
+  ctx.beginPath(); ctx.arc(x, y, r*4.5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = `rgba(${Math.min(255,R+90)},${Math.min(255,G+90)},${Math.min(255,B+90)},${(a*0.95).toFixed(2)})`;
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
 }
 
 function _drawWash(ctx, w, s) {
-  if (!w.active || w.brt < 0.01) return;
   const x = w.x*s, y = w.y*s;
-  const r = (w.radius + w.pulse*60)*s;
-  const [R,G,B] = w.rgb;
-  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-  g.addColorStop(0, `rgba(${R},${G},${B},${(w.brt*0.35).toFixed(2)})`);
-  g.addColorStop(1, `rgba(${R},${G},${B},0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  const on = w.active && w.brt > 0.01;
+  const isGigbar = w.id === 'gigbar_wash';
+  const fr = (isGigbar ? 10 : 12) * s;
+  // Housing: concentric double ring
+  ctx.strokeStyle = on ? _H_ON : _H_OFF;
+  ctx.lineWidth = Math.max(1, 1.5*s);
+  ctx.beginPath(); ctx.arc(x, y, fr,      0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, fr*0.45, 0, Math.PI*2); ctx.stroke();
+  if (on) {
+    const brt = Math.max(0.2, w.brt);
+    const r = (w.radius + w.pulse * 70) * s;
+    const [R,G,B] = w.rgb;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0,   `rgba(${R},${G},${B},${(brt*0.5).toFixed(2)})`);
+    g.addColorStop(0.4, `rgba(${R},${G},${B},${(brt*0.2).toFixed(2)})`);
+    g.addColorStop(1,   `rgba(${R},${G},${B},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  }
+  const lbl = isGigbar ? 'GIGBAR' : (w.id === 'wash_00' ? 'WASH L' : 'WASH R');
+  _fixtureLabel(ctx, lbl, x, y + fr + 11*s, s, on);
 }
 
 function _drawBeam(ctx, b, s) {
-  if (!b.active || b.brt < 0.01) return;
   const ox = b.x*s, oy = b.y*s;
-  const rad = b.angle * Math.PI / 180;
-  const len = b.length*s;
-  const halfSpread = Math.tan(b.spread * Math.PI/180) * len;
-  const dx = Math.sin(rad), dy = -Math.cos(rad);   // direction (up=negative y)
-  const tx = ox + dx*len,   ty = oy + dy*len;
-  const px = -dy, py = dx;   // perpendicular
-  const [R,G,B] = b.rgb;
-  const g = ctx.createLinearGradient(ox, oy, tx, ty);
-  g.addColorStop(0, `rgba(${R},${G},${B},${(b.brt*0.8).toFixed(2)})`);
-  g.addColorStop(1, `rgba(${R},${G},${B},0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.moveTo(ox, oy);
-  ctx.lineTo(tx - px*halfSpread, ty - py*halfSpread);
-  ctx.lineTo(tx + px*halfSpread, ty + py*halfSpread);
-  ctx.closePath(); ctx.fill();
+  const on = b.active && b.brt > 0.01;
+  // Mount bar (horizontal truss)
+  ctx.strokeStyle = on ? 'rgba(110,110,170,0.55)' : 'rgba(40,40,70,0.5)';
+  ctx.lineWidth = Math.max(2, 3*s);
+  ctx.beginPath(); ctx.moveTo(ox - 18*s, oy); ctx.lineTo(ox + 18*s, oy); ctx.stroke();
+  // Pivot head (double-ring)
+  ctx.strokeStyle = on ? _H_ON : _H_OFF;
+  ctx.lineWidth = Math.max(1, 1.5*s);
+  const pr = 8*s;
+  ctx.beginPath(); ctx.arc(ox, oy, pr,      0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(ox, oy, pr*0.38, 0, Math.PI*2); ctx.stroke();
+  if (on) {
+    const rad = b.angle * Math.PI / 180;
+    const len = b.length * s;
+    const halfSpread = Math.tan(b.spread * Math.PI / 180) * len;
+    const dx = Math.sin(rad), dy = -Math.cos(rad);
+    const tx = ox + dx*len, ty = oy + dy*len;
+    const px = -dy, py = dx;
+    const [R,G,B] = b.rgb;
+    const brt = Math.max(0.4, b.brt);
+    const g = ctx.createLinearGradient(ox, oy, tx, ty);
+    g.addColorStop(0,   `rgba(${R},${G},${B},${(brt*0.92).toFixed(2)})`);
+    g.addColorStop(0.55,`rgba(${R},${G},${B},${(brt*0.35).toFixed(2)})`);
+    g.addColorStop(1,   `rgba(${R},${G},${B},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(tx - px*halfSpread, ty - py*halfSpread);
+    ctx.lineTo(tx + px*halfSpread, ty + py*halfSpread);
+    ctx.closePath(); ctx.fill();
+  }
+  const lbl = b.id === 'beam_l' ? 'BEAM L' : 'BEAM R';
+  _fixtureLabel(ctx, lbl, ox, oy + pr + 13*s, s, on);
 }
 
 function _drawSparkle(ctx, sp, s) {
   if (!sp.active || sp.amount < 0.05) return;
   const cx = sp.x*s, cy = sp.y*s;
   const [R,G,B] = sp.rgb;
-  const count = Math.floor(sp.amount * 25);
-  const rad = 70*s;
-  const t = Math.floor(Date.now() / 120);   // slow-scroll seed
-  ctx.fillStyle = `rgba(${R},${G},${B},0.85)`;
+  const count = Math.floor(sp.amount * 30);
+  const rad = 75*s;
+  const t = Math.floor(Date.now() / 120);
+  ctx.fillStyle = `rgba(${R},${G},${B},0.9)`;
   for (let i = 0; i < count; i++) {
     const h1 = Math.imul(i*2654435761 + t, 0x9e3779b9) >>> 0;
     const h2 = Math.imul(i*1013904223 + t, 0x6c62272e) >>> 0;
     const angle = (h1 % 1000) / 1000 * Math.PI * 2;
     const dist  = (h2 % 1000) / 1000 * rad;
     ctx.beginPath();
-    ctx.arc(cx + Math.cos(angle)*dist, cy + Math.sin(angle)*dist, 2*s, 0, Math.PI*2);
+    ctx.arc(cx + Math.cos(angle)*dist, cy + Math.sin(angle)*dist, Math.max(1.5, 2*s), 0, Math.PI*2);
     ctx.fill();
   }
 }
 
 function _drawImpact(ctx, im, s, W, H) {
   if (!im.flash || im.brt < 0.05) return;
-  ctx.fillStyle = `rgba(255,255,255,${(im.brt*0.25).toFixed(2)})`;
+  ctx.fillStyle = `rgba(255,255,255,${(im.brt*0.28).toFixed(2)})`;
   ctx.fillRect(0, 0, W, H);
+}
+
+function _drawLegend(ctx, s, W) {
+  const lh = Math.max(9, 10*s);
+  const x0 = W - 90*s, y0 = 10*s;
+  ctx.font = `${lh}px monospace`;
+  ctx.fillStyle = 'rgba(60,60,100,0.7)';
+  ctx.fillRect(x0 - 6*s, y0 - lh, 84*s, lh*5.4);
+  const items = [
+    ['□', 'Uplight (×18)'],
+    ['⊚', 'Wash / GigBAR'],
+    ['◎', 'Moving Beam'],
+    ['·', 'Derby Sparkle'],
+  ];
+  items.forEach(([icon, label], i) => {
+    ctx.fillStyle = 'rgba(100,100,160,0.9)';
+    ctx.fillText(icon, x0, y0 + i*lh*1.3);
+    ctx.fillStyle = 'rgba(110,110,150,0.8)';
+    ctx.fillText(label, x0 + 12*s, y0 + i*lh*1.3);
+  });
 }
 
 // ============================================================
