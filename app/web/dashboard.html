@@ -22,15 +22,19 @@
       background: var(--bg);
       color: var(--text);
       font-family: 'Courier New', Courier, monospace;
-      min-height: 100vh;
-      padding: 12px;
+      height: 100vh;
+      overflow: hidden;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
     }
 
     /* ---- Header ---- */
     .header {
       display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-      padding-bottom: 10px; margin-bottom: 10px;
+      padding-bottom: 8px; margin-bottom: 8px;
       border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
     }
     .logo { font-size: 1rem; font-weight: bold; letter-spacing: 0.25em; color: var(--accent); }
     .bpm  { font-size: 1.3rem; font-weight: bold; color: var(--green); min-width: 85px; transition: color 0.08s; }
@@ -39,33 +43,70 @@
            background: var(--dim); margin-right: 4px; vertical-align: middle; }
     .dot.ok { background: var(--green); } .dot.err { background: var(--red); }
 
+    /* ---- Two-column main layout ---- */
+    .main-layout {
+      display: flex;
+      gap: 12px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ---- Left panel: tabs + content ---- */
+    .left-panel {
+      width: 390px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    /* ---- Right panel: canvas, always visible ---- */
+    .right-panel {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+
     /* ---- Tabs ---- */
-    .tabs { display: flex; gap: 2px; margin-bottom: 12px; }
+    .tabs { display: flex; gap: 2px; margin-bottom: 8px; flex-shrink: 0; }
     .tab {
       background: var(--surface); border: 1px solid var(--border);
       color: var(--dim); font-family: inherit; font-size: 0.78rem;
-      padding: 7px 18px; cursor: pointer; border-radius: 4px 4px 0 0;
+      padding: 6px 16px; cursor: pointer; border-radius: 4px 4px 0 0;
     }
     .tab.active { background: var(--card); border-bottom-color: var(--card); color: var(--text); }
 
-    /* ---- Canvas ---- */
-    #rig-canvas {
-      display: block; width: 100%; max-width: 100%;
-      border: 1px solid var(--border); border-radius: 4px;
-      background: #080810; margin-bottom: 12px;
+    /* ---- Tab content panes ---- */
+    .tab-pane {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
     }
 
-    /* ---- Controls row ---- */
-    .controls-row { display: flex; gap: 12px; flex-wrap: wrap; }
-    .ctrl-col { flex: 1; min-width: 200px; }
+    /* ---- Canvas ---- */
+    #rig-canvas {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1200 / 800;
+      max-height: calc(100vh - 70px);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #080810;
+    }
+
+    /* ---- Controls row (live tab) ---- */
+    .controls-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .ctrl-col { flex: 1; min-width: 160px; }
 
     /* ---- Section ---- */
-    .section { margin-bottom: 14px; }
+    .section { margin-bottom: 12px; }
     .section-label { font-size: 0.67rem; text-transform: uppercase;
                      letter-spacing: 0.18em; color: var(--dim); margin-bottom: 7px; }
 
     /* ---- Energy bars ---- */
-    .bars { display: flex; flex-direction: column; gap: 6px; }
+    .bars { display: flex; flex-direction: column; gap: 5px; }
     .bar-row { display: flex; align-items: center; gap: 8px; }
     .bar-label { width: 52px; font-size: 0.68rem; color: var(--dim); text-align: right; }
     .bar-bg { flex: 1; height: 9px; background: var(--surface);
@@ -77,19 +118,19 @@
     .bar-fill.overall { background: linear-gradient(90deg, #cc4400, #ff8844); }
 
     /* ---- Buttons ---- */
-    .grid { display: flex; flex-wrap: wrap; gap: 6px; }
+    .grid { display: flex; flex-wrap: wrap; gap: 5px; }
     .btn {
       background: var(--card); border: 1px solid var(--border); color: var(--text);
-      font-family: inherit; font-size: 0.75rem; padding: 9px 10px;
+      font-family: inherit; font-size: 0.75rem; padding: 8px 9px;
       cursor: pointer; border-radius: 4px; text-align: center;
-      transition: background 0.12s, border-color 0.12s; line-height: 1.3; min-width: 110px;
+      transition: background 0.12s, border-color 0.12s; line-height: 1.3; min-width: 100px;
     }
     .btn:hover  { background: #1c1c34; border-color: var(--accent); }
     .btn:active { transform: scale(0.97); }
     .btn.active { background: #181838; border-color: var(--accent); color: #8888ff; }
     .btn .shortcut { display: block; font-size: 0.6rem; color: var(--dim); margin-bottom: 2px; }
     .btn.active .shortcut { color: #6666cc; }
-    .btn-full { width: 100%; padding: 12px; font-size: 0.85rem; letter-spacing: 0.1em; }
+    .btn-full { width: 100%; padding: 10px; font-size: 0.85rem; letter-spacing: 0.1em; }
     .btn-blackout { border-color: #333355; margin-top: 6px; }
     .btn-blackout.active { background: #2a0000; border-color: var(--red); color: var(--red);
                            animation: pulse-red 1s ease-in-out infinite; }
@@ -105,24 +146,31 @@
     }
 
     /* ---- Scene editor ---- */
-    .editor-layout { display: flex; gap: 12px; height: calc(100vh - 140px); min-height: 400px; }
-    .scene-list-panel {
-      width: 260px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px;
-      overflow-y: auto;
+    .editor-layout {
+      display: flex; flex-direction: column; gap: 8px;
+      height: 100%;
     }
-    .scene-form-panel { flex: 1; overflow-y: auto; }
+    .scene-list-panel {
+      flex-shrink: 0;
+      max-height: 210px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .scene-form-panel { flex: 1; overflow-y: auto; min-height: 0; }
 
     .scene-card {
       background: var(--card); border: 1px solid var(--border); border-radius: 4px;
-      padding: 10px 12px; cursor: pointer; transition: border-color 0.12s;
+      padding: 8px 10px; cursor: pointer; transition: border-color 0.12s;
     }
     .scene-card:hover { border-color: var(--accent); }
     .scene-card.selected { border-color: var(--accent); background: #181838; }
     .scene-card-name { font-size: 0.82rem; margin-bottom: 2px; }
     .scene-card-meta { font-size: 0.67rem; color: var(--dim); }
-    .scene-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .scene-card-actions { display: flex; gap: 5px; margin-top: 7px; }
     .btn-sm {
-      font-family: inherit; font-size: 0.68rem; padding: 4px 10px;
+      font-family: inherit; font-size: 0.68rem; padding: 4px 9px;
       border-radius: 3px; cursor: pointer; border: 1px solid var(--border);
       background: var(--surface); color: var(--text);
     }
@@ -131,13 +179,13 @@
     .btn-sm.danger:hover { background: #2a0000; }
     .btn-sm.primary { border-color: var(--accent); color: #8888ff; }
 
-    .form-group { margin-bottom: 12px; }
+    .form-group { margin-bottom: 10px; }
     label { display: block; font-size: 0.7rem; color: var(--dim);
             text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
     input[type=text], select, textarea {
       width: 100%; background: var(--surface); border: 1px solid var(--border);
       color: var(--text); font-family: inherit; font-size: 0.78rem;
-      padding: 7px 10px; border-radius: 3px;
+      padding: 6px 9px; border-radius: 3px;
     }
     input[type=text]:focus, select:focus, textarea:focus {
       outline: none; border-color: var(--accent);
@@ -146,18 +194,18 @@
 
     .group-row {
       background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
-      padding: 10px; margin-bottom: 8px; display: grid;
-      grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+      padding: 9px; margin-bottom: 7px; display: grid;
+      grid-template-columns: 1fr 1fr; gap: 7px;
     }
     .group-row-header {
       grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
     .group-label { font-size: 0.68rem; color: var(--accent); }
     .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; }
     input[type=checkbox] { accent-color: var(--accent); }
 
-    .form-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .form-actions { display: flex; gap: 8px; margin-top: 14px; }
     .editor-empty { color: var(--dim); font-size: 0.8rem; padding: 20px;
                     border: 1px dashed var(--border); border-radius: 4px; text-align: center; }
   </style>
@@ -172,62 +220,73 @@
   </span>
 </div>
 
-<div class="tabs">
-  <button class="tab active" onclick="showTab('live')">Live</button>
-  <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
-</div>
+<div class="main-layout">
 
-<!-- ===================== LIVE TAB ===================== -->
-<div id="tab-live">
-  <canvas id="rig-canvas"></canvas>
-  <div class="controls-row">
-    <div class="ctrl-col">
-      <div class="section">
-        <div class="section-label">Audio Energy</div>
-        <div class="bars">
-          <div class="bar-row"><span class="bar-label">Low</span>
-            <div class="bar-bg"><div class="bar-fill low"     id="bar-low"></div></div></div>
-          <div class="bar-row"><span class="bar-label">Mid</span>
-            <div class="bar-bg"><div class="bar-fill mid"     id="bar-mid"></div></div></div>
-          <div class="bar-row"><span class="bar-label">High</span>
-            <div class="bar-bg"><div class="bar-fill high"    id="bar-high"></div></div></div>
-          <div class="bar-row"><span class="bar-label">Overall</span>
-            <div class="bar-bg"><div class="bar-fill overall" id="bar-overall"></div></div></div>
-        </div>
-      </div>
-      <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})">
-        BLACKOUT
-      </button>
+  <!-- ===== LEFT PANEL: tabs + controls ===== -->
+  <div class="left-panel">
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('live')">Live</button>
+      <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
     </div>
-    <div class="ctrl-col">
-      <div class="section">
-        <div class="section-label">Mode</div>
-        <div class="grid" id="mode-grid"></div>
-      </div>
-      <div class="section">
-        <div class="section-label">Scene Presets</div>
-        <div class="grid" id="scene-grid"></div>
-        <div style="margin-top:6px">
-          <button class="btn btn-full btn-release" onclick="cmd({type:'release_scene'})">
-            <span class="shortcut">F10</span>Release Scene
+
+    <!-- LIVE TAB -->
+    <div id="tab-live" class="tab-pane">
+      <div class="controls-row">
+        <div class="ctrl-col">
+          <div class="section">
+            <div class="section-label">Audio Energy</div>
+            <div class="bars">
+              <div class="bar-row"><span class="bar-label">Low</span>
+                <div class="bar-bg"><div class="bar-fill low"     id="bar-low"></div></div></div>
+              <div class="bar-row"><span class="bar-label">Mid</span>
+                <div class="bar-bg"><div class="bar-fill mid"     id="bar-mid"></div></div></div>
+              <div class="bar-row"><span class="bar-label">High</span>
+                <div class="bar-bg"><div class="bar-fill high"    id="bar-high"></div></div></div>
+              <div class="bar-row"><span class="bar-label">Overall</span>
+                <div class="bar-bg"><div class="bar-fill overall" id="bar-overall"></div></div></div>
+            </div>
+          </div>
+          <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})">
+            BLACKOUT
           </button>
         </div>
+        <div class="ctrl-col">
+          <div class="section">
+            <div class="section-label">Mode</div>
+            <div class="grid" id="mode-grid"></div>
+          </div>
+          <div class="section">
+            <div class="section-label">Scene Presets</div>
+            <div class="grid" id="scene-grid"></div>
+            <div style="margin-top:5px">
+              <button class="btn btn-full btn-release" onclick="cmd({type:'release_scene'})">
+                <span class="shortcut">F10</span>Release Scene
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCENE EDITOR TAB -->
+    <div id="tab-scenes" class="tab-pane" style="display:none">
+      <div class="editor-layout">
+        <div class="scene-list-panel" id="scene-list-panel">
+          <button class="btn btn-full" style="margin-bottom:3px" onclick="editorNewScene()">+ New Scene</button>
+          <div id="scene-list-cards"></div>
+        </div>
+        <div class="scene-form-panel" id="scene-form-panel">
+          <div class="editor-empty">Select a scene to edit, or click "+ New Scene"</div>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-<!-- ===================== SCENES TAB ===================== -->
-<div id="tab-scenes" style="display:none">
-  <div class="editor-layout">
-    <div class="scene-list-panel" id="scene-list-panel">
-      <button class="btn btn-full" style="margin-bottom:4px" onclick="editorNewScene()">+ New Scene</button>
-      <div id="scene-list-cards"></div>
-    </div>
-    <div class="scene-form-panel" id="scene-form-panel">
-      <div class="editor-empty">Select a scene to edit, or click "+ New Scene"</div>
-    </div>
+  <!-- ===== RIGHT PANEL: canvas always visible ===== -->
+  <div class="right-panel">
+    <canvas id="rig-canvas"></canvas>
   </div>
+
 </div>
 
 <!-- Blackout overlay -->
@@ -251,10 +310,10 @@ let _beatFlash = 0;   // 0–1, set to 1 on beat, decays each draw frame
 
 function _initCanvas() {
   const c = document.getElementById('rig-canvas');
-  // Canvas height = width * (800/1200)
   function resize() {
-    const w = c.offsetWidth;
-    const h = Math.round(w * ORIG_H / ORIG_W);
+    // Use CSS-computed dimensions (aspect-ratio + max-height handled by CSS)
+    const w = c.offsetWidth  || 1;
+    const h = c.offsetHeight || 1;
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     _drawRig(_lastFixtures, _blackoutActive);
   }
@@ -663,7 +722,7 @@ function applyState(s) {
   const ov = document.getElementById('blackout-overlay');
   ov.style.display = _blackoutActive ? 'flex' : 'none';
 
-  // Canvas
+  // Canvas — always draw regardless of active tab
   if (s.fixtures && Object.keys(s.fixtures).length) {
     _lastFixtures = s.fixtures;
     _drawRig(_lastFixtures, _blackoutActive);
@@ -801,7 +860,7 @@ function _renderForm(scene) {
     </div>`).join('');
 
   document.getElementById('scene-form-panel').innerHTML = `
-    <div style="padding:4px">
+    <div style="padding:2px 4px">
       <div class="form-group">
         <label>Scene ID <span style="color:var(--dim)">(letters/numbers/underscore)</span></label>
         <input type="text" id="ed-scene-id" value="${scene.scene_id}"
@@ -821,9 +880,9 @@ function _renderForm(scene) {
         <input type="text" id="ed-scene-desc" value="${scene.description||''}"
           oninput="_edSelected.description=this.value" placeholder="Optional">
       </div>
-      <div class="section-label" style="margin-bottom:8px">Groups</div>
+      <div class="section-label" style="margin-bottom:7px">Groups</div>
       <div id="ed-groups">${groupsHtml}</div>
-      <button class="btn" style="margin-bottom:12px" onclick="editorAddGroup()">+ Add Group</button>
+      <button class="btn" style="margin-bottom:10px" onclick="editorAddGroup()">+ Add Group</button>
       <div class="form-actions">
         <button class="btn btn-sm primary" style="padding:8px 20px" onclick="editorSave()">Save Scene</button>
         <button class="btn btn-sm" style="padding:8px 16px" onclick="_clearForm();_edSelected=null">Cancel</button>
