@@ -1,5 +1,5 @@
 """
-Terminal diagnostic overlay for LightBrain Sprint 1.
+Terminal diagnostic overlay for LightBrain Sprint 1 / 1B.
 
 Renders a fixed-position, refreshing display at ~20-40 FPS using ANSI
 cursor control. Designed to stay in place without scrolling.
@@ -8,7 +8,9 @@ Shows:
   - Audio input device and FPS
   - Raw band energies with colour-coded bar graphs
   - Smoothed lane values (Impact, Room)
-  - Mode, palette, HSV and RGB output
+  - Mode, palette, current/next color names, hold timer or transition progress
+  - HSV and RGB output with 24-bit colour swatch
+  - Brightness breakdown (base / pulse / final)
   - RockWedge DMX channels 1-8 with mini bars
   - Safety state (blackout, strobe)
   - Any active error message
@@ -79,7 +81,6 @@ def _rgb_swatch(r: int, g: int, b: int) -> str:
 # ---------------------------------------------------------------------------
 
 # All lines must render within this visible width (ignoring ANSI codes).
-# Adjust if your terminal is narrower.
 WIDTH = 62
 
 _SEP  = f"{DIM}{'─' * WIDTH}{RESET}"
@@ -102,7 +103,7 @@ class TerminalDebugOverlay:
 
     def __init__(self):
         self._frame_count  = 0
-        self._last_time:   Optional[float] = None   # None = not started
+        self._last_time:   Optional[float] = None
         self._fps          = 0.0
         self._fps_samples  = []
         self._initialized  = False
@@ -114,15 +115,12 @@ class TerminalDebugOverlay:
     def _update_fps(self) -> None:
         now = time.monotonic()
         if self._last_time is None:
-            # First call — record the start time but don't emit a sample;
-            # the interval from __init__ to first frame is not meaningful.
             self._last_time = now
             return
         dt = now - self._last_time
         self._last_time = now
         if dt > 0:
             self._fps_samples.append(1.0 / dt)
-            # Keep a 20-frame rolling window
             if len(self._fps_samples) > 20:
                 self._fps_samples.pop(0)
             self._fps = sum(self._fps_samples) / len(self._fps_samples)
@@ -133,20 +131,28 @@ class TerminalDebugOverlay:
 
     def update(
         self,
-        device_name:      str            = "unknown",
-        raw_bands:        Optional[dict] = None,
-        smoothed_lanes:   Optional[dict] = None,
-        mode_name:        str            = "—",
-        palette_name:     str            = "—",
-        hsv:              Optional[tuple] = None,   # (h, s, v)
-        rgb:              Optional[tuple] = None,   # (r, g, b) 0-255
-        fixture_name:     str            = "RockWedge LED",
-        dmx_address:      int            = 1,
-        dmx_channels:     Optional[dict] = None,    # {label: 0-255}
-        dmx_output_type:  str            = "MOCK",
-        safety_blackout:  bool           = False,
-        safety_strobe_ok: bool           = False,
-        error:            Optional[str]  = None,
+        device_name:          str            = "unknown",
+        raw_bands:            Optional[dict] = None,
+        smoothed_lanes:       Optional[dict] = None,
+        mode_name:            str            = "—",
+        palette_name:         str            = "—",
+        # Sprint 1B: color names and palette state
+        color_name:           str            = "",
+        next_color_name:      str            = "",
+        hold_remaining_ms:    float          = 0.0,
+        transition_progress:  float          = 0.0,
+        hsv:                  Optional[tuple] = None,   # (h, s, v)
+        rgb:                  Optional[tuple] = None,   # (r, g, b) 0-255
+        # Sprint 1B: brightness breakdown
+        brightness_base:      float          = 0.0,
+        brightness_pulse:     float          = 0.0,
+        fixture_name:         str            = "RockWedge LED",
+        dmx_address:          int            = 1,
+        dmx_channels:         Optional[dict] = None,    # {label: 0-255}
+        dmx_output_type:      str            = "MOCK",
+        safety_blackout:      bool           = False,
+        safety_strobe_ok:     bool           = False,
+        error:                Optional[str]  = None,
     ) -> None:
         """Render one frame of the diagnostic overlay to stdout."""
 
@@ -162,7 +168,7 @@ class TerminalDebugOverlay:
         lines = []
 
         # ── Header ──────────────────────────────────────────────────────
-        title = "LIGHTBRAIN  DIAGNOSTIC  OVERLAY  S1"
+        title = "LIGHTBRAIN  DIAGNOSTIC  OVERLAY  S1B"
         pad   = max(0, WIDTH - len(title))
         lines.append(f"{BOLD}{FG_CYAN}{'─' * (pad // 2)} {title} {'─' * (pad - pad // 2)}{RESET}")
 
@@ -206,10 +212,45 @@ class TerminalDebugOverlay:
         lines.append(f"  {FG_WHITE}Mode:{RESET}    {FG_MAGENTA}{mode_name}{RESET}{bo_tag}")
         lines.append(f"  {FG_WHITE}Palette:{RESET} {FG_CYAN}{palette_name}{RESET}")
 
+        # Color names
+        cur_name  = color_name      or "—"
+        nxt_name  = next_color_name or "—"
+        color_str = f"{FG_GREEN}{cur_name:<16}{RESET} → {FG_CYAN}{nxt_name}{RESET}"
+        lines.append(f"  {FG_WHITE}Color:{RESET}   {color_str}")
+
+        # Hold timer or transition progress
+        if hold_remaining_ms > 0:
+            hold_s     = hold_remaining_ms / 1000.0
+            hold_frac  = 1.0  # full bar while holding (time remaining shown as text)
+            hold_bar   = _bar(hold_frac, width=20)
+            lines.append(
+                f"  {FG_WHITE}Hold:{RESET}    {FG_YELLOW}{hold_bar}{RESET}"
+                f"  {FG_YELLOW}{hold_s:.1f}s{RESET}"
+            )
+        else:
+            pct      = int(transition_progress * 100)
+            tbar     = _bar(transition_progress, width=20)
+            tbar_col = FG_GREEN if transition_progress < 0.5 else FG_CYAN
+            lines.append(
+                f"  {FG_WHITE}Trans:{RESET}   {tbar_col}{tbar}{RESET}"
+                f"  {FG_YELLOW}{pct:3d}%{RESET}"
+            )
+
         h, s, v_hsv = hsv
         r,  g,  b   = rgb
         lines.append(f"  {FG_WHITE}HSV:{RESET}     {h:5.1f}°  S:{s:.2f}  V:{v_hsv:.2f}")
         lines.append(f"  {FG_WHITE}RGB:{RESET}     {r:3d},{g:3d},{b:3d}  {_rgb_swatch(r, g, b)}")
+
+        # Brightness breakdown
+        final_brt  = brightness_base + brightness_pulse
+        dmx_brt    = int(round((max(0.0, min(1.0, v_hsv)) ** 2.2) * 255))
+        lines.append(
+            f"  {FG_WHITE}Brt:{RESET}  "
+            f"base {FG_YELLOW}{brightness_base:.2f}{RESET}"
+            f"  +bass {FG_YELLOW}{brightness_pulse:.2f}{RESET}"
+            f"  → {FG_GREEN}{final_brt:.2f}{RESET}"
+            f"  dmx {FG_GREEN}{dmx_brt:3d}{RESET}"
+        )
 
         # ── Output target ───────────────────────────────────────────────
         lines.append(_section("OUTPUT TARGET"))
@@ -233,12 +274,14 @@ class TerminalDebugOverlay:
         str_s = f"{FG_YELLOW}OK {RESET}" if safety_strobe_ok else f"{DIM}OFF{RESET}"
         lines.append(f"  Blackout: {bo_s}   Strobe: {str_s}")
 
+        # ── Keyboard hints ──────────────────────────────────────────────
+        lines.append(f"{DIM}  O=OpenDance D=Dinner B=Banger I=Indian/Latin S=Speech L=SlowDance Space=BO Q=Quit{RESET}")
+
         if error:
             lines.append(f"  {FG_RED}ERR: {error[:WIDTH - 8]}{RESET}")
 
         lines.append(_SEP)
 
-        # Move to top and write everything in one syscall
         out = CURSOR_HOME + "\n".join(lines) + "\n"
         sys.stdout.write(out)
         sys.stdout.flush()

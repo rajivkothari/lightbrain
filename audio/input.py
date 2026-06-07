@@ -7,7 +7,7 @@ can pull frames from without stalling the main render loop.
 
 import queue
 import threading
-from typing import Optional, Callable
+from typing import Optional
 
 import numpy as np
 import sounddevice as sd

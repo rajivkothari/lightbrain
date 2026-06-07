@@ -5,6 +5,10 @@ smooth, shortest-path hue interpolation between palette colors.
 CRITICAL: All hue interpolation uses circular shortest-path logic.
 Never do naive linear lerp across hue — it causes ugly sweeps through
 unintended color families (e.g. red→magenta going through the entire spectrum).
+
+Sprint 1B: PaletteBlender now has a HOLDING / TRANSITIONING state machine.
+The blender holds each color for hold_ms before blending to the next over
+transition_ms. Setting hold_ms=0 restores the original continuous-blend behavior.
 """
 
 import json
@@ -116,41 +120,54 @@ def load_all_palettes(palettes_dir: str) -> dict:
 # Palette blender — drives the slow color blend over time
 # ---------------------------------------------------------------------------
 
+_HOLDING = "holding"
+_TRANSITIONING = "transitioning"
+
+
 class PaletteBlender:
     """
     Slowly cycles through the colors of the active palette.
 
-    In Sprint 1, blending is time-driven (slow_blend mode) so you can see
-    colors moving visually without needing phrase detection.
+    Sprint 1B: has a HOLDING / TRANSITIONING state machine.
+    - HOLDING: color is fixed; counts down hold_ms before starting a blend
+    - TRANSITIONING: blend_t advances from 0→1 over transition_ms; when done,
+      advance color index and return to HOLDING (if hold_ms > 0)
 
-    Later, major transitions will be triggered by musical phrases.
+    Setting hold_ms=0 collapses into the original continuous-blend behavior
+    (effectively always TRANSITIONING).
     """
 
-    def __init__(self, palette: Palette):
-        self._palette    = palette
-        self._color_idx  = 0           # current color index
-        self._next_idx   = 1 % max(len(palette.colors), 1)
-        self._blend_t    = 0.0         # 0.0 = at color_idx, 1.0 = at next_idx
-        self._last_time  = time.monotonic()
+    def __init__(self, palette: Palette, hold_ms: float = 0.0):
+        self._palette          = palette
+        self._color_idx        = 0
+        self._next_idx         = 1 % max(len(palette.colors), 1)
+        self._blend_t          = 0.0
+        self._hold_ms          = hold_ms
+        self._hold_elapsed_ms  = 0.0
+        self._last_time        = time.monotonic()
+        self._state            = _HOLDING if hold_ms > 0 else _TRANSITIONING
 
     def set_palette(self, palette: Palette) -> None:
         """Switch to a new palette — restart blend from color index 0."""
-        self._palette   = palette
-        self._color_idx = 0
-        self._next_idx  = 1 % max(len(palette.colors), 1)
-        self._blend_t   = 0.0
-        self._last_time = time.monotonic()
+        self._palette          = palette
+        self._color_idx        = 0
+        self._next_idx         = 1 % max(len(palette.colors), 1)
+        self._blend_t          = 0.0
+        self._hold_elapsed_ms  = 0.0
+        self._last_time        = time.monotonic()
+        self._state            = _HOLDING if self._hold_ms > 0 else _TRANSITIONING
+
+    def set_hold_ms(self, hold_ms: float) -> None:
+        """Update hold time (takes effect at the next state transition)."""
+        self._hold_ms = hold_ms
 
     def update(self, energy: float = 0.5) -> HSVColor:
         """
         Advance the blend and return the current blended color.
 
-        energy — room energy 0.0–1.0 (currently not used to speed up blends,
-                 but wired in for future phrase/energy-triggered changes).
+        energy — room energy 0.0–1.0 (wired in for future energy-triggered changes).
         """
-        now = time.monotonic()
-        # Cap dt to 100 ms so a process suspend/resume doesn't cause a
-        # visual jump (colors snap forward many steps at once).
+        now   = time.monotonic()
         dt_ms = min((now - self._last_time) * 1000.0, 100.0)
         self._last_time = now
 
@@ -160,24 +177,69 @@ class PaletteBlender:
 
         if len(colors) == 1:
             c = colors[0]
-            return HSVColor(h=c.h, s=c.s, v=c.v)
+            return HSVColor(h=c.h, s=c.s, v=c.v, name=c.name)
 
-        t_ms = self._palette.transition_ms
-        if t_ms <= 0:
-            t_ms = 2000.0
+        t_ms = self._palette.transition_ms or 2000.0
 
-        # Advance blend fraction
+        if self._state == _HOLDING:
+            self._hold_elapsed_ms += dt_ms
+            if self._hold_elapsed_ms >= self._hold_ms:
+                self._state   = _TRANSITIONING
+                self._blend_t = 0.0
+            c = colors[self._color_idx]
+            return HSVColor(h=c.h, s=c.s, v=c.v, name=c.name)
+
+        # --- TRANSITIONING ---
         self._blend_t += dt_ms / t_ms
 
-        # Use while so a large dt still cycles through correctly
         while self._blend_t >= 1.0:
             self._blend_t  -= 1.0
             self._color_idx = self._next_idx
             self._next_idx  = (self._color_idx + 1) % len(colors)
+            if self._hold_ms > 0:
+                # Arrived at new color — enter hold phase
+                self._state           = _HOLDING
+                self._hold_elapsed_ms = 0.0
+                c = colors[self._color_idx]
+                return HSVColor(h=c.h, s=c.s, v=c.v, name=c.name)
 
-        c1 = colors[self._color_idx]
-        c2 = colors[self._next_idx]
-        return lerp_color(c1, c2, self._blend_t)
+        c1     = colors[self._color_idx]
+        c2     = colors[self._next_idx]
+        result = lerp_color(c1, c2, self._blend_t)
+        result.name = c1.name  # name follows current (source) color during blend
+        return result
+
+    # ------------------------------------------------------------------
+    # Sprint 1B: observable state for the UI overlay
+    # ------------------------------------------------------------------
+
+    @property
+    def hold_remaining_ms(self) -> float:
+        """Milliseconds left in hold phase; 0.0 if currently transitioning."""
+        if self._state != _HOLDING:
+            return 0.0
+        return max(0.0, self._hold_ms - self._hold_elapsed_ms)
+
+    @property
+    def transition_progress(self) -> float:
+        """0.0–1.0 fraction through the current transition; 0.0 if holding."""
+        if self._state == _HOLDING:
+            return 0.0
+        return self._blend_t
+
+    @property
+    def current_color_name(self) -> str:
+        colors = self._palette.colors
+        if not colors:
+            return ""
+        return colors[self._color_idx].name or f"color {self._color_idx + 1}"
+
+    @property
+    def next_color_name(self) -> str:
+        colors = self._palette.colors
+        if not colors:
+            return ""
+        return colors[self._next_idx].name or f"color {self._next_idx + 1}"
 
     @property
     def palette_name(self) -> str:

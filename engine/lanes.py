@@ -3,16 +3,18 @@ Lane renderers — translate smoothed audio energy + palette state into
 per-fixture lighting commands.
 
 Sprint 1: Room Lane only.
+Sprint 1B: RoomLane uses per-mode brightness profiles (base/max brightness,
+pulse amount, saturation scale) so each mode has its own lighting character.
 
 The Room Lane is the "ambiance" layer:
 - Color comes from the active palette blend
-- Brightness tracks smoothed room energy (slow, long-tail)
-- A subtle bass-breathing pulse adds life to the dimmer
-- Hue changes slowly via palette blend — never every frame
+- Brightness maps room energy into [base_brightness, max_brightness] range
+- A bass-breathing pulse (impact × pulse_amount) adds life to the dimmer
+- Saturation is scaled by mode.saturation_scale for softer or punchier looks
 """
 
-from dataclasses import dataclass
-from typing import Tuple
+from dataclasses import dataclass, field
+from typing import Optional, Tuple
 
 from engine.palettes import HSVColor, PaletteBlender, Palette
 from engine.safety import SafetyEngine
@@ -26,6 +28,8 @@ class RoomLaneOutput:
     strobe: float           # 0.0 (always off Sprint 1)
     raw_room_energy: float
     raw_impact_energy: float
+    base_brightness: float = 0.0   # brightness from mode mapping (before pulse)
+    pulse_brightness: float = 0.0  # additive bass lift contribution
 
 
 class RoomLane:
@@ -33,28 +37,37 @@ class RoomLane:
     Room Lane — slow ambient color behavior for uplights and wash fixtures.
 
     Inputs each frame:
-        smoothed_room:   long-tail room energy follower value
+        smoothed_room:   long-tail room energy follower value (0.0–1.0)
         impact:          short-attack impact follower for bass breathing
-        palette:         active Palette object
         safety:          SafetyEngine for final scaling
         master_dimmer:   0.0–1.0 master override
-        group_intensity: 0.0–1.0 per-group scale (for future group support)
+        group_intensity: 0.0–1.0 per-group scale
 
-    Behavior:
-        - Base brightness = smoothed_room energy
-        - Bass pulse adds a small multiplicative boost on transients
-          (impact * BASS_BREATH_DEPTH), keeping the room feeling alive
-        - Palette blender drives slow hue changes independent of beat
+    Behavior (Sprint 1B):
+        - Base brightness maps room energy into mode's [base, max] range
+        - Bass pulse = impact × mode.pulse_amount (additive lift)
+        - Saturation is scaled by mode.saturation_scale
+        - Palette blender uses mode.hold_ms for color hold timing
     """
 
-    # How much the bass transient breathes the dimmer up
-    BASS_BREATH_DEPTH = 0.15  # 15% max lift from a full impact hit
+    # Fallback values used when no mode is set (bare-bones default)
+    _FALLBACK_BASE   = 0.0
+    _FALLBACK_MAX    = 1.0
+    _FALLBACK_PULSE  = 0.15
+    _FALLBACK_SAT    = 1.0
 
-    def __init__(self, palette: Palette):
-        self._blender = PaletteBlender(palette)
+    def __init__(self, palette: Palette, mode=None):
+        hold_ms          = mode.hold_ms if mode is not None else 0.0
+        self._blender    = PaletteBlender(palette, hold_ms=hold_ms)
+        self._mode       = mode  # Optional[Mode]
 
     def set_palette(self, palette: Palette) -> None:
         self._blender.set_palette(palette)
+
+    def set_mode(self, mode) -> None:
+        """Update the mode profile and propagate hold_ms to the blender."""
+        self._mode = mode
+        self._blender.set_hold_ms(mode.hold_ms)
 
     def render(
         self,
@@ -64,35 +77,28 @@ class RoomLane:
         master_dimmer: float = 1.0,
         group_intensity: float = 1.0,
     ) -> RoomLaneOutput:
-        """
-        Render one frame of Room Lane output.
-
-        Returns RoomLaneOutput with color, brightness, and strobe values.
-        """
-        # Get current blended palette color (advances the blend)
+        """Render one frame of Room Lane output."""
+        mode  = self._mode
         color = self._blender.update(energy=smoothed_room)
 
-        # Base brightness follows room energy
-        base_brightness = smoothed_room
+        if mode is not None:
+            base_br = (mode.base_brightness
+                       + smoothed_room * (mode.max_brightness - mode.base_brightness))
+            pulse   = impact * mode.pulse_amount
+            sat     = min(1.0, color.s * mode.saturation_scale)
+        else:
+            base_br = smoothed_room * self._FALLBACK_MAX + self._FALLBACK_BASE
+            pulse   = impact * self._FALLBACK_PULSE
+            sat     = min(1.0, color.s * self._FALLBACK_SAT)
 
-        # Bass breathing: small additive boost from impact transients
-        bass_lift = impact * self.BASS_BREATH_DEPTH
-        raw_brightness = min(1.0, base_brightness + bass_lift)
+        raw_brightness = min(1.0, base_br + pulse) * group_intensity
 
-        # Apply group intensity scale
-        raw_brightness *= group_intensity
-
-        # Safety engine applies blackout, mode scale, master dimmer
         safe_brightness, safe_strobe = safety.apply(raw_brightness)
-
-        # Master dimmer applied on top (safety.apply uses its own internal
-        # master but we also allow an explicit per-call override here)
         final_brightness = min(1.0, safe_brightness * master_dimmer)
 
-        # Modulate value channel of HSV with final brightness
         output_color = HSVColor(
             h=color.h,
-            s=color.s,
+            s=sat,
             v=final_brightness,
             name=color.name,
         )
@@ -103,8 +109,30 @@ class RoomLane:
             strobe=safe_strobe,
             raw_room_energy=smoothed_room,
             raw_impact_energy=impact,
+            base_brightness=base_br,
+            pulse_brightness=pulse,
         )
+
+    # ------------------------------------------------------------------
+    # Palette blender observables (for the overlay)
+    # ------------------------------------------------------------------
 
     @property
     def palette_name(self) -> str:
         return self._blender.palette_name
+
+    @property
+    def current_color_name(self) -> str:
+        return self._blender.current_color_name
+
+    @property
+    def next_color_name(self) -> str:
+        return self._blender.next_color_name
+
+    @property
+    def hold_remaining_ms(self) -> float:
+        return self._blender.hold_remaining_ms
+
+    @property
+    def transition_progress(self) -> float:
+        return self._blender.transition_progress

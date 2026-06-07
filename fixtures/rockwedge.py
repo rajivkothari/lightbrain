@@ -18,6 +18,7 @@ driven by palette rules in a later sprint.
 """
 
 import colorsys
+import warnings
 from typing import Tuple
 
 from dmx.universe import DMXUniverse
@@ -71,6 +72,12 @@ class RockWedge(FixtureBase):
         strobe     — strobe intensity (always 0 in Sprint 1)
         """
         addr = self.dmx_address
+        if addr + NUM_CHANNELS - 1 > 512:
+            warnings.warn(
+                f"RockWedge '{self.name}' at address {addr}: "
+                f"channels {addr}–{addr + NUM_CHANNELS - 1} exceed DMX universe limit 512",
+                RuntimeWarning, stacklevel=2,
+            )
 
         # Final brightness = lane value (safety-scaled) × any additional scale
         final_brightness = max(0.0, min(1.0, value * brightness))

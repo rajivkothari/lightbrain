@@ -113,8 +113,9 @@ class SyntheticAudioSource:
         # Soft clip to prevent overflow (tanh limiter)
         block = np.tanh(block).astype(np.float32)
 
-        # Advance phase counter
-        self._phase += n
+        # Advance phase; wrap at 2^30 samples (~6.7 h at 44100 Hz) to prevent
+        # float precision loss while keeping the per-block RNG seed stable.
+        self._phase = (self._phase + n) % (1 << 30)
 
         # Return shaped as (N, 1) to match AudioCapture output
         return block.reshape(-1, 1)

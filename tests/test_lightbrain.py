@@ -36,11 +36,15 @@ from engine.gamma     import apply_gamma, apply_gamma_to_dmx, apply_gamma_rgb
 from dmx.universe     import DMXUniverse
 from engine.smoothing import EnvelopeFollower, EnvelopeConfig, LaneSmoother
 from fixtures.rockwedge import RockWedge
-from engine.modes     import get_mode
+from engine.modes     import get_mode, MODES
 from engine.safety    import SafetyEngine
 from engine.lanes     import RoomLane
 from audio.synthetic  import SyntheticAudioSource
 from audio.analyzer   import AudioAnalyzer
+from app.render.fixture_state import (
+    UplightState, WashState, BeamState, SparkleState, ImpactState, RigVisualState,
+)
+from app.render.scene import SceneLayout
 
 
 # ===========================================================================
@@ -658,3 +662,351 @@ class TestSyntheticAudio:
         assert src.is_running()
         src.stop()
         assert not src.is_running()
+
+
+# ===========================================================================
+# Sprint 1B: Mode brightness profiles
+# ===========================================================================
+
+class TestModeProfiles:
+
+    def test_open_dance_full_brightness_range(self):
+        mode = get_mode("open_dance")
+        assert mode.base_brightness == pytest.approx(0.2)
+        assert mode.max_brightness  == pytest.approx(1.0)
+
+    def test_dinner_constrained_brightness(self):
+        mode = get_mode("dinner")
+        assert mode.base_brightness < mode.max_brightness
+        assert mode.max_brightness  <= 0.7  # dinner stays subdued
+
+    def test_speech_high_floor(self):
+        mode = get_mode("speech")
+        assert mode.base_brightness >= 0.4   # visible even in silence
+
+    def test_pulse_amount_positive(self):
+        for key in ["open_dance", "banger", "indian_latin", "dinner"]:
+            mode = get_mode(key)
+            assert mode.pulse_amount > 0, f"{key}: pulse_amount should be > 0"
+
+    def test_speech_minimal_pulse(self):
+        assert get_mode("speech").pulse_amount <= 0.05
+
+    def test_saturation_scale_valid_range(self):
+        for key in ["open_dance", "dinner", "speech", "banger", "indian_latin", "slow_dance"]:
+            mode = get_mode(key)
+            assert 0.0 < mode.saturation_scale <= 1.0, \
+                f"{key}: saturation_scale {mode.saturation_scale} out of range"
+
+    def test_speech_desaturated(self):
+        assert get_mode("speech").saturation_scale <= 0.6
+
+    def test_hold_ms_positive_for_real_modes(self):
+        for key in ["open_dance", "dinner", "banger", "indian_latin", "slow_dance", "speech"]:
+            assert get_mode(key).hold_ms > 0, f"{key}: hold_ms should be positive"
+
+    def test_banger_faster_transitions_than_speech(self):
+        # Banger should cycle through colors faster than speech
+        assert get_mode("banger").hold_ms < get_mode("speech").hold_ms
+
+    def test_base_always_lte_max(self):
+        for key in get_mode.__globals__["MODES"]:
+            m = get_mode(key)
+            assert m.base_brightness <= m.max_brightness, \
+                f"{key}: base_brightness {m.base_brightness} > max_brightness {m.max_brightness}"
+
+
+# ===========================================================================
+# Sprint 1B: Palette hold / transition state machine
+# ===========================================================================
+
+class TestPaletteHoldTransition:
+
+    def _blender_with_hold(self, hold_ms: float) -> "PaletteBlender":
+        palettes_dir = os.path.join(ROOT, "config", "palettes")
+        pal = load_all_palettes(palettes_dir)["open_dance"]
+        return PaletteBlender(pal, hold_ms=hold_ms)
+
+    def test_no_hold_transitions_immediately(self):
+        b = self._blender_with_hold(0.0)
+        # With hold_ms=0, blender starts in TRANSITIONING state
+        assert b.hold_remaining_ms == pytest.approx(0.0)
+
+    def test_hold_starts_in_holding_state(self):
+        b = self._blender_with_hold(5000.0)
+        # Immediately after construction, hold_remaining_ms should be > 0
+        assert b.hold_remaining_ms > 0.0
+
+    def test_hold_color_stable_during_hold(self):
+        b = self._blender_with_hold(5000.0)
+        c1 = b.update(0.5)
+        c2 = b.update(0.5)
+        # During hold, color should not change between frames
+        assert c1.h == pytest.approx(c2.h)
+
+    def test_transition_progress_zero_while_holding(self):
+        b = self._blender_with_hold(5000.0)
+        b.update(0.5)
+        assert b.transition_progress == pytest.approx(0.0)
+
+    def test_color_names_exposed(self):
+        b = self._blender_with_hold(0.0)
+        # Names may be empty strings but should not raise
+        _ = b.current_color_name
+        _ = b.next_color_name
+
+    def test_set_hold_ms_accepted(self):
+        b = self._blender_with_hold(0.0)
+        b.set_hold_ms(3000.0)
+        # The new hold takes effect at the next state transition
+
+    def test_set_palette_resets_state(self):
+        palettes_dir = os.path.join(ROOT, "config", "palettes")
+        pals = load_all_palettes(palettes_dir)
+        b = self._blender_with_hold(2000.0)
+        b.set_palette(pals["banger"])
+        # After switching palette, blender should return to start
+        assert b.hold_remaining_ms >= 0.0  # valid non-negative
+
+    def test_blender_with_hold_stays_in_range(self):
+        b = self._blender_with_hold(100.0)
+        for _ in range(50):
+            c = b.update(0.5)
+            assert 0 <= c.h <= 360
+            assert 0 <= c.s <= 1.0
+            assert 0 <= c.v <= 1.0
+            time.sleep(0.005)
+
+
+# ===========================================================================
+# Sprint 1B: RoomLane with mode profiles
+# ===========================================================================
+
+class TestRoomLaneWithModeProfile:
+
+    def _setup(self, mode_key: str):
+        palettes_dir = os.path.join(ROOT, "config", "palettes")
+        pals         = load_all_palettes(palettes_dir)
+        mode         = get_mode(mode_key)
+        palette      = pals.get(mode.palette_key, list(pals.values())[0])
+        safety       = SafetyEngine()
+        safety.update_from_mode(mode)
+        lane = RoomLane(palette, mode=mode)
+        return lane, safety, mode
+
+    def test_base_brightness_is_floor_at_zero_energy(self):
+        lane, safety, mode = self._setup("open_dance")
+        out = lane.render(smoothed_room=0.0, impact=0.0, safety=safety)
+        # With zero room energy and no impact, brightness should be near base_brightness
+        # (after mode intensity_scale)
+        expected_floor = mode.base_brightness * mode.intensity_scale
+        assert out.brightness >= expected_floor * 0.9, \
+            f"brightness {out.brightness:.3f} below expected floor {expected_floor:.3f}"
+
+    def test_max_brightness_ceiling_at_full_energy(self):
+        lane, safety, mode = self._setup("dinner")
+        out = lane.render(smoothed_room=1.0, impact=0.0, safety=safety)
+        # Dinner max_brightness=0.65 × intensity_scale=0.7 → ceiling ≈ 0.455
+        ceiling = mode.max_brightness * mode.intensity_scale
+        assert out.brightness <= ceiling + 0.02, \
+            f"brightness {out.brightness:.3f} exceeds ceiling {ceiling:.3f}"
+
+    def test_pulse_lifts_brightness(self):
+        lane, safety, _ = self._setup("banger")
+        out_no_pulse   = lane.render(smoothed_room=0.5, impact=0.0, safety=safety)
+        out_with_pulse = lane.render(smoothed_room=0.5, impact=1.0, safety=safety)
+        assert out_with_pulse.brightness >= out_no_pulse.brightness
+
+    def test_saturation_scale_applied(self):
+        lane, safety, mode = self._setup("speech")
+        # Speech has saturation_scale=0.5; with full-sat palette color,
+        # output saturation should be capped well below 1.0
+        out = lane.render(smoothed_room=0.5, impact=0.0, safety=safety)
+        assert out.hsv.s <= mode.saturation_scale + 0.01
+
+    def test_set_mode_updates_behavior(self):
+        lane, safety, _ = self._setup("open_dance")
+        # Switch to dinner (lower ceiling)
+        dinner = get_mode("dinner")
+        safety.update_from_mode(dinner)
+        lane.set_mode(dinner)
+        out = lane.render(smoothed_room=1.0, impact=0.0, safety=safety)
+        ceiling = dinner.max_brightness * dinner.intensity_scale
+        assert out.brightness <= ceiling + 0.02
+
+    def test_room_lane_exposes_blender_properties(self):
+        lane, safety, _ = self._setup("open_dance")
+        # These should not raise
+        _ = lane.current_color_name
+        _ = lane.next_color_name
+        _ = lane.hold_remaining_ms
+        _ = lane.transition_progress
+
+    def test_base_and_pulse_fields_in_output(self):
+        lane, safety, _ = self._setup("banger")
+        out = lane.render(smoothed_room=0.5, impact=0.3, safety=safety)
+        assert hasattr(out, "base_brightness")
+        assert hasattr(out, "pulse_brightness")
+        assert out.base_brightness >= 0.0
+        assert out.pulse_brightness >= 0.0
+
+
+# ===========================================================================
+# Visualizer: fixture state dataclasses
+# ===========================================================================
+
+class TestFixtureStateDataclasses:
+
+    def test_uplight_state_instantiates(self):
+        u = UplightState(fixture_id="u1", x=100.0, y=200.0,
+                         color_rgb=(255, 0, 128), brightness=0.8)
+        assert u.brightness == pytest.approx(0.8)
+        assert u.active is True
+
+    def test_wash_state_instantiates(self):
+        w = WashState(fixture_id="w1", x=300.0, y=500.0,
+                      color_rgb=(0, 200, 255), brightness=0.6,
+                      radius=150.0, pulse_strength=0.3)
+        assert w.radius == pytest.approx(150.0)
+
+    def test_beam_state_instantiates(self):
+        b = BeamState(fixture_id="b1", x=200.0, y=600.0,
+                      color_rgb=(200, 100, 255), brightness=0.9,
+                      angle_degrees=-30.0, length=400.0,
+                      spread=6.0, movement_speed=0.7)
+        assert b.angle_degrees == pytest.approx(-30.0)
+
+    def test_sparkle_state_instantiates(self):
+        sp = SparkleState(fixture_id="sp1", x=600.0, y=600.0,
+                          color_rgb=(255, 255, 200), brightness=0.5,
+                          sparkle_amount=0.6)
+        assert sp.sparkle_amount == pytest.approx(0.6)
+
+    def test_impact_state_instantiates(self):
+        imp = ImpactState(fixture_id="i1", x=600.0, y=600.0,
+                          brightness=0.8, flash_active=True)
+        assert imp.flash_active is True
+
+    def test_rig_visual_state_instantiates(self):
+        rig = RigVisualState(
+            mode="open_dance", palette_name="Open Dance",
+            low_energy=0.5, mid_energy=0.3, high_energy=0.2, overall_energy=0.4,
+            room_brightness=0.6, impact_value=0.3,
+            uplights=[], washes=[], beams=[], sparkles=[], impacts=[],
+            blackout_active=False,
+        )
+        assert rig.mode == "open_dance"
+        assert rig.blackout_active is False
+
+
+# ===========================================================================
+# Visualizer: scene layout and RigVisualState generation
+# ===========================================================================
+
+class TestSceneLayout:
+
+    def _build(self, mode_key: str = "open_dance", blackout: bool = False):
+        palettes_dir = os.path.join(ROOT, "config", "palettes")
+        pals         = load_all_palettes(palettes_dir)
+        mode         = get_mode(mode_key)
+        lane         = RoomLane(pals.get(mode.palette_key, list(pals.values())[0]), mode=mode)
+        safety       = SafetyEngine()
+        safety.update_from_mode(mode)
+        room_out = lane.render(smoothed_room=0.5, impact=0.3, safety=safety)
+        scene    = SceneLayout()
+        return scene.update_and_build(
+            bands={"low_energy": 0.4, "mid_energy": 0.3,
+                   "high_energy": 0.5, "overall_energy": 0.4},
+            lanes={"impact": 0.3, "room": 0.5},
+            hue=room_out.hsv.h,
+            saturation=room_out.hsv.s,
+            brightness=room_out.brightness,
+            base_brt=room_out.base_brightness,
+            pulse_brt=room_out.pulse_brightness,
+            mode_key=mode_key,
+            palette_name=lane.palette_name,
+            blackout=blackout,
+        )
+
+    def test_eighteen_uplights(self):
+        rig = self._build()
+        assert len(rig.uplights) == 18
+
+    def test_two_beams(self):
+        rig = self._build()
+        assert len(rig.beams) == 2
+
+    def test_rgb_values_valid(self):
+        rig = self._build("banger")
+        for ul in rig.uplights:
+            r, g, b = ul.color_rgb
+            assert 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255
+
+    def test_brightness_in_range(self):
+        rig = self._build("open_dance")
+        for ul in rig.uplights:
+            assert 0.0 <= ul.brightness <= 1.0
+        for w in rig.washes:
+            assert 0.0 <= w.brightness <= 1.0
+
+    def test_blackout_deactivates_fixtures(self):
+        rig = self._build(blackout=True)
+        assert rig.blackout_active is True
+        assert all(not ul.active for ul in rig.uplights)
+        assert all(not w.active  for w  in rig.washes)
+        assert all(not b.active  for b  in rig.beams)
+
+    def test_sparkle_zero_in_dinner(self):
+        rig = self._build("dinner")
+        for sp in rig.sparkles:
+            assert sp.sparkle_amount == pytest.approx(0.0), \
+                "Dinner should have no sparkle"
+
+    def test_sparkle_active_in_banger(self):
+        palettes_dir = os.path.join(ROOT, "config", "palettes")
+        pals = load_all_palettes(palettes_dir)
+        mode = get_mode("banger")
+        lane = RoomLane(pals["banger"], mode=mode)
+        safety = SafetyEngine()
+        safety.update_from_mode(mode)
+        room_out = lane.render(smoothed_room=0.8, impact=0.5, safety=safety)
+        scene = SceneLayout()
+        rig = scene.update_and_build(
+            bands={"low_energy": 0.5, "mid_energy": 0.4,
+                   "high_energy": 0.8, "overall_energy": 0.6},
+            lanes={"impact": 0.5, "room": 0.8},
+            hue=room_out.hsv.h, saturation=room_out.hsv.s,
+            brightness=room_out.brightness,
+            base_brt=room_out.base_brightness, pulse_brt=room_out.pulse_brightness,
+            mode_key="banger", palette_name="Banger", blackout=False,
+        )
+        total_sparkle = sum(sp.sparkle_amount for sp in rig.sparkles)
+        assert total_sparkle > 0.1, "Banger should show sparkle when high energy > 0"
+
+    def test_impact_flash_not_in_speech(self):
+        rig = self._build("speech")
+        for imp in rig.impacts:
+            # Speech never allows flash
+            assert not imp.flash_active
+
+    def test_second_build_does_not_raise(self):
+        scene = SceneLayout()
+        palettes_dir = os.path.join(ROOT, "config", "palettes")
+        pals = load_all_palettes(palettes_dir)
+        mode = get_mode("open_dance")
+        lane = RoomLane(pals["open_dance"], mode=mode)
+        safety = SafetyEngine()
+        safety.update_from_mode(mode)
+        for _ in range(10):
+            room_out = lane.render(smoothed_room=0.5, impact=0.3, safety=safety)
+            rig = scene.update_and_build(
+                bands={"low_energy": 0.4, "mid_energy": 0.3,
+                       "high_energy": 0.2, "overall_energy": 0.3},
+                lanes={"impact": 0.3, "room": 0.5},
+                hue=room_out.hsv.h, saturation=room_out.hsv.s,
+                brightness=room_out.brightness,
+                base_brt=room_out.base_brightness, pulse_brt=room_out.pulse_brightness,
+                mode_key="open_dance", palette_name="Open Dance", blackout=False,
+            )
+            time.sleep(0.005)
+        assert rig is not None
