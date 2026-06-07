@@ -1,437 +1,470 @@
-# RKADE LightBrain — Sprint 1B + Visualizer MVP
+# LightBrain
 
-A mobile-DJ-focused lighting engine that listens to live audio, separates it
-into lighting-control stems, smooths those stems through EMA envelope followers,
-applies musical interpretation rules, and renders DMX values for fixtures.
+A wedding/event DJ lighting engine that listens to live audio and drives
+professional DMX fixtures in real time. Not a generic sound-active script —
+it separates music into **lighting stems** (low, mid, high, energy) and
+interprets them through mode profiles, palettes, and scene presets tuned for
+wedding moments.
 
-**This is not a generic sound-active script.** It is a premium "lighting stems"
-engine where lows, mids, highs, energy, palettes, mode profiles, transitions,
-and safety rules control fixture behavior.
+**Current status:** Hardware arrives in ~2 weeks. System runs fully in mock
+mode today. 422+ automated tests passing.
 
 ---
 
-## MVP Pipeline
+## How it works
 
 ```
-DJ audio source  (or SyntheticAudioSource --simulate)
-      |
-      v
-AudioCapture  (sounddevice ring-buffer)
-      |
-      v
-AudioAnalyzer  (FFT bands: low / mid / high / overall, adaptive gain)
-      |
-      v
-LaneSmoother  (EMA followers: Impact 10ms/250ms, Room 600ms/3000ms)
-      |
-      v
-RoomLane  (mode brightness profile + palette hold/transition + bass breathing -> HSV)
-      |
-      v
-SafetyEngine  (blackout gate, mode intensity scale, master dimmer)
-      |
-      v
-┌──────────────────┐    ┌──────────────────────────┐
-│  RockWedge       │    │  SceneLayout (visualizer) │
-│  HSV→RGB→gamma   │    │  builds RigVisualState    │
-│  → 8-ch DMX      │    │  for all 18+5 fixtures    │
-└──────────────────┘    └──────────────────────────┘
-      |                        |
-      v                        v
-DMXUniverse              Visualizer (pygame 2D)
-(512-ch buffer)          animated rig preview
-      |
-      v
-MockDMXOutput / EnttecProOutput → DMXking ultraDMX MAX
+DJ audio source (or --demo for synthetic audio)
+        │
+        ▼
+AudioCapture  ──  AudioAnalyzer (FFT: low / mid / high / overall)
+                        │
+                  BeatDetector  →  BPM estimate
+                        │
+                  LaneSmoother  (EMA envelope followers)
+                        │
+                  RoomLane  (mode profile + palette → HSV)
+                        │
+                  StrobeEngine  (EDM lift strobe, 2–16 Hz)
+                        │
+                  SafetyEngine  (blackout gate, dimmer, strobe_allowed)
+                        │
+        ┌───────────────┼─────────────────────┐
+        ▼               ▼                     ▼
+   Fixtures        SceneLayout           HybridEngine
+ (DMX mappers)   (RigVisualState)     (blend saved + live)
+        │               │
+        ▼               ▼
+  DMXUniverse      Visualizer (pygame)
+        │
+  MockDMXOutput / EnttecProOutput / ArtNetOutput
+        │
+  Web dashboard + iPad PWA  ◄──  commands (mode / scene / faders)
 ```
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 lightbrain/
   app/
-    main.py               Full app entry point (--device, --mode, --demo/--simulate)
+    main.py                 Entry point — all CLI flags live here
+    hybrid.py               HybridEngine: blend saved program + live audio
     render/
-      fixture_state.py    High-level fixture state dataclasses (UplightState etc.)
-      scene.py            SceneLayout: 18 uplights + 2 washes + 2 beams + sparkle + impact
-      visualizer.py       Pygame renderer: glows, washes, beam cones, sparkles, HUD
+      fixture_state.py      RigVisualState + FixtureStateTimeline dataclasses
+      scene.py              Maps engine output → RigVisualState (all fixtures)
+      visualizer.py         Pygame 2D rig preview
+      playback.py           FixtureStateTimeline player (song preview)
+      waveform.py           Waveform + energy lane display (song preview)
+    web/
+      server.py             FastAPI web server (dashboard + REST + WebSocket)
+      ipad_server.py        iPad PWA server (port 8080)
+      dashboard.html        Desktop web dashboard
+      ipad.html             iPad PWA controller
   audio/
-    input.py              Non-blocking AudioCapture via sounddevice
-    analyzer.py           FFT band energy analyzer (low/mid/high/overall)
-    synthetic.py          Synthetic audio source for demo/testing (no mic needed)
+    input.py                Non-blocking sounddevice capture
+    analyzer.py             Real-time FFT band analyzer
+    beat_detector.py        BPM estimation from onset intervals
+    synthetic.py            Synthetic audio source (no hardware needed)
+    offline_analyzer.py     Batch FFT + phrase/onset detection
+    file_loader.py          WAV / FLAC / MP3 loader
   engine/
-    smoothing.py          EMA EnvelopeFollower + LaneSmoother (Impact, Room)
-    palettes.py           HSV palettes, shortest-path hue interpolation, hold/transition SM
-    gamma.py              Gamma correction (v^2.2, clamp, DMX scaling)
-    lanes.py              RoomLane renderer (mode brightness profile + saturation scale)
-    modes.py              Mode definitions with brightness profiles (base/max/pulse/sat/hold)
-    safety.py             Safety engine (blackout, strobe disable, master dimmer)
-  dmx/
-    universe.py           512-ch DMXUniverse (1-indexed public API)
-    output_mock.py        MockDMXOutput (logs changes, no hardware needed)
-    output_enttec_pro.py  EnttecProOutput (hardware-ready, untested)
+    smoothing.py            EMA EnvelopeFollower + LaneSmoother
+    palettes.py             HSV palettes, hue interpolation, hold/transition SM
+    lanes.py                RoomLane, impact/room rendering
+    modes.py                6 mode definitions (brightness profile, palette key)
+    safety.py               Blackout, strobe gate, master dimmer
+    gamma.py                Gamma correction (v^2.2, DMX scaling)
+    strobe.py               EDM lift strobe engine
+    hue_crossfader.py       Smooth hue crossfade on mode switch
+    transitions.py          Mode transition handler
+    scenes.py               SceneManager + preset activation
+    deterministic.py        Seeded replay engine (song preview)
+    settings_snapshot.py    Captures engine settings for deterministic replay
   fixtures/
-    fixture.py            FixtureBase dataclass
-    rockwedge.py          RockWedge 8-ch RGBWAUV mapper
+    fixture.py              FixtureBase dataclass
+    rockwedge.py            RockWedge 8-ch RGBWAUV (current hardware placeholder)
+    chauvet_wash_fx2.py     Chauvet Wash FX2 — 3/4/8/28-ch mapper
+    chauvet_gigbar_move_ils.py  Chauvet GigBAR Move+ILS — 29-ch mapper
+    djflx_beam.py           DJFLX 10-ch moving beam mapper
+    aiming.py               FixtureAimingTool (pan/tilt presets)
+    positions.json          Named pan/tilt presets
+    states.json             Named color/intensity presets
+  dmx/
+    universe.py             512-ch DMXUniverse (1-indexed)
+    output_mock.py          MockDMXOutput (no hardware needed)
+    output_enttec_pro.py    Enttec USB Pro protocol
+    output_artnet.py        Art-Net 4 UDP output
+  data/
+    lighting_program.py     LightingProgram model + fingerprinting
+    program_store.py        Save / load / index programs
+    setlist.py              Setlist + SetlistEntry models
+    setlist_store.py        Setlist file I/O
+  midi/
+    input.py                MIDI controller input (mido/rtmidi)
   ui/
-    terminal_debug.py     ANSI refreshing terminal overlay (40 FPS)
+    terminal_debug.py       ANSI 40 FPS terminal overlay
   config/
-    rig_config.json       Rig configuration
-    palettes/             dinner, open_dance, banger, indian_latin, speech, slow_dance
-  tests/
-    test_lightbrain.py    115 automated tests (pytest)
+    rig_config.json         Fixture layout + hardware settings
+    app_config.json         Web server / headless mode toggle
+    palettes/               6 palette files (one per mode)
+    scenes/                 9 wedding scene presets
   scripts/
-    list_audio_devices.py
+    list_audio_devices.py   Find your audio device index
     test_audio_analyzer.py
-    test_mock_rockwedge.py  Full mock pipeline with keyboard mode switching
+    test_mock_rockwedge.py  Full pipeline, keyboard mode switching
     test_visualizer.py      2D pygame rig preview
-    test_dmxking_rockwedge.py
+    test_dmxking_rockwedge.py  Hardware DMX test
+    test_song_preview.py    Offline analysis + deterministic replay
+  tests/
+    test_lightbrain.py      422+ automated tests
+  docs/
+    ARCHITECTURE.md         System design + module guide
+    ROADMAP.md              Sprint history + completed features
 ```
 
 ---
 
 ## Installation
 
-Python 3.10+ recommended.
+Python 3.10+ required.
 
 ```bash
+git clone <repo>
 cd lightbrain
 
-# Create virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate        # macOS/Linux
+source venv/bin/activate        # macOS / Linux
 # venv\Scripts\activate         # Windows
 
-# Install Python dependencies
 pip install -r requirements.txt
 ```
 
 ### System dependency: PortAudio
 
-`sounddevice` requires the PortAudio C library. Install it for your OS:
+`sounddevice` needs the PortAudio C library:
 
-**macOS:**
 ```bash
+# macOS
 brew install portaudio
-```
 
-**Ubuntu/Debian:**
-```bash
+# Ubuntu / Debian
 sudo apt-get install libportaudio2 portaudio19-dev
+
+# Windows — bundled with sounddevice wheel, no extra install
 ```
-
-**Windows:**
-PortAudio is bundled with the sounddevice wheel. No manual install needed.
-
-### pygame
-
-pygame is installed automatically via `pip install -r requirements.txt`.
-No additional system libraries are required for most platforms.
 
 ---
 
 ## Quick start — no hardware needed
 
 ```bash
-# 1. List available audio devices
-python scripts/list_audio_devices.py
-
-# 2. Run audio analyzer test (demo mode — no microphone needed)
-python scripts/test_audio_analyzer.py --demo
-
-# 3. Run full mock pipeline with keyboard mode switching (demo mode)
-python scripts/test_mock_rockwedge.py --demo
-
-# 4. Run the 2D rig visualizer (simulated audio)
-python scripts/test_visualizer.py --simulate
-
-# 5. Run with real microphone (replace 2 with your device index)
-python scripts/test_mock_rockwedge.py --device 2
-
-# 6. Run full app
+# Synthetic audio, mock DMX, terminal overlay
 python -m app.main --demo
-python -m app.main --device 2 --mode dinner
-```
 
-Press `Ctrl+C` to stop terminal scripts. Press `Q` or `Esc` in the visualizer.
-
----
-
-## Preview Visualizer
-
-The 2D rig preview lets you see how modes and palettes look before
-connecting physical fixtures.
-
-```bash
-# Simulated audio (no microphone or routing needed):
+# With 2D pygame visualizer
 python scripts/test_visualizer.py --simulate
 
-# Try live audio, fall back to simulated if unavailable:
-python scripts/test_visualizer.py
+# With web dashboard  →  open http://localhost:8765/
+python -m app.main --demo --web
 
-# Choose a starting mode:
-python scripts/test_visualizer.py --simulate --mode banger
+# With iPad controller  →  open http://<your-ip>:8080/ on iPad
+python -m app.main --demo --headless --web --ipad-port 8080
+
+# Real audio (find your device index first)
+python scripts/list_audio_devices.py
+python -m app.main --device 2
 ```
 
-### What you'll see
+### CLI flags
 
-- **18 uplights** glowing and pulsing around the dance floor perimeter
-- **2 wash effects** (Chauvet Wash FX) flanking the DJ booth
-- **1 GigBAR central wash** with sparkle/derby dots on the dance floor
-- **2 DJFLX beams** sweeping slowly from the DJ area toward the floor
-- **Impact flash** overlay in energetic modes (Banger, Open Dance, Indian/Latin)
-- **Blackout** immediately blacks out everything with a large BLACKOUT label
-
-### Visualizer keyboard controls
-
-| Key    | Action           |
-|--------|------------------|
-| O      | Open Dance       |
-| D      | Dinner           |
-| B      | Banger           |
-| I      | Indian / Latin   |
-| S      | Speech           |
-| L      | Slow Dance       |
-| Space  | Blackout toggle  |
-| A      | Toggle Live/Simulated audio |
-| P      | Pause / unpause animation |
-| Q / Esc | Quit           |
-
-### Mode visual differences
-
-| Mode        | Look                                                 |
-|-------------|------------------------------------------------------|
-| Dinner      | Warm amber/champagne, low brightness, no sparkle     |
-| Speech      | Warm white/amber, very calm, no sparkle or flash     |
-| Open Dance  | Blue/purple, moderate pulse, light sparkle           |
-| Banger      | Full brightness, heavy sparkle, impact flashes, fast beams |
-| Indian/Latin| Saturated magenta/gold, lively sparkle, active beams |
-| Slow Dance  | Soft lavender/blush, slow beams, no sparkle          |
-
-### Known visualizer limitations
-
-- The scene is a stylized 2D layout, not a room photo or 3D model
-- No haze, gobos, or optical simulation
-- All 18 uplights show the same color (individual addressing is Sprint 2+)
-- Beam spread is simplified (no gobo patterns)
-- Sparkle is randomized, not physics-based
-- GigBAR beam lines not yet shown (central wash + sparkle only)
+| Flag | Description |
+|------|-------------|
+| `--demo` | Synthetic audio source (no microphone needed) |
+| `--device N` | Use audio input device N (from list_audio_devices) |
+| `--mode MODE` | Starting mode (open_dance / dinner / banger / indian_latin / speech / slow_dance) |
+| `--web` | Enable web dashboard on port 8765 |
+| `--web-port N` | Override dashboard port |
+| `--ipad-port N` | Enable iPad PWA on port N (default 8080) |
+| `--headless` | No terminal overlay or pygame window (use with web/iPad) |
+| `--serial PORT` | DMX output via Enttec USB Pro (e.g. /dev/ttyUSB0 or COM3) |
+| `--artnet IP` | DMX output via Art-Net UDP to IP address |
 
 ---
 
-## Keyboard mode switching (terminal scripts)
+## Web dashboard
 
-Both `scripts/test_mock_rockwedge.py` and `python -m app.main` support
-live keyboard mode switching in a real terminal:
+Open **http://localhost:8765/** in a browser (or replace `localhost` with your
+machine's IP from another device on the same network).
 
-| Key    | Mode           |
-|--------|----------------|
-| O      | Open Dance     |
-| D      | Dinner         |
-| B      | Banger         |
-| I      | Indian / Latin |
-| S      | Speech         |
-| L      | Slow Dance     |
-| Space  | Blackout toggle|
-| Q      | Quit           |
+### What you can do
+
+- **Mode** buttons — switch lighting behavior instantly
+- **Scene presets** — activate wedding moments (Grand Entrance, First Dance, etc.)
+- **Strobe Master** — fader controls the level for both auto EDM strobe and manual strobe
+- **STROBE HOLD** — hold to strobe at whatever level the master fader is set; release to stop
+- **FLASH** — single bright hit
+- **Kill switches** — STROBE / DERBY / LASER buttons; when red = that element is silenced
+- **BLACKOUT** — instant fade to black (0.8s fade-out); click again to restore
+- **Canvas** — live 2D fixture visualizer; border glows when strobe fires, flashes on FLASH
+
+The dashboard connects via WebSocket and updates at ~10 fps. Commands send
+instantly via fetch POST.
 
 ---
 
-## Audio devices
+## iPad PWA controller
+
+Open **http://\<your-ip\>:8080/** in Safari on the iPad. Add to Home Screen
+for full-screen standalone mode (no browser chrome).
+
+The iPad controller has three tabs:
+
+### PERF tab (live performance)
+- **Audio Energy** bars — low / mid / high / overall
+- **Mode** buttons — 3 per row, compact layout
+- **Scene Presets** — F1–F9 shortcuts, Release button
+- **Faders** — Master / Uplight / Strobe (synced from engine on connect)
+- **Kill Switches** — STROBE / DERBY / LASER; tap to kill (shows "OFF" + red when killed), tap again to restore
+- **Momentary** — FLASH (tap) and STROBE HOLD (hold and release)
+
+### TEST tab (fixture testing, no hardware required)
+- Tap any color button to lock all fixtures to that color: Blackout, Dim, White,
+  Red, Green, Blue, Yellow, Cyan, Magenta, UV, Amber, Strobe
+- Moving head aim snaps: Left / Center / Right pan, Ceiling / Floor / Front tilt
+- **RELEASE TEST** — returns to live engine
+
+### SETUP tab
+- DMX output type and engine FPS readout
+- Fixture aiming joystick — touch-drag to move the spot head
+- Save named position presets
+
+---
+
+## Hardware: current rig (DMX adapter arriving ~2 weeks)
+
+### Target fixture list
+
+| ID | Fixture | Type | DMX Addr | Lane | Personality |
+|----|---------|------|----------|------|-------------|
+| `washfx2_l` | Chauvet Wash FX2 Left  | wash  | 1  | room | 8Ch |
+| `washfx2_r` | Chauvet Wash FX2 Right | wash  | 9  | room | 8Ch |
+| `gigbar_001` | Chauvet GigBAR Move+ILS | combo | 17 | room | 29Ch |
+
+Set in **config/rig_config.json** — swap the active `fixtures` array from the
+placeholder RockWedge to `_hardware_fixtures` when hardware is connected.
+
+### DMX adapter
+
+**Enttec USB Pro** or compatible device.
 
 ```bash
+# List serial ports
+python scripts/test_dmxking_rockwedge.py --list-ports
+
+# Hardware test (fixture must be powered and addressed)
+python scripts/test_dmxking_rockwedge.py --port /dev/ttyUSB0
+
+# Run engine with hardware output
+python -m app.main --device 2 --serial /dev/ttyUSB0 --web
+```
+
+### Art-Net output
+
+```bash
+python -m app.main --demo --artnet 2.0.0.1
+```
+
+---
+
+## Fixture configuration
+
+Edit **config/rig_config.json**:
+
+```json
+{
+  "dmx": {
+    "output": "enttec",
+    "serial_port": "/dev/ttyUSB0"
+  },
+  "fixtures": [
+    {
+      "id": "washfx2_l",
+      "type": "wash_fx2",
+      "dmx_address": 1,
+      "lane": "room",
+      "group": "left"
+    }
+  ]
+}
+```
+
+Supported fixture types: `rockwedge`, `wash_fx2`, `gigbar_move_ils`, `djflx_beam`.
+
+For **GigBAR Move+ILS**, set it to **29Ch** personality on the fixture menu. Optional config keys:
+
+```json
+{
+  "type": "gigbar_move_ils",
+  "dmx_address": 17,
+  "spot_pan_deg": 270,
+  "spot_tilt_dmx": 90,
+  "laser_enabled": false
+}
+```
+
+---
+
+## Modes
+
+| Key | Name | Character | Palette |
+|-----|------|-----------|---------|
+| `open_dance` | Open Dance | Moderate pulse, light energy | Blue / Purple / Cyan |
+| `dinner` | Dinner | Warm, low brightness, calm | Amber / Champagne / Warm White |
+| `banger` | Banger | Full brightness, heavy sparkle, fast | Red / Magenta / Electric Blue |
+| `indian_latin` | Indian / Latin | Vibrant, active, lively | Magenta / Gold / Emerald |
+| `speech` | Speech | Very calm, professional | Warm White / Amber |
+| `slow_dance` | Slow Dance | Soft, romantic, slow beams | Lavender / Blush / Champagne |
+
+Modes gate automatic strobe: only `banger` and `indian_latin` allow the EDM
+lift strobe engine to fire. Manual STROBE HOLD works in any mode.
+
+---
+
+## Scene presets
+
+Nine wedding scenes ship in **config/scenes/**. Activate via the dashboard,
+iPad, or F1–F9 keyboard shortcut:
+
+| Key | Scene |
+|-----|-------|
+| F1 | test |
+| F2 | Bouquet / Garter |
+| F3 | Cake Cutting |
+| F4 | Dinner Service |
+| F5 | First Dance |
+| F6 | Grand Entrance |
+| F7 | Last Dance |
+| F8 | Open Dancing |
+| F9 | Send-Off |
+| F10 | Release Scene (return to mode) |
+
+Create custom scenes in the **Scene Editor** tab of the web dashboard.
+
+---
+
+## Audio setup
+
+```bash
+# Find your device index
 python scripts/list_audio_devices.py
 ```
 
-Find your DJ monitor or virtual loopback device index.
+**Virtual loopback** (route DJ software output into LightBrain):
+- macOS: [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+- Windows: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 
-**Virtual loopback for DJ software:**
-- macOS: BlackHole (https://github.com/ExistentialAudio/BlackHole)
-- Windows: VB-Audio Virtual Cable (https://vb-audio.com/Cable/)
-
-After installing, route your DJ software output to the virtual device,
-then select that device index with `--device N`.
+Set `device_index` in `config/rig_config.json` or use `--device N` on the
+command line.
 
 ---
 
-## Modes and palettes
+## Keyboard controls
 
-| Key            | Display        | Colors                                          |
-|----------------|----------------|-------------------------------------------------|
-| `open_dance`   | Open Dance     | Royal Blue / Purple / Cyan / Magenta            |
-| `dinner`       | Dinner         | Warm Amber / Champagne / Warm White / Soft Rose |
-| `banger`       | Banger         | Red / Magenta / Electric Blue / White           |
-| `indian_latin` | Indian / Latin | Magenta / Gold / Emerald / Royal Blue / Amber   |
-| `speech`       | Speech         | Warm White / Amber / Champagne                  |
-| `slow_dance`   | Slow Dance     | Soft Lavender / Blush / Champagne / Warm White  |
+### Terminal (main app + test scripts)
 
-Each mode now has a **brightness profile** (Sprint 1B):
+| Key | Action |
+|-----|--------|
+| O | Open Dance mode |
+| D | Dinner mode |
+| B | Banger mode |
+| I | Indian / Latin mode |
+| S | Speech mode |
+| L | Slow Dance mode |
+| Space | Blackout toggle |
+| F1–F9 | Activate scene preset |
+| F10 | Release scene |
+| Q | Quit |
 
-| Mode        | Base brt | Max brt | Pulse | Sat scale | Hold/color |
-|-------------|----------|---------|-------|-----------|------------|
-| Open Dance  | 0.20     | 1.00    | 0.15  | 1.00      | 4s         |
-| Dinner      | 0.35     | 0.65    | 0.06  | 0.85      | 8s         |
-| Banger      | 0.30     | 1.00    | 0.20  | 1.00      | 2s         |
-| Indian/Latin| 0.25     | 1.00    | 0.18  | 1.00      | 3s         |
-| Speech      | 0.50     | 0.70    | 0.02  | 0.50      | 15s        |
-| Slow Dance  | 0.40     | 0.75    | 0.08  | 0.75      | 10s        |
+### Pygame visualizer
+
+Same mode keys plus:
+
+| Key | Action |
+|-----|--------|
+| A | Toggle live / simulated audio |
+| P | Pause / unpause animation |
+| Q / Esc | Quit |
 
 ---
 
-## Run the automated tests
+## Safety and kill switches
+
+**Blackout** — instantly silences all output. Activates a 0.8-second
+fade-out. Available on dashboard, iPad, and Space bar. Restored by pressing again.
+
+**Kill switches** (dashboard and iPad PERF tab):
+- **STROBE** — silences all strobe output (auto EDM and manual hold)
+- **DERBY** — stops the GigBAR derby rotation and blanks derby colors
+- **LASER** — forces GigBAR laser off regardless of config
+
+Kill switches are independent of mode — they override at the last step
+before DMX write. Red label ("STROBE OFF") = element is silenced.
+
+---
+
+## Run the test suite
 
 ```bash
-pip install pytest   # one-time
 python -m pytest tests/ -v
 ```
 
-All **115 tests** should pass. Tests cover:
-- Hue interpolation (shortest-path, wraparound)
-- Gamma correction (curve, clamp, DMX scaling)
-- DMX universe (channel API, clamping, blackout, diff)
-- Smoothing (bounds, NaN safety, cooldown hold, attack/decay timing)
-- Palette loading (all 6 palettes, graceful failure on bad JSON)
-- Palette hold/transition state machine (HOLDING/TRANSITIONING states)
-- RockWedge mapper (channel writes, dimmer/RGB separation, sprint constraints)
-- Safety engine (blackout, mode scale, master dimmer, strobe disabled)
-- Mode brightness profiles (base/max/pulse/saturation per mode)
-- Full room lane pipeline (end-to-end bounds check, mode profile behavior)
-- Synthetic audio (valid blocks, non-zero energy, no NaN/Inf)
-- Fixture state dataclasses (instantiation, field types)
-- Scene layout (18 uplights, RGB validity, blackout suppression, sparkle per mode)
-
----
-
-## DMXking ultraDMX MAX (hardware — when it arrives)
-
-**Do not run this without a DMX fixture connected, powered, and addressed correctly.**
-
-```bash
-# List available serial ports
-python scripts/test_dmxking_rockwedge.py --list-ports
-
-# Run hardware test: blackout -> red -> green -> blue -> white -> fade -> blackout
-python scripts/test_dmxking_rockwedge.py --port /dev/ttyUSB0
-python scripts/test_dmxking_rockwedge.py --port COM3 --address 1
-
-# Run full app with hardware DMX output
-python -m app.main --device 2 --serial /dev/ttyUSB0
-```
-
-The `output_enttec_pro.py` module is fully implemented using the Enttec USB Pro
-protocol. It has not been tested against physical hardware yet.
-
----
-
-## RockWedge channel map (provisional — verify against physical unit)
-
-| Ch | Function | Sprint 1 |
-|----|----------|----------|
-| 1  | Dimmer   | Gamma-corrected brightness |
-| 2  | Red      | Pure hue gamma-corrected (no brightness in channel) |
-| 3  | Green    | Pure hue gamma-corrected |
-| 4  | Blue     | Pure hue gamma-corrected |
-| 5  | White    | 0 (Sprint 2: palette-driven) |
-| 6  | Amber    | 0 (Sprint 2: palette-driven) |
-| 7  | UV       | 0 (Sprint 2: palette-driven) |
-| 8  | Strobe   | 0 (globally disabled Sprint 1) |
-
-**Dimmer/RGB design:** Ch1 carries the overall brightness. Ch2-4 carry pure hue
-at full value. The fixture hardware multiplies dimmer × colour to produce the
-actual output — this avoids double-dimming and gives correct perceptual response.
+422+ tests covering: audio analysis, beat detection, gamma, DMX universe,
+smoothing, palettes, modes, safety, room lane, all fixture mappers, scene
+system, strobe engine, hue crossfade, Art-Net, hybrid blend, program
+save/load, setlist, web API, iPad commands, and the full codebase audit.
 
 ---
 
 ## Troubleshooting
 
 **`OSError: PortAudio library not found`**
-Install the system library (see Installation above). This is separate from the
-Python package — pip alone is not enough.
+Install the system library (see Installation above). `pip` alone is not enough.
 
-**`PortAudioError: Error querying device -1` / no devices listed**
-No audio hardware in this environment. Use `--demo` or `--simulate` flag.
+**`PortAudioError: Error querying device -1`**
+No audio hardware detected. Use `--demo` or `--simulate`.
 
-**Visualizer window doesn't open / pygame error**
-Make sure pygame 2.5+ is installed: `pip install "pygame>=2.5.0"`
-On headless servers, set `SDL_VIDEODRIVER=dummy` for unit tests only.
+**BPM reads too high (200+)**
+The beat detector caps at 180 BPM and normalizes by halving. If you still
+see high readings, the audio signal has a lot of transients — this is normal
+in demo mode.
 
-**Overlay is scrolling instead of staying fixed**
-ANSI cursor control requires a real TTY. If you pipe output to a file or log,
-it will scroll. Run interactively in a terminal.
+**Visualizer window won't open**
+Requires pygame 2.5+: `pip install "pygame>=2.5.0"`. On headless servers
+set `SDL_VIDEODRIVER=dummy` (tests only).
 
-**FPS shows `---` on first frame**
-Normal — the overlay skips the first sample to avoid a false spike. FPS
-stabilises to ~40 by the second frame.
+**DMX channels all zero on startup**
+Room energy takes ~1–2 seconds to build from silence (600ms EMA attack).
+Wait a moment — values will appear.
 
-**DMX channels all zero**
-Room energy takes ~1-2 seconds to build up from silence (600ms attack tau).
-Make sure audio is actually playing. With `--demo`, values appear within 1s.
+**Flash / Strobe look like nothing happens in the visualizer**
+The canvas visualizer draws lighting intent state, not per-frame DMX bytes.
+On real hardware, strobe fires at the DMX level. Watch the canvas border:
+it glows yellow while strobe hold is active, pops blue-white on a flash.
 
 **`ModuleNotFoundError`**
-Run scripts from the repo root, not from inside a subdirectory:
+Always run from the repo root:
 ```bash
 cd /path/to/lightbrain
-python scripts/test_mock_rockwedge.py --demo
+python -m app.main --demo
 ```
 
 ---
 
-## Current assumptions
+## Architecture and design
 
-- One RockWedge-style uplight at DMX address 001, 8-channel RGBWAUV mode
-- Gamma = 2.2 (standard sRGB; adjust per fixture if needed)
-- Audio block size = 1024 samples at 44100 Hz = ~23ms per FFT frame
-- Gain normalization is adaptive (running-peak RMS, per band)
-- Strobe is disabled globally in Sprint 1
-- White / Amber / UV channels are zero (palette-driven logic Sprint 2)
-- Palette transitions use hold/blend state machine (hold_ms per mode, then transition_ms blend)
+See **docs/ARCHITECTURE.md** for the full system design, module breakdown,
+safety priority chain, and determinism contract.
 
----
-
-## Behavior Modes
-
-LightBrain supports three behavior levels (see `docs/SONG_PREVIEW_MODE.md`):
-
-| Mode | Description | Determinism |
-|------|-------------|-------------|
-| **Live Reactive** | Real-time audio → real-time lighting. Same song may look similar but not identical each time. Responds to DJ cuts, loops, scratches. | Non-deterministic by design |
-| **Deterministic Preview** *(Sprint 3)* | Audio file → offline analysis → seeded engine → fixed output. Same file + same mode + same settings + same seed = identical result every run. | Fully deterministic |
-| **Saved Program** *(Sprint 4)* | Generated lighting pass saved as a `LightingProgram`. Replay exactly or use as a hybrid guide while still reacting live. | Exact replay |
-
-Full architecture: `docs/ARCHITECTURE.md`
-Roadmap: `docs/ROADMAP.md`
-Song Preview spec: `docs/SONG_PREVIEW_MODE.md`
-
----
-
-## Not yet built (see docs/ROADMAP.md for full plan)
-
-### Sprint 2 (near-term)
-- Floor / Beam / Sparkle lanes wired to DMX
-- White / Amber / UV channel control
-- Beat / phrase detection for palette transitions
-- Individual uplight addressing
-- MIDI controller input
-- Full GigBAR, Wash FX, DJFLX channel maps
-
-### Sprint 3 — Song Preview Mode
-- Load audio file (WAV/MP3/FLAC) into the visualizer
-- Offline analysis → `AnalysisTimeline` (energy, onsets, phrases, drops)
-- `DeterministicEngine` with fixed seed and clock injection
-- `FixtureStateTimeline` playback with playhead and waveform display
-- Mode / palette / intensity controls before preview
-- `scripts/test_song_preview.py` runner
-
-### Sprint 4 — Saved Program Mode
-- `LightingProgram` model (see `docs/SONG_PREVIEW_MODE.md`)
-- Save / load generated lighting shows
-- Exact replay or hybrid live mode
-
-### Later
-- Art-Net / sACN network output
-- Raspberry Pi deployment
-- Web dashboard / mobile app
-- Fixture wizard
-- Song fingerprint library auto-matching
+See **docs/ROADMAP.md** for the complete sprint history.
