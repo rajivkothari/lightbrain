@@ -106,6 +106,7 @@ class RigVisualState:
     sparkles:  List[SparkleState]
     impacts:   List[ImpactState]
     blackout_active: bool
+    ambient_warm: float = 0.0   # 0–1; warm W/A channel level for canvas tint
 
 
 # ---------------------------------------------------------------------------

@@ -57,8 +57,9 @@ from dmx.output_enttec_pro import EnttecProOutput
 from fixtures.rockwedge import RockWedge
 
 from ui.terminal_debug import TerminalDebugOverlay
-from engine.scenes  import SceneManager
-from engine.strobe  import StrobeEngine
+from engine.scenes        import SceneManager
+from engine.strobe        import StrobeEngine
+from engine.hue_crossfader import HueCrossfader
 from app.render.scene import SceneLayout
 from app.web import server as _web
 
@@ -265,6 +266,7 @@ def main():
     _all_scenes = scene_mgr.list_scenes()
     scene_layout   = SceneLayout()
     strobe_engine  = StrobeEngine()
+    hue_crossfader = HueCrossfader(duration_s=0.5)
 
     # ---- web dashboard ----
     if args.web:
@@ -295,10 +297,13 @@ def main():
     last_bands = AudioBands()
     last_lanes: dict = {"impact": 0.0, "room": 0.0}
     quit_flag  = False
+    _last_hue  = 0.0       # raw hue from previous frame — reference for snap()
+    _prev_mode_key = mode_key  # detect mode changes within a frame
 
     try:
         while not quit_flag:
             frame_start = time.monotonic()
+            _prev_mode_key = mode_key   # capture before input handling changes it
 
             # --- keyboard ---
             while not _key_queue.empty():
@@ -569,16 +574,24 @@ def main():
 
             # --- web state push ---
             if args.web:
+                # Snap hue crossfader on mode change (before blend)
+                _raw_hue = room_out.hsv.h
+                if _prev_mode_key != mode_key:
+                    hue_crossfader.snap(_last_hue, instant=current_mode.transition_snap)
+                _display_hue = hue_crossfader.blend(_raw_hue)
+                _last_hue = _raw_hue   # update reference for next frame
+
                 _active_s = scene_mgr.active_scene
                 _rig_web = scene_layout.update_and_build(
                     bands=bands_dict, lanes=last_lanes,
-                    hue=room_out.hsv.h, saturation=room_out.hsv.s,
+                    hue=_display_hue, saturation=room_out.hsv.s,
                     brightness=room_out.hsv.v,
                     base_brt=room_out.base_brightness,
                     pulse_brt=room_out.pulse_brightness,
                     mode_key=mode_key, palette_name=room_lane.palette_name,
                     blackout=safety.state.blackout_active,
                     strobe_on=_strobe_on, strobe_rate=_eff_strobe,
+                    ambient_white=eff_white, ambient_amber=eff_amber,
                 )
                 _rig_web = scene_mgr.apply_to_rig_state(_rig_web)
                 _web.update_state(

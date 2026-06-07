@@ -41,6 +41,31 @@ BOOTH_L, BOOTH_T, BOOTH_R, BOOTH_B = 430, 620, 770, 700
 # Per-mode behavior scales
 # ---------------------------------------------------------------------------
 
+# Hue offset between uplight zones (top/bottom/left/right walls).
+# Larger values make the floor look more dramatically multi-colored.
+_ZONE_OFFSET: dict = {
+    "dinner":       12.0,
+    "speech":        0.0,   # uniform: neutral white look
+    "open_dance":   35.0,
+    "banger":       50.0,
+    "indian_latin": 40.0,
+    "slow_dance":   18.0,
+    "blackout":      0.0,
+}
+
+
+def _uplight_zone_hue(i: int, base_hue: float, zone_offset: float) -> float:
+    """Return hue for uplight i: top/bottom/left/right walls get distinct offsets."""
+    if i < 6:
+        return base_hue                            # top wall
+    elif i < 12:
+        return (base_hue + zone_offset) % 360      # bottom wall
+    elif i < 15:
+        return (base_hue - zone_offset * 0.5) % 360  # left wall
+    else:
+        return (base_hue + zone_offset * 0.5) % 360  # right wall
+
+
 # How much sparkle each mode shows (0 = none, 1 = full)
 _SPARKLE_SCALE: dict = {
     "dinner":      0.0,
@@ -167,6 +192,8 @@ class SceneLayout:
         now:            Optional[float] = None,   # Sprint 3: inject clock
         strobe_on:      bool  = False,            # EDM rise strobe oscillator on-phase
         strobe_rate:    float = 0.0,              # 0–1 strobe speed/intensity
+        ambient_white:  float = 0.0,              # W channel level for canvas warmth
+        ambient_amber:  float = 0.0,              # A channel level for canvas warmth
     ) -> RigVisualState:
         """Build a complete RigVisualState for one render frame.
 
@@ -203,14 +230,17 @@ class SceneLayout:
         eff_brightness = brightness * uplight_dim
 
         # ------------------------------------------------------------------
-        # Uplights (18)
+        # Uplights (18) — 4 wall zones with mode-dependent hue offsets
         # ------------------------------------------------------------------
+        zone_offset = _ZONE_OFFSET.get(mode_key, 0.0)
         uplights = [
             UplightState(
                 fixture_id=f"rw_{i:02d}",
                 x=float(pos[0]),
                 y=float(pos[1]),
-                color_rgb=main_rgb,
+                color_rgb=_hsv_to_rgb(
+                    _uplight_zone_hue(i, hue, zone_offset), saturation, 1.0
+                ),
                 brightness=eff_brightness,
                 active=not blackout,
             )
@@ -348,6 +378,8 @@ class SceneLayout:
             )
         ]
 
+        ambient_warm = min(1.0, ambient_amber + ambient_white * 0.5) if not blackout else 0.0
+
         return RigVisualState(
             mode=mode_key,
             palette_name=palette_name,
@@ -363,4 +395,5 @@ class SceneLayout:
             sparkles=sparkles,
             impacts=impacts,
             blackout_active=blackout,
+            ambient_warm=ambient_warm,
         )

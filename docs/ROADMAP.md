@@ -145,6 +145,28 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
+## Phase 11 — Sprint 11: Live Visual Quality
+
+**Status: Complete — 414 tests passing**
+
+### Delivered
+
+- [x] `engine/hue_crossfader.py` — `HueCrossfader`: captures departing hue on mode switch and blends to the new hue over 0.5s using shortest-path interpolation; `instant=True` skips crossfade for snap modes (banger)
+- [x] `app/render/scene.py` — per-fixture color zones: 4 wall segments (top/bottom/left/right) each get mode-specific hue offsets; `_ZONE_OFFSET` dict drives offsets from 0° (speech) to 50° (banger); `ambient_white`/`ambient_amber` params feed `RigVisualState.ambient_warm`
+- [x] `app/render/fixture_state.py` — `RigVisualState.ambient_warm: float` field carries the blended W/A channel level to the canvas
+- [x] `app/main.py` — `HueCrossfader` wired to mode-change detection; `_last_hue` tracking; `ambient_white`/`ambient_amber` passed to `scene_layout.update_and_build()`
+- [x] `app/web/server.py` — `serialize_rig_state()` includes `ambient_warm`
+- [x] `app/web/dashboard.html` — amber floor-wash overlay (`rgba(255,148,24,…)`) drawn over dance floor when `ambient_warm > 0.04` (visible during dinner/slow_dance/indian_latin modes)
+
+### What these fix
+
+- **Color zones**: all 18 uplights previously shared one hue; now top/bottom walls contrast and sides blend between them — most visible in banger (±50°) and open_dance (±35°)
+- **Warm canvas tint**: White/Amber DMX channels drove physical hardware warmth but were completely invisible in the visualizer; now dinner/slow_dance modes show an amber floor wash
+- **Hue crossfade**: mode switches previously caused an instant palette hue jump; now the display hue blends smoothly over 0.5s (DMX output unaffected — hardware transitions are already handled by the palette hold/blend cycle)
+- **Beat-sync note**: already fully wired in earlier sprints (banger=`fast_beat`, open_dance/indian_latin=`energy_trigger`); no changes needed
+
+---
+
 ## Phase 10 — Sprint 10: EDM Lift Strobe
 
 **Status: Complete — 399 tests passing**
@@ -290,3 +312,4 @@ python -m app.main --demo --web
 | 8 | 359 ✅ | Web dashboard (FastAPI + WebSocket), live energy bars, mode/scene/blackout control |
 | 9 | 378 ✅ | Canvas rig visualizer, scene editor UI, scene CRUD API, serialize_rig_state |
 | 10 | 399 ✅ | EDM lift strobe engine, safety chain strobe passthrough, RockWedge Ch8, visual flash |
+| 11 | 414 ✅ | Per-fixture color zones, mode hue crossfade, ambient warm tint in canvas |

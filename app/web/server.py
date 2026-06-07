@@ -161,6 +161,7 @@ def serialize_rig_state(rig: Any) -> dict:
              "active": i.active}
             for i in rig.impacts
         ],
+        "ambient_warm": round(float(getattr(rig, "ambient_warm", 0.0)), 3),
     }
 
 

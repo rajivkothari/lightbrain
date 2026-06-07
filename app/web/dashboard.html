@@ -289,7 +289,8 @@ const BL = 430, BT = 620, BR = 770, BB = 700;  // DJ booth
 
 let _lastFixtures = null;
 let _blackoutActive = false;
-let _beatFlash = 0;   // 0–1, set to 1 on beat, decays each draw frame
+let _beatFlash = 0;    // 0–1, set to 1 on beat, decays each draw frame
+let _ambientWarm = 0;  // 0–1, driven by W/A channels (dinner / slow dance)
 
 function _initCanvas() {
   const c = document.getElementById('rig-canvas');
@@ -368,6 +369,13 @@ function _drawRig(fixtures, blackout) {
       (fixtures.impacts  || []).forEach(im => _drawImpact(ctx, im, s, W, H));
     }
   }
+  // Warm W/A channel tint — amber wash over dance floor for dinner / slow dance
+  if (_ambientWarm > 0.04 && !blackout) {
+    const wa = Math.min(0.22, _ambientWarm * 0.22);
+    ctx.fillStyle = `rgba(255,148,24,${wa.toFixed(3)})`;
+    ctx.fillRect(FL*s, FT*s, (FR-FL)*s, (FB-FT)*s);
+  }
+
   _drawLegend(ctx, s, W);
   if (blackout) {
     ctx.font = `bold ${Math.max(11, 14*s)}px monospace`;
@@ -714,6 +722,7 @@ function applyState(s) {
   // Canvas — always draw regardless of active tab
   if (s.fixtures && Object.keys(s.fixtures).length) {
     _lastFixtures = s.fixtures;
+    _ambientWarm  = s.fixtures.ambient_warm || 0;
     _drawRig(_lastFixtures, _blackoutActive);
   }
 }

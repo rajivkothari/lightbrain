@@ -54,6 +54,7 @@ from fixtures.aiming import FixtureAimingTool
 from fixtures.djflx_beam import DJFLXBeam as _DJFLXBeamForAiming
 from app.web    import server as _web_server
 from engine.strobe import StrobeEngine
+from engine.hue_crossfader import HueCrossfader
 
 
 # ===========================================================================
@@ -3195,11 +3196,13 @@ class TestWebServerState:
 class TestWebRigState:
     """serialize_rig_state converts RigVisualState to JSON-safe dicts."""
 
-    def test_serialize_returns_dict_with_five_keys(self):
+    def test_serialize_returns_expected_keys(self):
         rig = _make_rig_state()
         result = _web_server.serialize_rig_state(rig)
         assert isinstance(result, dict)
-        assert set(result.keys()) == {"uplights", "washes", "beams", "sparkles", "impacts"}
+        assert set(result.keys()) == {
+            "uplights", "washes", "beams", "sparkles", "impacts", "ambient_warm"
+        }
 
     def test_serialize_uplights_fields(self):
         rig = _make_rig_state()
@@ -3267,7 +3270,7 @@ class TestWebRigState:
         )
         result = _web_server.serialize_rig_state(rig)
         assert result == {"uplights": [], "washes": [], "beams": [],
-                          "sparkles": [], "impacts": []}
+                          "sparkles": [], "impacts": [], "ambient_warm": 0.0}
 
 
 class TestWebSceneAPI:
@@ -3482,3 +3485,132 @@ class TestStrobeEngine:
         uni = DMXUniverse()
         rw.render_to_universe(uni, 1.0, 0.0, 1.0, 0.8, strobe=0.5)
         assert uni.get_channel(8) >= 11  # Ch8 must be in the strobe range
+
+
+# ===========================================================================
+# Sprint 11: HueCrossfader
+# ===========================================================================
+
+class TestHueCrossfader:
+    _T = 1000.0
+
+    def test_no_crossfade_returns_current(self):
+        cf = HueCrossfader()
+        assert cf.blend(90.0, now=self._T) == pytest.approx(90.0)
+
+    def test_snap_then_blend_midpoint(self):
+        cf = HueCrossfader(duration_s=1.0)
+        cf.snap(0.0, now=self._T)
+        result = cf.blend(90.0, now=self._T + 0.5)
+        assert 0.0 < result < 90.0
+
+    def test_crossfade_completes_at_duration(self):
+        cf = HueCrossfader(duration_s=0.5)
+        cf.snap(0.0, now=self._T)
+        result = cf.blend(90.0, now=self._T + 1.0)
+        assert result == pytest.approx(90.0)
+
+    def test_instant_snap_skips_crossfade(self):
+        cf = HueCrossfader(duration_s=0.5)
+        cf.snap(0.0, now=self._T, instant=True)
+        result = cf.blend(90.0, now=self._T + 0.1)
+        assert result == pytest.approx(90.0)
+
+    def test_shortest_path_through_zero(self):
+        """350° → 10° should travel +20° (through 0°), not -340°."""
+        cf = HueCrossfader(duration_s=1.0)
+        cf.snap(350.0, now=self._T)
+        result = cf.blend(10.0, now=self._T + 0.5)
+        # Midpoint of shortest arc 350°→10° is 0° (or 360°).
+        assert result > 340 or result < 20
+
+    def test_reset_clears_active(self):
+        cf = HueCrossfader(duration_s=1.0)
+        cf.snap(0.0, now=self._T)
+        cf.reset()
+        result = cf.blend(90.0, now=self._T + 0.1)
+        assert result == pytest.approx(90.0)
+
+    def test_second_snap_restarts_blend(self):
+        cf = HueCrossfader(duration_s=1.0)
+        cf.snap(0.0, now=self._T)
+        cf.snap(45.0, now=self._T + 0.3)
+        result = cf.blend(90.0, now=self._T + 0.3 + 1.0)
+        assert result == pytest.approx(90.0)
+
+
+# ===========================================================================
+# Sprint 11: uplight color zones + ambient_warm
+# ===========================================================================
+
+class TestUplightZones:
+    _BANDS = {"low_energy": 0.5, "mid_energy": 0.5,
+              "high_energy": 0.5, "overall_energy": 0.5}
+    _LANES = {"impact": 0.5, "room": 0.5}
+
+    def _build(self, mode_key="banger", hue=0.0, **kw):
+        from app.render.scene import SceneLayout
+        sl = SceneLayout()
+        sl.reset_time(0.0)
+        return sl.update_and_build(
+            bands=self._BANDS, lanes=self._LANES,
+            hue=hue, saturation=1.0, brightness=0.8,
+            base_brt=0.3, pulse_brt=0.2,
+            mode_key=mode_key, palette_name="test", blackout=False,
+            **kw,
+        )
+
+    def test_banger_top_bottom_differ(self):
+        """Banger zone_offset=50° → top and bottom wall uplights differ."""
+        import colorsys
+        rig = self._build("banger")
+        def to_h(rgb): r, g, b = rgb; h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255); return h * 360
+        top_h = to_h(rig.uplights[0].color_rgb)
+        bot_h = to_h(rig.uplights[6].color_rgb)
+        diff = min(abs(top_h - bot_h), 360 - abs(top_h - bot_h))
+        assert diff > 5.0
+
+    def test_speech_all_same_hue(self):
+        """Speech zone_offset=0 → all uplights identical."""
+        import colorsys
+        rig = self._build("speech", hue=60.0)
+        def to_h(rgb): r, g, b = rgb; h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255); return h * 360
+        hues = [to_h(u.color_rgb) for u in rig.uplights]
+        assert max(hues) - min(hues) < 1.0
+
+    def test_total_uplights_is_18(self):
+        assert len(self._build().uplights) == 18
+
+    def test_top_wall_gets_base_hue(self):
+        """Uplights 0–5 (top wall) must use the base hue unchanged."""
+        import colorsys
+        rig = self._build("banger", hue=120.0)
+        def to_h(rgb): r, g, b = rgb; h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255); return h * 360
+        for i in range(6):
+            h = to_h(rig.uplights[i].color_rgb)
+            assert abs(h - 120.0) < 2.0, f"uplight {i} hue={h:.1f} expected ~120"
+
+    def test_ambient_warm_from_amber(self):
+        rig = self._build(ambient_amber=0.6)
+        assert rig.ambient_warm > 0.0
+
+    def test_ambient_warm_from_white(self):
+        rig = self._build(ambient_white=0.4)
+        assert rig.ambient_warm > 0.0
+
+    def test_ambient_warm_zero_on_blackout(self):
+        from app.render.scene import SceneLayout
+        sl = SceneLayout()
+        sl.reset_time(0.0)
+        rig = sl.update_and_build(
+            bands=self._BANDS, lanes=self._LANES,
+            hue=30.0, saturation=1.0, brightness=0.6,
+            base_brt=0.3, pulse_brt=0.1,
+            mode_key="dinner", palette_name="test", blackout=True,
+            ambient_white=0.3, ambient_amber=0.5,
+        )
+        assert rig.ambient_warm == pytest.approx(0.0)
+
+    def test_ambient_warm_capped_at_one(self):
+        rig = self._build(ambient_amber=0.9, ambient_white=0.9)
+        assert rig.ambient_warm <= 1.0
