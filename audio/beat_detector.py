@@ -70,7 +70,7 @@ class BeatDetector:
                         mean_ivl = sum(self._beat_intervals) / len(self._beat_intervals)
                         self.bpm = 60.0 / mean_ivl if mean_ivl > 0 else 0.0
                 self._last_beat_time = now
-                strength = min(1.0, low_energy / max(avg, 1e-6) - 1.0)
+                strength = max(0.0, min(1.0, low_energy / max(avg, 1e-6) - 1.0))
                 return True, strength
 
         return False, 0.0

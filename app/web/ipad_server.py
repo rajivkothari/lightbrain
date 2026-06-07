@@ -105,7 +105,9 @@ def _build_app() -> "FastAPI":
                     _command_queue.put_nowait(cmd)
                 except (json.JSONDecodeError, ValueError):
                     pass
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, Exception):
+            pass
+        finally:
             _mgr.disconnect(ws)
 
     return app

@@ -78,8 +78,12 @@ class ArtNetOutput:
             self._sock = None
 
     def disconnect(self) -> None:
-        """Close the UDP socket."""
+        """Send blackout and close the UDP socket."""
         if self._sock is not None:
+            try:
+                self.send_universe([0] * 512)
+            except Exception:
+                pass
             self._sock.close()
             self._sock = None
 

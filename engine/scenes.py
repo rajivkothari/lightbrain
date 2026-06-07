@@ -159,8 +159,9 @@ class SceneManager:
                     data = json.load(f)
                 scene = _scene_from_dict(data)
                 self._scenes[scene.scene_id] = scene
-            except (json.JSONDecodeError, KeyError, OSError):
-                pass
+            except (json.JSONDecodeError, KeyError, OSError) as e:
+                import logging
+                logging.getLogger(__name__).warning("Failed to load scene %s: %s", fname, e)
 
     # ------------------------------------------------------------------
     # Activation

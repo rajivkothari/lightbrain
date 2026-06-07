@@ -144,8 +144,9 @@ def _keyboard_thread_fn() -> None:
                         _key_queue.put_nowait(ch.lower())
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Keyboard thread died: %s", e)
 
 
 def _start_keyboard() -> threading.Thread:
@@ -437,7 +438,10 @@ def main():
                 elif _wtype == "blackout":
                     safety.toggle_blackout()
                 elif _wtype == "strobe_master":
-                    _strobe_master = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
+                    try:
+                        _strobe_master = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
+                    except (ValueError, TypeError):
+                        pass
                 elif _wtype == "set_mode":
                     _wval = _wcmd.get("value", "")
                     if _wval in MODES:
@@ -476,7 +480,10 @@ def main():
                             room_lane.set_palette(current_palette)
                 elif _wtype == "set_fader":
                     _fname = _wcmd.get("fader", "")
-                    _fval  = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
+                    try:
+                        _fval = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
+                    except (ValueError, TypeError):
+                        continue
                     if _fname == "master":
                         _master_dimmer = _fval
                     elif _fname == "uplight":
@@ -494,7 +501,7 @@ def main():
             # --- MIDI ---
             if midi_in is not None:
                 for evt in midi_in.get_events():
-                    if evt.type == "mode":
+                    if evt.type == "mode" and evt.value in MODES:
                         new_mode    = get_mode(evt.value)
                         new_palette = all_palettes.get(new_mode.palette_key, current_palette)
                         _wau_snapshot = (last_lanes.get("wau_white", 0.0),
@@ -570,8 +577,7 @@ def main():
                 _r_f = _sc_rgb[0] / 255.0
                 _g_f = _sc_rgb[1] / 255.0
                 _b_f = _sc_rgb[2] / 255.0
-                import colorsys as _cs2
-                _sh, _ss, _sv = _cs2.rgb_to_hsv(_r_f, _g_f, _b_f)
+                _sh, _ss, _sv = colorsys.rgb_to_hsv(_r_f, _g_f, _b_f)
                 _render_h = _sh * 360.0
                 _render_s = _ss
                 _render_v = room_out.hsv.v if _sc_reactive else _sc_brt
@@ -589,8 +595,8 @@ def main():
             )
             _eff_strobe = _strobe_rate * _strobe_master if safety.state.strobe_allowed else 0.0
 
-            # --- strobe burst override ---
-            if time.monotonic() < _strobe_burst_end:
+            # --- strobe burst override (gated by safety) ---
+            if time.monotonic() < _strobe_burst_end and safety.state.strobe_allowed and not safety.state.blackout_active:
                 _eff_strobe = 1.0
 
             # --- prepare per-frame render values ---
@@ -600,12 +606,14 @@ def main():
             _frame_v   = _render_v
             _frame_w   = eff_white
 
-            if _flash_frames > 0:
+            if _flash_frames > 0 and not safety.state.blackout_active:
                 _flash_frames -= 1
                 _frame_brt = 1.0
                 _frame_v   = 1.0
                 _frame_s   = 0.0
                 _frame_w   = 1.0
+            elif _flash_frames > 0:
+                _flash_frames = 0
 
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
@@ -620,6 +628,10 @@ def main():
                     amber=eff_amber,
                     uv=eff_uv,
                 )
+
+            # --- universe-level blackout guard ---
+            if safety.state.blackout_active:
+                universe.blackout()
 
             # --- DMX send ---
             dmx_out.send(universe)

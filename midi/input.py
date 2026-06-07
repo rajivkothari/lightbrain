@@ -163,8 +163,9 @@ class MidiInput:
                         self._handle_cc(msg.control, msg.value)
                 # 5 ms poll prevents spin-lock while still staying responsive
                 self._stop_event.wait(timeout=0.005)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error("MIDI listener thread died: %s", e)
 
     def _handle_cc(self, cc: int, value: int) -> None:
         if cc == CC_MASTER_DIMMER:
@@ -174,7 +175,7 @@ class MidiInput:
             ))
         elif cc == CC_BLACKOUT:
             self._queue.put_nowait(MidiEvent(
-                type="blackout", value=1.0 if value > 64 else 0.0,
+                type="blackout", value=1.0 if value >= 64 else 0.0,
                 raw_cc=cc, raw_value=value,
             ))
         elif cc in _CC_MODE_MAP and value > 0:

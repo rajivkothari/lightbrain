@@ -250,7 +250,9 @@ def _build_app() -> "FastAPI":
         try:
             while True:
                 await websocket.receive_text()
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, Exception):
+            pass
+        finally:
             _manager.disconnect(websocket)
 
     # --- Scene editor API ---

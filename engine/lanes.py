@@ -107,7 +107,7 @@ class RoomLane:
             amber = min(1.0, mode.amber_base + smoothed_room * mode.amber_scale)
             uv    = min(1.0, mode.uv_base    + smoothed_room * mode.uv_scale)
         else:
-            base_br = smoothed_room * self._FALLBACK_MAX + self._FALLBACK_BASE
+            base_br = self._FALLBACK_BASE + smoothed_room * (self._FALLBACK_MAX - self._FALLBACK_BASE)
             pulse   = impact * self._FALLBACK_PULSE
             sat     = min(1.0, color.s * self._FALLBACK_SAT)
             white   = amber = uv = 0.0

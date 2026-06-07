@@ -65,7 +65,7 @@ class StrobeEngine:
             return False, 0.0, 0.0
 
         # Normalised position above threshold (0 at threshold, 1 at max energy)
-        t    = min(1.0, (high_energy - _THRESHOLD) / max(1e-6, 1.0 - _THRESHOLD))
+        t    = max(0.0, min(1.0, (high_energy - _THRESHOLD) / max(1e-6, 1.0 - _THRESHOLD)))
         freq = _MIN_FREQ + t * (_MAX_FREQ - _MIN_FREQ)
 
         self._phase = (self._phase + dt * freq) % 1.0

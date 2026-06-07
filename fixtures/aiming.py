@@ -141,8 +141,13 @@ class FixtureAimingTool:
             0,               # Ch2 Pan Fine
             self._tilt_dmx,  # Ch3 Tilt
             0,               # Ch4 Tilt Fine
+            255,             # Ch5 Red   — white for visibility
+            255,             # Ch6 Green
+            255,             # Ch7 Blue
+            _AIM_DIMMER,     # Ch8 Dimmer
+            0,               # Ch9 Speed — fastest
+            0,               # Ch10 Reset
         ])
-        self._universe.set_channel(base + CH_DIMMER + 1, _AIM_DIMMER)
 
     def _load_raw(self) -> dict:
         if not os.path.exists(self._positions_file):

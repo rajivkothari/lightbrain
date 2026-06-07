@@ -89,6 +89,8 @@ class EnvelopeFollower:
             elapsed_since_peak = (now - self._peak_time) * 1000.0
             if elapsed_since_peak < self.config.cooldown_ms:
                 self.value = max(self.value, self._peak_value)
+            else:
+                self._peak_value = self.value
 
         self.value = max(0.0, min(1.0, self.value))
         return self.value

@@ -308,7 +308,6 @@ class OfflineAnalyzer:
                     label="drop",
                     confidence=min(1.0, after - before),
                 ))
-                i += win_frames  # skip ahead to avoid duplicate drops
 
         events.sort(key=lambda e: e.time_s)
         return events

@@ -175,6 +175,7 @@ def blend_rig_states(
         sparkles=  sparkles,
         impacts=   impacts,
         blackout_active=live.blackout_active or program.blackout_active,
+        ambient_warm=lerp(live.ambient_warm, program.ambient_warm),
     )
 
 

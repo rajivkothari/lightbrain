@@ -3729,3 +3729,138 @@ class TestUplightDimmer:
             u.brightness *= dimmer
         for i, u in enumerate(rig.uplights):
             assert u.brightness == pytest.approx(original_brts[i] * 0.5)
+
+
+# ===========================================================================
+# Enttec Pro frame construction (byte-level verification)
+# ===========================================================================
+
+from dmx.output_enttec_pro import build_enttec_frame
+
+
+class TestEnttecProFrame:
+
+    def test_header_byte(self):
+        frame = build_enttec_frame(DMXUniverse())
+        assert frame[0] == 0x7E
+
+    def test_label_byte(self):
+        frame = build_enttec_frame(DMXUniverse())
+        assert frame[1] == 0x06
+
+    def test_length_bytes_lsb_first(self):
+        frame = build_enttec_frame(DMXUniverse())
+        expected_len = 513
+        assert frame[2] | (frame[3] << 8) == expected_len
+
+    def test_start_code_is_zero(self):
+        frame = build_enttec_frame(DMXUniverse())
+        assert frame[4] == 0x00
+
+    def test_channel_data_roundtrip(self):
+        u = DMXUniverse()
+        u.set_channel(1, 42)
+        u.set_channel(512, 99)
+        frame = build_enttec_frame(u)
+        assert frame[5] == 42
+        assert frame[516] == 99
+
+    def test_footer_byte(self):
+        frame = build_enttec_frame(DMXUniverse())
+        assert frame[-1] == 0xE7
+
+    def test_total_frame_length(self):
+        frame = build_enttec_frame(DMXUniverse())
+        assert len(frame) == 518
+
+    def test_all_channels_in_frame(self):
+        u = DMXUniverse()
+        for ch in range(1, 513):
+            u.set_channel(ch, ch % 256)
+        frame = build_enttec_frame(u)
+        for ch in range(1, 513):
+            assert frame[4 + ch] == ch % 256
+
+
+# ===========================================================================
+# FFT normalization — AudioAnalyzer output always in [0, 1]
+# ===========================================================================
+
+class TestAudioAnalyzerFFTNormalization:
+
+    def _make_analyzer(self, block_size=1024):
+        return AudioAnalyzer(sample_rate=44100, block_size=block_size)
+
+    def test_sine_wave_in_range(self):
+        az = self._make_analyzer()
+        t = np.linspace(0, 1024 / 44100, 1024, endpoint=False)
+        block = (np.sin(2 * np.pi * 440 * t) * 0.8).astype(np.float32)
+        for _ in range(5):
+            az.analyze(block)
+        bands = az.analyze(block)
+        assert 0.0 <= bands.low_energy <= 1.0
+        assert 0.0 <= bands.mid_energy <= 1.0
+        assert 0.0 <= bands.high_energy <= 1.0
+        assert 0.0 <= bands.overall_energy <= 1.0
+
+    def test_silence_returns_zero(self):
+        az = self._make_analyzer()
+        block = np.zeros(1024, dtype=np.float32)
+        bands = az.analyze(block)
+        assert bands.low_energy == pytest.approx(0.0)
+        assert bands.mid_energy == pytest.approx(0.0)
+        assert bands.high_energy == pytest.approx(0.0)
+        assert bands.overall_energy == pytest.approx(0.0)
+
+    def test_random_signal_always_in_range(self):
+        az = self._make_analyzer()
+        rng = np.random.default_rng(42)
+        for _ in range(50):
+            block = rng.uniform(-1.0, 1.0, size=1024).astype(np.float32)
+            bands = az.analyze(block)
+            assert 0.0 <= bands.low_energy <= 1.0
+            assert 0.0 <= bands.mid_energy <= 1.0
+            assert 0.0 <= bands.high_energy <= 1.0
+            assert 0.0 <= bands.overall_energy <= 1.0
+
+    def test_no_nan_or_inf(self):
+        az = self._make_analyzer()
+        t = np.linspace(0, 1024 / 44100, 1024, endpoint=False)
+        block = (np.sin(2 * np.pi * 1000 * t) * 0.5).astype(np.float32)
+        bands = az.analyze(block)
+        for val in [bands.low_energy, bands.mid_energy, bands.high_energy, bands.overall_energy]:
+            assert math.isfinite(val)
+
+
+# ===========================================================================
+# Blackout safety bypass — verify fixes
+# ===========================================================================
+
+class TestBlackoutSafetyBypass:
+
+    def test_beat_strength_never_negative(self):
+        bd = BeatDetector(history_size=5, threshold=1.5)
+        for _ in range(10):
+            bd.update(0.5)
+        beat, strength = bd.update(0.9)
+        if beat:
+            assert strength >= 0.0
+
+    def test_peak_value_resets_after_cooldown(self):
+        config = EnvelopeConfig(attack_ms=10, decay_ms=100, cooldown_ms=50)
+        ef = EnvelopeFollower(config)
+        t = time.monotonic()
+        ef.reset(now=t)
+        ef.update(1.0, now=t)
+        t += 0.1
+        ef.update(0.0, now=t)
+        t += 0.1
+        val = ef.update(0.0, now=t)
+        assert val < 0.5
+
+    def test_strobe_t_clamped_below_threshold(self):
+        se = StrobeEngine()
+        se._last_t = 0.0
+        se._hold_t = 0.1
+        result = se.update(high_energy=0.1, mode_key="banger", now=1.0)
+        assert result[1] >= 0.0
