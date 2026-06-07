@@ -145,6 +145,27 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
+## Phase 9 — Sprint 9: Canvas Visualizer + Scene Editor
+
+**Status: Complete — 378 tests passing**
+
+### Delivered
+
+- [x] `app/web/server.py` — added `GET /api/scenes`, `POST /api/scenes`, `DELETE /api/scenes/{id}`, `GET /api/presets` endpoints; `set_paths()` to configure file paths and scene manager; `serialize_rig_state()` to convert RigVisualState to JSON; `_refresh_scene_catalog()` to rebuild scene list after edits
+- [x] `app/web/dashboard.html` — full rewrite: tab system (Live / Scene Editor); 2D canvas rig visualizer with beam cones, wash glows, uplight halos, sparkle particles, blackout flash; responsive via ResizeObserver; scene editor panel with scene list, form editor (scene_id, name, base mode, fixture groups with state/position presets), save/delete via REST API
+- [x] `app/main.py` — added `SceneLayout` instance; builds per-frame `RigVisualState` via `scene_layout.update_and_build()`; applies scene overrides via `scene_mgr.apply_to_rig_state()`; pushes serialized fixture state to web via `_web.update_state(fixtures=...)`; calls `_web.set_paths()` at startup to wire scene CRUD API
+
+### Usage
+
+```
+python -m app.main --demo --web
+# Open http://localhost:8765/ in any browser
+# Live tab: 2D rig visualizer updates at 10fps
+# Scene Editor tab: create/edit/delete/activate scenes in-browser
+```
+
+---
+
 ## Phase 8 — Sprint 8: Web Dashboard
 
 **Status: Complete — 359 tests passing**
@@ -243,3 +264,4 @@ python -m app.main --demo --web
 | 6 | 298 ✅ | Setlist model/store, DJFLXBeam 10-ch pan/tilt mapper, setlist auto-detection |
 | 7 | 344 ✅ | Scene presets, position/state presets, SceneManager, FixtureAimingTool, F1-F9 shortcuts |
 | 8 | 359 ✅ | Web dashboard (FastAPI + WebSocket), live energy bars, mode/scene/blackout control |
+| 9 | 378 ✅ | Canvas rig visualizer, scene editor UI, scene CRUD API, serialize_rig_state |

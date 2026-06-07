@@ -3172,3 +3172,154 @@ class TestWebServerState:
         assert "LightBrain" in content
         assert "/ws" in content          # WebSocket endpoint referenced
         assert "/api/command" in content  # command endpoint referenced
+
+
+# ===========================================================================
+# Sprint 9 — Web rig state serialization + scene API wiring
+# ===========================================================================
+
+class TestWebRigState:
+    """serialize_rig_state converts RigVisualState to JSON-safe dicts."""
+
+    def test_serialize_returns_dict_with_five_keys(self):
+        rig = _make_rig_state()
+        result = _web_server.serialize_rig_state(rig)
+        assert isinstance(result, dict)
+        assert set(result.keys()) == {"uplights", "washes", "beams", "sparkles", "impacts"}
+
+    def test_serialize_uplights_fields(self):
+        rig = _make_rig_state()
+        result = _web_server.serialize_rig_state(rig)
+        u = result["uplights"][0]
+        assert "id" in u and "x" in u and "y" in u
+        assert "rgb" in u and "brt" in u and "active" in u
+
+    def test_serialize_washes_fields(self):
+        rig = _make_rig_state()
+        result = _web_server.serialize_rig_state(rig)
+        w = result["washes"][0]
+        assert "radius" in w and "pulse" in w
+
+    def test_serialize_beams_fields(self):
+        rig = _make_rig_state()
+        result = _web_server.serialize_rig_state(rig)
+        b = result["beams"][0]
+        assert "angle" in b and "length" in b and "spread" in b
+
+    def test_serialize_sparkles_fields(self):
+        rig = _make_rig_state()
+        result = _web_server.serialize_rig_state(rig)
+        sp = result["sparkles"][0]
+        assert "amount" in sp
+
+    def test_serialize_impacts_fields(self):
+        rig = _make_rig_state()
+        result = _web_server.serialize_rig_state(rig)
+        im = result["impacts"][0]
+        assert "flash" in im and "brt" in im
+
+    def test_serialize_rgb_is_list(self):
+        rig = _make_rig_state(uplight_color=(200, 100, 50))
+        result = _web_server.serialize_rig_state(rig)
+        rgb = result["uplights"][0]["rgb"]
+        assert isinstance(rgb, list)
+        assert rgb == [200, 100, 50]
+
+    def test_serialize_brightness_is_rounded_float(self):
+        rig = _make_rig_state(uplight_brightness=0.888888)
+        result = _web_server.serialize_rig_state(rig)
+        brt = result["uplights"][0]["brt"]
+        assert isinstance(brt, float)
+        assert brt == pytest.approx(0.889, abs=0.001)
+
+    def test_serialize_is_json_serializable(self):
+        import json
+        rig = _make_rig_state()
+        result = _web_server.serialize_rig_state(rig)
+        json.dumps(result)   # must not raise
+
+    def test_serialize_beam_angle_rounded(self):
+        rig = _make_rig_state(beam_angle=33.333)
+        result = _web_server.serialize_rig_state(rig)
+        assert result["beams"][0]["angle"] == pytest.approx(33.3, abs=0.05)
+
+    def test_serialize_empty_lists(self):
+        rig = RigVisualState(
+            mode="open_dance", palette_name="test",
+            low_energy=0.0, mid_energy=0.0, high_energy=0.0, overall_energy=0.0,
+            room_brightness=0.0, impact_value=0.0,
+            uplights=[], washes=[], beams=[], sparkles=[], impacts=[],
+            blackout_active=False,
+        )
+        result = _web_server.serialize_rig_state(rig)
+        assert result == {"uplights": [], "washes": [], "beams": [],
+                          "sparkles": [], "impacts": []}
+
+
+class TestWebSceneAPI:
+    """set_paths, _paths configuration, and engine_state fixtures key."""
+
+    def setup_method(self):
+        _web_server._paths.update({
+            "scenes_dir": "", "positions_file": "", "states_file": "", "scene_manager": None
+        })
+        _web_server._engine_state.update({"fixtures": {}, "scenes": [], "modes": []})
+
+    def test_engine_state_has_fixtures_key(self):
+        assert "fixtures" in _web_server._engine_state
+
+    def test_update_state_sets_fixtures(self):
+        rig = _make_rig_state()
+        fxt = _web_server.serialize_rig_state(rig)
+        _web_server.update_state(fixtures=fxt)
+        assert "uplights" in _web_server._engine_state["fixtures"]
+
+    def test_set_paths_populates_paths_dict(self):
+        _web_server.set_paths(
+            scenes_dir="/tmp/scenes",
+            positions_file="/tmp/pos.json",
+            states_file="/tmp/states.json",
+        )
+        assert _web_server._paths["scenes_dir"]     == "/tmp/scenes"
+        assert _web_server._paths["positions_file"] == "/tmp/pos.json"
+        assert _web_server._paths["states_file"]    == "/tmp/states.json"
+        assert _web_server._paths["scene_manager"]  is None
+
+    def test_set_paths_with_scene_manager(self):
+        mgr = _make_scene_manager()
+        _web_server.set_paths(
+            scenes_dir=_SCENES_DIR,
+            positions_file=_POSITIONS_FILE,
+            states_file=_STATES_FILE,
+            scene_manager=mgr,
+        )
+        assert _web_server._paths["scene_manager"] is mgr
+
+    def test_refresh_scene_catalog_populates_scenes(self):
+        mgr = _make_scene_manager()
+        _web_server.set_paths(
+            scenes_dir=_SCENES_DIR,
+            positions_file=_POSITIONS_FILE,
+            states_file=_STATES_FILE,
+            scene_manager=mgr,
+        )
+        _web_server._refresh_scene_catalog()
+        scenes = _web_server._engine_state["scenes"]
+        assert len(scenes) >= 1
+        assert all("id" in s and "name" in s for s in scenes)
+
+    def test_refresh_scene_catalog_no_manager_no_crash(self):
+        _web_server._paths["scene_manager"] = None
+        _web_server._refresh_scene_catalog()   # must not raise
+
+    def test_scene_id_regex_accepts_valid(self):
+        import re
+        pattern = r'^[a-zA-Z0-9_]+$'
+        for valid in ("first_dance", "scene1", "MyScene", "a_b_c_123"):
+            assert re.match(pattern, valid), f"Should be valid: {valid}"
+
+    def test_scene_id_regex_rejects_invalid(self):
+        import re
+        pattern = r'^[a-zA-Z0-9_]+$'
+        for invalid in ("../evil", "scene id", "scene-id", "", "a/b"):
+            assert not re.match(pattern, invalid), f"Should be invalid: {invalid}"

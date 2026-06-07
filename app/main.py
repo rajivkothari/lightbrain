@@ -58,6 +58,7 @@ from fixtures.rockwedge import RockWedge
 
 from ui.terminal_debug import TerminalDebugOverlay
 from engine.scenes import SceneManager
+from app.render.scene import SceneLayout
 from app.web import server as _web
 
 try:
@@ -261,6 +262,7 @@ def main():
     scene_mgr = SceneManager(SCENES_DIR, POSITIONS_FILE, STATES_FILE)
     scene_mgr.load_all()
     _all_scenes = scene_mgr.list_scenes()
+    scene_layout = SceneLayout()
 
     # ---- web dashboard ----
     if args.web:
@@ -271,6 +273,7 @@ def main():
                       for i, s in enumerate(_all_scenes)],
         )
         _web.start(port=args.web_port)
+        _web.set_paths(SCENES_DIR, POSITIONS_FILE, STATES_FILE, scene_mgr)
 
     # ---- fps counter ----
     _fps_frames = 0
@@ -556,6 +559,16 @@ def main():
             # --- web state push ---
             if args.web:
                 _active_s = scene_mgr.active_scene
+                _rig_web = scene_layout.update_and_build(
+                    bands=bands_dict, lanes=last_lanes,
+                    hue=room_out.hsv.h, saturation=room_out.hsv.s,
+                    brightness=room_out.hsv.v,
+                    base_brt=room_out.base_brightness,
+                    pulse_brt=room_out.pulse_brightness,
+                    mode_key=mode_key, palette_name=room_lane.palette_name,
+                    blackout=safety.state.blackout_active,
+                )
+                _rig_web = scene_mgr.apply_to_rig_state(_rig_web)
                 _web.update_state(
                     mode=            mode_key,
                     mode_display=    current_mode.display_name,
@@ -570,6 +583,7 @@ def main():
                     overall_energy=  float(bands_dict.get("overall_energy",0.0)),
                     fps=             _fps_display,
                     dmx_output=      dmx_out.output_type,
+                    fixtures=        _web.serialize_rig_state(_rig_web),
                 )
 
             # --- frame rate cap ---

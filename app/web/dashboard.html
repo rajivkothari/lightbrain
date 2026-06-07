@@ -16,351 +16,683 @@
       --green:   #40e888;
       --amber:   #ffaa22;
       --red:     #ff3333;
-      --beat-glow: #ffffff;
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       background: var(--bg);
       color: var(--text);
       font-family: 'Courier New', Courier, monospace;
       min-height: 100vh;
-      padding: 16px;
-      max-width: 900px;
-      margin: 0 auto;
+      padding: 12px;
     }
 
     /* ---- Header ---- */
     .header {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      padding-bottom: 14px;
-      margin-bottom: 18px;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      padding-bottom: 10px; margin-bottom: 10px;
       border-bottom: 1px solid var(--border);
-      flex-wrap: wrap;
     }
-    .logo {
-      font-size: 1.05rem;
-      font-weight: bold;
-      letter-spacing: 0.25em;
-      color: var(--accent);
+    .logo { font-size: 1rem; font-weight: bold; letter-spacing: 0.25em; color: var(--accent); }
+    .bpm  { font-size: 1.3rem; font-weight: bold; color: var(--green); min-width: 85px; transition: color 0.08s; }
+    .status { font-size: 0.7rem; color: var(--dim); margin-left: auto; }
+    .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+           background: var(--dim); margin-right: 4px; vertical-align: middle; }
+    .dot.ok { background: var(--green); } .dot.err { background: var(--red); }
+
+    /* ---- Tabs ---- */
+    .tabs { display: flex; gap: 2px; margin-bottom: 12px; }
+    .tab {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--dim); font-family: inherit; font-size: 0.78rem;
+      padding: 7px 18px; cursor: pointer; border-radius: 4px 4px 0 0;
     }
-    .bpm {
-      font-size: 1.35rem;
-      font-weight: bold;
-      color: var(--green);
-      min-width: 90px;
-      transition: color 0.08s;
+    .tab.active { background: var(--card); border-bottom-color: var(--card); color: var(--text); }
+
+    /* ---- Canvas ---- */
+    #rig-canvas {
+      display: block; width: 100%; max-width: 100%;
+      border: 1px solid var(--border); border-radius: 4px;
+      background: #080810; margin-bottom: 12px;
     }
-    .status {
-      font-size: 0.72rem;
-      color: var(--dim);
-      margin-left: auto;
-    }
+
+    /* ---- Controls row ---- */
+    .controls-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .ctrl-col { flex: 1; min-width: 200px; }
 
     /* ---- Section ---- */
-    .section { margin-bottom: 22px; }
-    .section-label {
-      font-size: 0.68rem;
-      text-transform: uppercase;
-      letter-spacing: 0.18em;
-      color: var(--dim);
-      margin-bottom: 10px;
-    }
+    .section { margin-bottom: 14px; }
+    .section-label { font-size: 0.67rem; text-transform: uppercase;
+                     letter-spacing: 0.18em; color: var(--dim); margin-bottom: 7px; }
 
     /* ---- Energy bars ---- */
-    .bars { display: flex; flex-direction: column; gap: 7px; }
-    .bar-row { display: flex; align-items: center; gap: 10px; }
-    .bar-label { width: 58px; font-size: 0.7rem; color: var(--dim); text-align: right; }
-    .bar-bg {
-      flex: 1;
-      height: 11px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .bar-fill {
-      height: 100%;
-      border-radius: 2px;
-      width: 0%;
-      transition: width 0.08s ease-out;
-    }
+    .bars { display: flex; flex-direction: column; gap: 6px; }
+    .bar-row { display: flex; align-items: center; gap: 8px; }
+    .bar-label { width: 52px; font-size: 0.68rem; color: var(--dim); text-align: right; }
+    .bar-bg { flex: 1; height: 9px; background: var(--surface);
+              border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 2px; width: 0%; transition: width 0.08s ease-out; }
     .bar-fill.low     { background: linear-gradient(90deg, #2266ff, #44aaff); }
     .bar-fill.mid     { background: linear-gradient(90deg, #22cc66, #44ffaa); }
     .bar-fill.high    { background: linear-gradient(90deg, #ccaa00, #ffee44); }
     .bar-fill.overall { background: linear-gradient(90deg, #cc4400, #ff8844); }
 
-    /* ---- Button grid ---- */
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 8px;
-    }
+    /* ---- Buttons ---- */
+    .grid { display: flex; flex-wrap: wrap; gap: 6px; }
     .btn {
-      background: var(--card);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-family: inherit;
-      font-size: 0.78rem;
-      padding: 11px 10px;
-      cursor: pointer;
-      border-radius: 5px;
-      text-align: center;
-      transition: background 0.12s, border-color 0.12s, color 0.12s;
-      line-height: 1.3;
+      background: var(--card); border: 1px solid var(--border); color: var(--text);
+      font-family: inherit; font-size: 0.75rem; padding: 9px 10px;
+      cursor: pointer; border-radius: 4px; text-align: center;
+      transition: background 0.12s, border-color 0.12s; line-height: 1.3; min-width: 110px;
     }
     .btn:hover  { background: #1c1c34; border-color: var(--accent); }
     .btn:active { transform: scale(0.97); }
-
-    .btn.active {
-      background: #181838;
-      border-color: var(--accent);
-      color: #8888ff;
-    }
-    .btn .shortcut {
-      display: block;
-      font-size: 0.6rem;
-      color: var(--dim);
-      margin-bottom: 3px;
-      letter-spacing: 0.08em;
-    }
+    .btn.active { background: #181838; border-color: var(--accent); color: #8888ff; }
+    .btn .shortcut { display: block; font-size: 0.6rem; color: var(--dim); margin-bottom: 2px; }
     .btn.active .shortcut { color: #6666cc; }
-
-    /* ---- Blackout ---- */
-    .btn-full { width: 100%; padding: 15px; font-size: 0.9rem; letter-spacing: 0.1em; }
-    .btn-blackout { border-color: #333355; }
-    .btn-blackout.active {
-      background: #2a0000;
-      border-color: var(--red);
-      color: var(--red);
-      animation: pulse-red 1s ease-in-out infinite;
-    }
-    @keyframes pulse-red {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.75; }
-    }
-
-    /* ---- Release scene ---- */
-    .btn-release {
-      border-color: var(--amber);
-      color: var(--amber);
-    }
+    .btn-full { width: 100%; padding: 12px; font-size: 0.85rem; letter-spacing: 0.1em; }
+    .btn-blackout { border-color: #333355; margin-top: 6px; }
+    .btn-blackout.active { background: #2a0000; border-color: var(--red); color: var(--red);
+                           animation: pulse-red 1s ease-in-out infinite; }
+    @keyframes pulse-red { 0%,100%{opacity:1} 50%{opacity:.75} }
+    .btn-release { border-color: var(--amber); color: var(--amber); }
     .btn-release:hover { background: #1a1400; border-color: var(--amber); color: var(--amber); }
 
-    /* ---- Connection indicator ---- */
-    .dot {
-      display: inline-block;
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: var(--dim);
-      margin-right: 5px;
-      vertical-align: middle;
+    /* ---- Blackout overlay ---- */
+    #blackout-overlay {
+      display: none; position: fixed; inset: 0; background: #000; z-index: 999;
+      align-items: center; justify-content: center; flex-direction: column;
+      gap: 14px; cursor: pointer;
     }
-    .dot.ok  { background: var(--green); }
-    .dot.err { background: var(--red); }
+
+    /* ---- Scene editor ---- */
+    .editor-layout { display: flex; gap: 12px; height: calc(100vh - 140px); min-height: 400px; }
+    .scene-list-panel {
+      width: 260px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px;
+      overflow-y: auto;
+    }
+    .scene-form-panel { flex: 1; overflow-y: auto; }
+
+    .scene-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 4px;
+      padding: 10px 12px; cursor: pointer; transition: border-color 0.12s;
+    }
+    .scene-card:hover { border-color: var(--accent); }
+    .scene-card.selected { border-color: var(--accent); background: #181838; }
+    .scene-card-name { font-size: 0.82rem; margin-bottom: 2px; }
+    .scene-card-meta { font-size: 0.67rem; color: var(--dim); }
+    .scene-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .btn-sm {
+      font-family: inherit; font-size: 0.68rem; padding: 4px 10px;
+      border-radius: 3px; cursor: pointer; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text);
+    }
+    .btn-sm:hover { border-color: var(--accent); }
+    .btn-sm.danger { border-color: #442222; color: #ff6666; }
+    .btn-sm.danger:hover { background: #2a0000; }
+    .btn-sm.primary { border-color: var(--accent); color: #8888ff; }
+
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-size: 0.7rem; color: var(--dim);
+            text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+    input[type=text], select, textarea {
+      width: 100%; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); font-family: inherit; font-size: 0.78rem;
+      padding: 7px 10px; border-radius: 3px;
+    }
+    input[type=text]:focus, select:focus, textarea:focus {
+      outline: none; border-color: var(--accent);
+    }
+    select option { background: var(--surface); }
+
+    .group-row {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 10px; margin-bottom: 8px; display: grid;
+      grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+    }
+    .group-row-header {
+      grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 4px;
+    }
+    .group-label { font-size: 0.68rem; color: var(--accent); }
+    .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; }
+    input[type=checkbox] { accent-color: var(--accent); }
+
+    .form-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .editor-empty { color: var(--dim); font-size: 0.8rem; padding: 20px;
+                    border: 1px dashed var(--border); border-radius: 4px; text-align: center; }
   </style>
 </head>
 <body>
 
-<!-- Header -->
 <div class="header">
   <span class="logo">LIGHTBRAIN</span>
   <span class="bpm" id="bpm">-- BPM</span>
   <span class="status">
-    <span class="dot" id="dot"></span>
-    <span id="status-text">connecting…</span>
+    <span class="dot" id="dot"></span><span id="status-text">connecting…</span>
   </span>
 </div>
 
-<!-- Energy -->
-<div class="section">
-  <div class="section-label">Audio Energy</div>
-  <div class="bars">
-    <div class="bar-row">
-      <span class="bar-label">Low</span>
-      <div class="bar-bg"><div class="bar-fill low"     id="bar-low"></div></div>
+<div class="tabs">
+  <button class="tab active" onclick="showTab('live')">Live</button>
+  <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
+</div>
+
+<!-- ===================== LIVE TAB ===================== -->
+<div id="tab-live">
+  <canvas id="rig-canvas"></canvas>
+  <div class="controls-row">
+    <div class="ctrl-col">
+      <div class="section">
+        <div class="section-label">Audio Energy</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-label">Low</span>
+            <div class="bar-bg"><div class="bar-fill low"     id="bar-low"></div></div></div>
+          <div class="bar-row"><span class="bar-label">Mid</span>
+            <div class="bar-bg"><div class="bar-fill mid"     id="bar-mid"></div></div></div>
+          <div class="bar-row"><span class="bar-label">High</span>
+            <div class="bar-bg"><div class="bar-fill high"    id="bar-high"></div></div></div>
+          <div class="bar-row"><span class="bar-label">Overall</span>
+            <div class="bar-bg"><div class="bar-fill overall" id="bar-overall"></div></div></div>
+        </div>
+      </div>
+      <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})">
+        BLACKOUT
+      </button>
     </div>
-    <div class="bar-row">
-      <span class="bar-label">Mid</span>
-      <div class="bar-bg"><div class="bar-fill mid"     id="bar-mid"></div></div>
-    </div>
-    <div class="bar-row">
-      <span class="bar-label">High</span>
-      <div class="bar-bg"><div class="bar-fill high"    id="bar-high"></div></div>
-    </div>
-    <div class="bar-row">
-      <span class="bar-label">Overall</span>
-      <div class="bar-bg"><div class="bar-fill overall" id="bar-overall"></div></div>
+    <div class="ctrl-col">
+      <div class="section">
+        <div class="section-label">Mode</div>
+        <div class="grid" id="mode-grid"></div>
+      </div>
+      <div class="section">
+        <div class="section-label">Scene Presets</div>
+        <div class="grid" id="scene-grid"></div>
+        <div style="margin-top:6px">
+          <button class="btn btn-full btn-release" onclick="cmd({type:'release_scene'})">
+            <span class="shortcut">F10</span>Release Scene
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- Mode -->
-<div class="section">
-  <div class="section-label">Mode</div>
-  <div class="grid" id="mode-grid"></div>
-</div>
-
-<!-- Scenes -->
-<div class="section">
-  <div class="section-label">Scene Presets</div>
-  <div class="grid" id="scene-grid"></div>
-  <div style="margin-top: 8px;">
-    <button class="btn btn-full btn-release" onclick="cmd({type:'release_scene'})">
-      <span class="shortcut">F10</span>Release Scene
-    </button>
+<!-- ===================== SCENES TAB ===================== -->
+<div id="tab-scenes" style="display:none">
+  <div class="editor-layout">
+    <div class="scene-list-panel" id="scene-list-panel">
+      <button class="btn btn-full" style="margin-bottom:4px" onclick="editorNewScene()">+ New Scene</button>
+      <div id="scene-list-cards"></div>
+    </div>
+    <div class="scene-form-panel" id="scene-form-panel">
+      <div class="editor-empty">Select a scene to edit, or click "+ New Scene"</div>
+    </div>
   </div>
 </div>
 
-<!-- Blackout -->
-<div class="section">
-  <button class="btn btn-full btn-blackout" id="blackout-btn"
-          onclick="cmd({type:'blackout'})">
-    BLACKOUT
-  </button>
-</div>
-
-<!-- Full-screen blackout overlay -->
-<div id="blackout-overlay" style="
-  display:none; position:fixed; inset:0; background:#000;
-  z-index:999; align-items:center; justify-content:center;
-  flex-direction:column; gap:16px; cursor:pointer;
-" onclick="cmd({type:'blackout'})">
-  <div style="color:#ff2222; font-size:2rem; font-family:monospace; letter-spacing:0.3em;">■ BLACKOUT</div>
-  <div style="color:#662222; font-size:0.8rem; font-family:monospace;">click to restore</div>
+<!-- Blackout overlay -->
+<div id="blackout-overlay" onclick="cmd({type:'blackout'})">
+  <div style="color:#ff2222;font-size:2rem;font-family:monospace;letter-spacing:.3em">■ BLACKOUT</div>
+  <div style="color:#662222;font-size:.8rem;font-family:monospace">click to restore</div>
 </div>
 
 <script>
-  // ---- Defaults shown before first server contact ----
-  const DEFAULT_MODES = [
-    {key:'open_dance',   display_name:'Open Dance'},
-    {key:'dinner',       display_name:'Dinner'},
-    {key:'banger',       display_name:'Banger'},
-    {key:'indian_latin', display_name:'Indian / Latin'},
-    {key:'slow_dance',   display_name:'Slow Dance'},
-  ];
+// ============================================================
+// CANVAS VISUALIZER
+// ============================================================
+const ORIG_W = 1200, ORIG_H = 800;
+// Scene layout constants (mirrored from scene.py)
+const FL = 130, FT = 65, FR = 1070, FB = 545;  // dance floor
+const BL = 430, BT = 620, BR = 770, BB = 700;  // DJ booth
 
-  let currentMode  = null;
-  let currentScene = null;
-  let modesReady   = false;
-  let scenesReady  = false;
+let _lastFixtures = null;
+let _blackoutActive = false;
 
-  // ---- Send command to engine ----
-  function cmd(payload) {
-    fetch('/api/command', {
-      method:  'POST',
-      headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify(payload),
-    }).catch(() => {});
+function _initCanvas() {
+  const c = document.getElementById('rig-canvas');
+  // Canvas height = width * (800/1200)
+  function resize() {
+    const w = c.offsetWidth;
+    const h = Math.round(w * ORIG_H / ORIG_W);
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    _drawRig(_lastFixtures, _blackoutActive);
+  }
+  new ResizeObserver(resize).observe(c);
+  resize();
+}
+
+function _drawRig(fixtures, blackout) {
+  const c = document.getElementById('rig-canvas');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const s = W / ORIG_W;   // scale factor
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#080810';
+  ctx.fillRect(0, 0, W, H);
+
+  // Dance floor
+  ctx.fillStyle = '#0d0d18';
+  ctx.fillRect(FL*s, FT*s, (FR-FL)*s, (FB-FT)*s);
+  ctx.strokeStyle = '#1a1a30'; ctx.lineWidth = 1;
+  ctx.strokeRect(FL*s, FT*s, (FR-FL)*s, (FB-FT)*s);
+
+  // DJ booth
+  ctx.fillStyle = '#0f0f1e';
+  ctx.fillRect(BL*s, BT*s, (BR-BL)*s, (BB-BT)*s);
+  ctx.strokeStyle = '#1e1e38';
+  ctx.strokeRect(BL*s, BT*s, (BR-BL)*s, (BB-BT)*s);
+  ctx.fillStyle = '#252540'; ctx.font = `${Math.max(8, 10*s)}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText('DJ', (BL+BR)/2*s, (BT+(BB-BT)*0.6)*s);
+  ctx.textAlign = 'left';
+
+  if (blackout || !fixtures) return;
+
+  // Draw order: beams → washes → uplights → sparkles → impacts
+  (fixtures.beams    || []).forEach(b => _drawBeam(ctx, b, s));
+  (fixtures.washes   || []).forEach(w => _drawWash(ctx, w, s));
+  (fixtures.uplights || []).forEach(u => _drawUplight(ctx, u, s));
+  (fixtures.sparkles || []).forEach(sp => _drawSparkle(ctx, sp, s));
+  (fixtures.impacts  || []).forEach(im => _drawImpact(ctx, im, s, W, H));
+}
+
+function _drawUplight(ctx, u, s) {
+  const x = u.x*s, y = u.y*s, r = 11*s;
+  if (!u.active || u.brt < 0.01) {
+    ctx.fillStyle = '#111120';
+    ctx.beginPath(); ctx.arc(x, y, r*0.5, 0, Math.PI*2); ctx.fill();
+    return;
+  }
+  const [R,G,B] = u.rgb, a = u.brt;
+  const g1 = ctx.createRadialGradient(x, y, 0, x, y, r*3.5);
+  g1.addColorStop(0, `rgba(${R},${G},${B},${(a*0.5).toFixed(2)})`);
+  g1.addColorStop(1, `rgba(${R},${G},${B},0)`);
+  ctx.fillStyle = g1;
+  ctx.beginPath(); ctx.arc(x, y, r*3.5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = `rgba(${Math.min(255,R+80)},${Math.min(255,G+80)},${Math.min(255,B+80)},${a})`;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+}
+
+function _drawWash(ctx, w, s) {
+  if (!w.active || w.brt < 0.01) return;
+  const x = w.x*s, y = w.y*s;
+  const r = (w.radius + w.pulse*60)*s;
+  const [R,G,B] = w.rgb;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${R},${G},${B},${(w.brt*0.35).toFixed(2)})`);
+  g.addColorStop(1, `rgba(${R},${G},${B},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+}
+
+function _drawBeam(ctx, b, s) {
+  if (!b.active || b.brt < 0.01) return;
+  const ox = b.x*s, oy = b.y*s;
+  const rad = b.angle * Math.PI / 180;
+  const len = b.length*s;
+  const halfSpread = Math.tan(b.spread * Math.PI/180) * len;
+  const dx = Math.sin(rad), dy = -Math.cos(rad);   // direction (up=negative y)
+  const tx = ox + dx*len,   ty = oy + dy*len;
+  const px = -dy, py = dx;   // perpendicular
+  const [R,G,B] = b.rgb;
+  const g = ctx.createLinearGradient(ox, oy, tx, ty);
+  g.addColorStop(0, `rgba(${R},${G},${B},${(b.brt*0.8).toFixed(2)})`);
+  g.addColorStop(1, `rgba(${R},${G},${B},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(ox, oy);
+  ctx.lineTo(tx - px*halfSpread, ty - py*halfSpread);
+  ctx.lineTo(tx + px*halfSpread, ty + py*halfSpread);
+  ctx.closePath(); ctx.fill();
+}
+
+function _drawSparkle(ctx, sp, s) {
+  if (!sp.active || sp.amount < 0.05) return;
+  const cx = sp.x*s, cy = sp.y*s;
+  const [R,G,B] = sp.rgb;
+  const count = Math.floor(sp.amount * 25);
+  const rad = 70*s;
+  const t = Math.floor(Date.now() / 120);   // slow-scroll seed
+  ctx.fillStyle = `rgba(${R},${G},${B},0.85)`;
+  for (let i = 0; i < count; i++) {
+    const h1 = Math.imul(i*2654435761 + t, 0x9e3779b9) >>> 0;
+    const h2 = Math.imul(i*1013904223 + t, 0x6c62272e) >>> 0;
+    const angle = (h1 % 1000) / 1000 * Math.PI * 2;
+    const dist  = (h2 % 1000) / 1000 * rad;
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(angle)*dist, cy + Math.sin(angle)*dist, 2*s, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function _drawImpact(ctx, im, s, W, H) {
+  if (!im.flash || im.brt < 0.05) return;
+  ctx.fillStyle = `rgba(255,255,255,${(im.brt*0.25).toFixed(2)})`;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ============================================================
+// LIVE TAB — WebSocket + state
+// ============================================================
+const DEFAULT_MODES = [
+  {key:'open_dance',   display_name:'Open Dance'},
+  {key:'dinner',       display_name:'Dinner'},
+  {key:'banger',       display_name:'Banger'},
+  {key:'indian_latin', display_name:'Indian / Latin'},
+  {key:'slow_dance',   display_name:'Slow Dance'},
+];
+
+let currentMode  = null;
+let currentScene = null;
+let modesReady   = false;
+let scenesReady  = false;
+
+function cmd(payload) {
+  fetch('/api/command', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+  }).catch(()=>{});
+}
+
+function buildModes(modes) {
+  if (modesReady) return;
+  const list = (modes && modes.length) ? modes : DEFAULT_MODES;
+  const grid = document.getElementById('mode-grid');
+  grid.innerHTML = '';
+  list.forEach(m => {
+    const b = document.createElement('button');
+    b.className = 'btn mode-btn'; b.dataset.key = m.key;
+    b.innerHTML = `<span class="shortcut">${m.key}</span>${m.display_name}`;
+    b.onclick = () => cmd({type:'mode', value:m.key});
+    grid.appendChild(b);
+  });
+  modesReady = true;
+}
+
+function buildScenes(scenes) {
+  if (scenesReady || !scenes || !scenes.length) return;
+  const grid = document.getElementById('scene-grid');
+  grid.innerHTML = '';
+  scenes.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn scene-btn'; b.dataset.id = s.id;
+    b.innerHTML = `<span class="shortcut">F${i+1}</span>${s.name}`;
+    b.onclick = () => cmd({type:'scene', value:s.id});
+    grid.appendChild(b);
+  });
+  scenesReady = true;
+}
+
+function applyState(s) {
+  // BPM
+  const bpmEl = document.getElementById('bpm');
+  bpmEl.textContent = s.bpm > 1 ? `${Math.round(s.bpm)} BPM` : '-- BPM';
+  if (s.beat) { bpmEl.style.color='#fff'; setTimeout(()=>bpmEl.style.color='',80); }
+
+  // Status
+  document.getElementById('status-text').textContent =
+    `${s.dmx_output||'MOCK'}  ${s.fps||0} fps`;
+
+  // Bars
+  const clamp = v => `${Math.min(100,Math.max(0,((v||0)*100))).toFixed(1)}%`;
+  document.getElementById('bar-low').style.width     = clamp(s.low_energy);
+  document.getElementById('bar-mid').style.width     = clamp(s.mid_energy);
+  document.getElementById('bar-high').style.width    = clamp(s.high_energy);
+  document.getElementById('bar-overall').style.width = clamp(s.overall_energy);
+
+  // Grids
+  buildModes(s.modes); buildScenes(s.scenes);
+
+  // Mode active
+  if (s.mode !== currentMode) {
+    currentMode = s.mode;
+    document.querySelectorAll('.mode-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.key === currentMode));
   }
 
-  // ---- Build grids (once) ----
-  function buildModes(modes) {
-    if (modesReady) return;
-    const list = (modes && modes.length) ? modes : DEFAULT_MODES;
-    const grid = document.getElementById('mode-grid');
-    grid.innerHTML = '';
-    list.forEach(m => {
-      const b = document.createElement('button');
-      b.className   = 'btn mode-btn';
-      b.dataset.key = m.key;
-      b.innerHTML   = `<span class="shortcut">${m.key}</span>${m.display_name}`;
-      b.onclick     = () => cmd({type:'mode', value:m.key});
-      grid.appendChild(b);
-    });
-    modesReady = true;
+  // Scene active
+  if (s.scene !== currentScene) {
+    currentScene = s.scene;
+    document.querySelectorAll('.scene-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.id === currentScene));
   }
 
-  function buildScenes(scenes) {
-    if (scenesReady || !scenes || !scenes.length) return;
-    const grid = document.getElementById('scene-grid');
-    grid.innerHTML = '';
-    scenes.forEach((s, i) => {
-      const b = document.createElement('button');
-      b.className  = 'btn scene-btn';
-      b.dataset.id = s.id;
-      b.innerHTML  = `<span class="shortcut">F${i+1}</span>${s.name}`;
-      b.onclick    = () => cmd({type:'scene', value:s.id});
-      grid.appendChild(b);
-    });
-    scenesReady = true;
+  // Blackout
+  _blackoutActive = !!s.blackout;
+  const bo = document.getElementById('blackout-btn');
+  bo.classList.toggle('active', _blackoutActive);
+  bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
+  const ov = document.getElementById('blackout-overlay');
+  ov.style.display = _blackoutActive ? 'flex' : 'none';
+
+  // Canvas
+  if (s.fixtures && Object.keys(s.fixtures).length) {
+    _lastFixtures = s.fixtures;
+    _drawRig(_lastFixtures, _blackoutActive);
   }
+}
 
-  // ---- Apply incoming state ----
-  function applyState(s) {
-    // BPM + beat flash
-    const bpmEl = document.getElementById('bpm');
-    bpmEl.textContent = s.bpm > 1 ? `${Math.round(s.bpm)} BPM` : '-- BPM';
-    if (s.beat) {
-      bpmEl.style.color = '#ffffff';
-      setTimeout(() => bpmEl.style.color = '', 80);
-    }
+function connect() {
+  const dot = document.getElementById('dot');
+  const st  = document.getElementById('status-text');
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onopen    = () => { dot.className='dot ok'; st.textContent='connected'; };
+  ws.onmessage = e => { try { applyState(JSON.parse(e.data)); } catch(_){} };
+  ws.onclose   = () => { dot.className='dot err'; st.textContent='reconnecting…'; setTimeout(connect, 2000); };
+  ws.onerror   = () => ws.close();
+}
 
-    // Status bar
-    document.getElementById('status-text').textContent =
-      `${s.dmx_output || 'MOCK'}  ${s.fps || 0} fps`;
+// ============================================================
+// SCENE EDITOR
+// ============================================================
+let _edPresets    = {positions:{}, states:{}};
+let _edScenes     = [];
+let _edSelected   = null;  // current scene being edited (object)
 
-    // Energy bars
-    const clamp = v => `${Math.min(100, Math.max(0, ((v||0)*100))).toFixed(1)}%`;
-    document.getElementById('bar-low').style.width     = clamp(s.low_energy);
-    document.getElementById('bar-mid').style.width     = clamp(s.mid_energy);
-    document.getElementById('bar-high').style.width    = clamp(s.high_energy);
-    document.getElementById('bar-overall').style.width = clamp(s.overall_energy);
+const MODES_LIST = ['open_dance','dinner','banger','indian_latin','slow_dance','speech'];
+const FIXTURE_TYPES = ['uplight','beam','wash','sparkle'];
+const MOVEMENT_MODES = ['inherit','locked','constrained'];
 
-    // Build grids first time
-    buildModes(s.modes);
-    buildScenes(s.scenes);
-
-    // Mode active state
-    if (s.mode !== currentMode) {
-      currentMode = s.mode;
-      document.querySelectorAll('.mode-btn').forEach(b =>
-        b.classList.toggle('active', b.dataset.key === currentMode)
-      );
-    }
-
-    // Scene active state
-    if (s.scene !== currentScene) {
-      currentScene = s.scene;
-      document.querySelectorAll('.scene-btn').forEach(b =>
-        b.classList.toggle('active', b.dataset.id === currentScene)
-      );
-    }
-
-    // Blackout
-    const bo = document.getElementById('blackout-btn');
-    bo.classList.toggle('active', !!s.blackout);
-    bo.textContent = s.blackout ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
-    const ov = document.getElementById('blackout-overlay');
-    ov.style.display = s.blackout ? 'flex' : 'none';
+async function _edLoad() {
+  const [scenesRes, presetsRes] = await Promise.all([
+    fetch('/api/scenes'), fetch('/api/presets')
+  ]);
+  _edScenes  = await scenesRes.json();
+  _edPresets = await presetsRes.json();
+  _renderSceneList();
+  if (_edSelected) {
+    const fresh = _edScenes.find(s => s.scene_id === _edSelected.scene_id);
+    if (fresh) _renderForm(fresh); else _edSelected = null;
   }
+}
 
-  // ---- WebSocket with auto-reconnect ----
-  function connect() {
-    const dot    = document.getElementById('dot');
-    const status = document.getElementById('status-text');
-    const proto  = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws     = new WebSocket(`${proto}//${location.host}/ws`);
-
-    ws.onopen = () => {
-      dot.className    = 'dot ok';
-      status.textContent = 'connected';
-    };
-    ws.onmessage = e => {
-      try { applyState(JSON.parse(e.data)); } catch(_) {}
-    };
-    ws.onclose = () => {
-      dot.className      = 'dot err';
-      status.textContent = 'reconnecting…';
-      setTimeout(connect, 2000);
-    };
-    ws.onerror = () => ws.close();
+function _renderSceneList() {
+  const el = document.getElementById('scene-list-cards');
+  el.innerHTML = '';
+  if (!_edScenes.length) {
+    el.innerHTML = '<div style="color:var(--dim);font-size:.75rem;padding:8px">No scenes yet.</div>';
+    return;
   }
+  _edScenes.forEach(scene => {
+    const card = document.createElement('div');
+    card.className = 'scene-card' + (_edSelected?.scene_id === scene.scene_id ? ' selected' : '');
+    card.innerHTML = `
+      <div class="scene-card-name">${scene.name || scene.scene_id}</div>
+      <div class="scene-card-meta">${scene.base_mode || ''}  ·  ${(scene.groups||[]).length} group(s)</div>
+      <div class="scene-card-actions">
+        <button class="btn-sm primary" onclick="editorEditScene('${scene.scene_id}')">Edit</button>
+        <button class="btn-sm" onclick="cmd({type:'scene',value:'${scene.scene_id}'})">Activate</button>
+        <button class="btn-sm danger" onclick="editorDeleteScene('${scene.scene_id}')">Delete</button>
+      </div>`;
+    el.appendChild(card);
+  });
+}
 
-  buildModes([]);  // show default mode buttons immediately
-  connect();
+function editorEditScene(sceneId) {
+  const scene = _edScenes.find(s => s.scene_id === sceneId);
+  if (scene) { _edSelected = JSON.parse(JSON.stringify(scene)); _renderForm(_edSelected); _renderSceneList(); }
+}
+
+function editorNewScene() {
+  _edSelected = {
+    scene_id: '', name: '', description: '', base_mode: 'open_dance', groups: []
+  };
+  _renderForm(_edSelected);
+  _edScenes.forEach((_, i) => {
+    document.querySelectorAll('.scene-card')[i]?.classList.remove('selected');
+  });
+}
+
+async function editorDeleteScene(sceneId) {
+  if (!confirm(`Delete scene "${sceneId}"?`)) return;
+  await fetch(`/api/scenes/${sceneId}`, {method:'DELETE'});
+  if (_edSelected?.scene_id === sceneId) { _edSelected = null; _clearForm(); }
+  _edLoad();
+  scenesReady = false;  // force scene grid rebuild in live tab
+}
+
+function _clearForm() {
+  document.getElementById('scene-form-panel').innerHTML =
+    '<div class="editor-empty">Select a scene to edit, or click "+ New Scene"</div>';
+}
+
+function _renderForm(scene) {
+  const posOptions = Object.keys(_edPresets.positions||{}).map(k=>`<option value="${k}">${k}</option>`).join('');
+  const stOptions  = Object.keys(_edPresets.states||{}).map(k=>`<option value="${k}">${k}</option>`).join('');
+  const modeOptions = MODES_LIST.map(m=>`<option value="${m}" ${scene.base_mode===m?'selected':''}>${m}</option>`).join('');
+
+  const groupsHtml = (scene.groups||[]).map((g,i) => `
+    <div class="group-row" id="group-row-${i}">
+      <div class="group-row-header">
+        <span class="group-label">Group ${i+1}</span>
+        <button class="btn-sm danger" onclick="editorRemoveGroup(${i})">Remove</button>
+      </div>
+      <div class="form-group">
+        <label>Fixture Type</label>
+        <select onchange="editorGroupChange(${i},'fixture_type',this.value)">
+          ${FIXTURE_TYPES.map(t=>`<option value="${t}" ${g.fixture_type===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>State Preset</label>
+        <select onchange="editorGroupChange(${i},'state_preset',this.value)">
+          <option value="">— none —</option>${stOptions.replace(`value="${g.state_preset}"`,`value="${g.state_preset}" selected`)}
+        </select>
+      </div>
+      <div class="form-group" id="pos-group-${i}" style="${g.fixture_type==='beam'?'':'display:none'}">
+        <label>Position Preset</label>
+        <select onchange="editorGroupChange(${i},'position_preset',this.value)">
+          <option value="">— none —</option>${posOptions.replace(`value="${g.position_preset}"`,`value="${g.position_preset}" selected`)}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Movement</label>
+        <select onchange="editorGroupChange(${i},'movement_mode',this.value)">
+          ${MOVEMENT_MODES.map(m=>`<option value="${m}" ${g.movement_mode===m?'selected':''}>${m}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>&nbsp;</label>
+        <div class="checkbox-row">
+          <input type="checkbox" id="reactive-${i}" ${g.audio_reactive?'checked':''}
+            onchange="editorGroupChange(${i},'audio_reactive',this.checked)">
+          <label for="reactive-${i}" style="text-transform:none;letter-spacing:0">Audio reactive</label>
+        </div>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('scene-form-panel').innerHTML = `
+    <div style="padding:4px">
+      <div class="form-group">
+        <label>Scene ID <span style="color:var(--dim)">(letters/numbers/underscore)</span></label>
+        <input type="text" id="ed-scene-id" value="${scene.scene_id}"
+          oninput="_edSelected.scene_id=this.value" placeholder="e.g. my_scene">
+      </div>
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="ed-scene-name" value="${scene.name||''}"
+          oninput="_edSelected.name=this.value" placeholder="Display name">
+      </div>
+      <div class="form-group">
+        <label>Base Mode</label>
+        <select onchange="_edSelected.base_mode=this.value">${modeOptions}</select>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <input type="text" id="ed-scene-desc" value="${scene.description||''}"
+          oninput="_edSelected.description=this.value" placeholder="Optional">
+      </div>
+      <div class="section-label" style="margin-bottom:8px">Groups</div>
+      <div id="ed-groups">${groupsHtml}</div>
+      <button class="btn" style="margin-bottom:12px" onclick="editorAddGroup()">+ Add Group</button>
+      <div class="form-actions">
+        <button class="btn btn-sm primary" style="padding:8px 20px" onclick="editorSave()">Save Scene</button>
+        <button class="btn btn-sm" style="padding:8px 16px" onclick="_clearForm();_edSelected=null">Cancel</button>
+      </div>
+      <div id="ed-feedback" style="margin-top:8px;font-size:.72rem;color:var(--green)"></div>
+    </div>`;
+}
+
+function editorGroupChange(i, field, value) {
+  if (!_edSelected || !_edSelected.groups[i]) return;
+  _edSelected.groups[i][field] = value;
+  if (field === 'fixture_type') {
+    const posEl = document.getElementById(`pos-group-${i}`);
+    if (posEl) posEl.style.display = value === 'beam' ? '' : 'none';
+  }
+}
+
+function editorAddGroup() {
+  if (!_edSelected) return;
+  _edSelected.groups.push({
+    fixture_type: 'uplight', groups: ['all'], state_preset: '',
+    position_preset: '', movement_mode: 'inherit', audio_reactive: true
+  });
+  _renderForm(_edSelected);
+}
+
+function editorRemoveGroup(i) {
+  if (!_edSelected) return;
+  _edSelected.groups.splice(i, 1);
+  _renderForm(_edSelected);
+}
+
+async function editorSave() {
+  if (!_edSelected) return;
+  const feedback = document.getElementById('ed-feedback');
+  if (!_edSelected.scene_id) { if(feedback) feedback.textContent='Scene ID is required.'; return; }
+  const res = await fetch('/api/scenes', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(_edSelected)});
+  const data = await res.json();
+  if (data.ok) {
+    if(feedback) feedback.textContent = 'Saved ✓';
+    setTimeout(()=>{ if(feedback) feedback.textContent=''; }, 2000);
+    scenesReady = false;  // force scene grid rebuild in live tab
+    _edLoad();
+  } else {
+    if(feedback) feedback.textContent = `Error: ${data.error||'unknown'}`;
+  }
+}
+
+// ============================================================
+// TAB SWITCHING
+// ============================================================
+function showTab(name) {
+  document.getElementById('tab-live').style.display   = name==='live'   ? '' : 'none';
+  document.getElementById('tab-scenes').style.display = name==='scenes' ? '' : 'none';
+  document.querySelectorAll('.tab').forEach((t,i) =>
+    t.classList.toggle('active', [,'live','scenes'][i+1]===name || t.textContent.toLowerCase().includes(name)));
+  if (name === 'scenes') _edLoad();
+}
+
+// ============================================================
+// INIT
+// ============================================================
+buildModes([]);
+_initCanvas();
+connect();
 </script>
 </body>
 </html>
