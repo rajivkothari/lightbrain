@@ -108,8 +108,8 @@ class RockWedge(FixtureBase):
         amber_dmx = apply_gamma_to_dmx(max(0.0, min(1.0, amber)), gamma)
         uv_dmx    = apply_gamma_to_dmx(max(0.0, min(1.0, uv)),    gamma)
 
-        # Strobe: disabled in Sprint 1 (strobe table per fixture Sprint 2+)
-        strobe_dmx = 0
+        # Strobe: Ch8 range 0=off, 11=slowest, 255=fastest (per RockWedge datasheet)
+        strobe_dmx = (11 + int(max(0.0, min(1.0, strobe)) * 244)) if strobe > 0.0 else 0
 
         universe.set_channels(addr, [
             dimmer_dmx,   # Ch1 Dimmer

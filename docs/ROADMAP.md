@@ -145,6 +145,30 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
+## Phase 10 — Sprint 10: EDM Lift Strobe
+
+**Status: Complete — 399 tests passing**
+
+### Delivered
+
+- [x] `engine/strobe.py` — `StrobeEngine`: time-based oscillator that activates during EDM energy rises; ramps from 2Hz→16Hz as `high_energy` climbs above 0.28 threshold; 25% duty cycle; 0.22s hold-off after energy drops; `update()` returns `(strobe_on: bool, rate: float, freq: float)`
+- [x] `engine/modes.py` — enabled `allow_strobe=True` for `banger` and `indian_latin` modes
+- [x] `engine/safety.py` — `update_from_mode()` now propagates `mode.allow_strobe` to `safety.state.strobe_allowed`; `apply()` passes strobe through the safety chain (blackout still forces to 0)
+- [x] `fixtures/rockwedge.py` — Ch8 strobe DMX now active: `(11 + int(strobe * 244)) if strobe > 0 else 0` (range: 0=off, 11=slowest, 255=fastest per RockWedge datasheet)
+- [x] `app/render/scene.py` — `update_and_build()` accepts `strobe_on` and `strobe_rate`; GigBAR impact flash triggers on `impact > 0.75 OR strobe_on`; flash brightness uses `max(impact, strobe_rate * 0.65)` during strobe
+- [x] `app/main.py` — `StrobeEngine` wired into per-frame loop; `strobe_on`/`strobe_rate` fed to safety chain and scene layout; RockWedge DMX write uses live strobe value
+- [x] `app/web/dashboard.html` — full-screen white flash on GigBAR impact (opacity `brt*0.28`) visible in canvas visualizer during strobe events; GigBAR movers added as actual beam cones (`gigbar_mover_l`, `gigbar_mover_r`)
+
+### Strobe behavior
+
+- Activates only in `banger` and `indian_latin` modes when `high_energy ≥ 0.28`
+- Frequency ramps linearly: 2Hz at threshold → 16Hz at full energy
+- 25% duty cycle (on for 25% of each strobe period)
+- 0.22s hold keeps strobe alive briefly after energy drops (avoids flicker on transients)
+- dt capped at 0.1s per update to prevent large time jumps breaking the oscillator
+
+---
+
 ## Phase 9 — Sprint 9: Canvas Visualizer + Scene Editor
 
 **Status: Complete — 378 tests passing**
@@ -265,3 +289,4 @@ python -m app.main --demo --web
 | 7 | 344 ✅ | Scene presets, position/state presets, SceneManager, FixtureAimingTool, F1-F9 shortcuts |
 | 8 | 359 ✅ | Web dashboard (FastAPI + WebSocket), live energy bars, mode/scene/blackout control |
 | 9 | 378 ✅ | Canvas rig visualizer, scene editor UI, scene CRUD API, serialize_rig_state |
+| 10 | 399 ✅ | EDM lift strobe engine, safety chain strobe passthrough, RockWedge Ch8, visual flash |

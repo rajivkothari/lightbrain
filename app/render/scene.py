@@ -165,6 +165,8 @@ class SceneLayout:
         palette_name:   str,
         blackout:       bool,
         now:            Optional[float] = None,   # Sprint 3: inject clock
+        strobe_on:      bool  = False,            # EDM rise strobe oscillator on-phase
+        strobe_rate:    float = 0.0,              # 0–1 strobe speed/intensity
     ) -> RigVisualState:
         """Build a complete RigVisualState for one render frame.
 
@@ -332,13 +334,15 @@ class SceneLayout:
         # ------------------------------------------------------------------
         # Impact / flash (GigBAR strobe head)
         # ------------------------------------------------------------------
-        flash_on = flash_allowed and impact > 0.75
+        # Flash fires on bass impact OR during EDM rise strobe pulse
+        flash_on  = flash_allowed and (impact > 0.75 or strobe_on)
+        flash_brt = max(impact, strobe_rate * 0.65) if flash_on else impact
         impacts = [
             ImpactState(
                 fixture_id="gigbar_impact",
                 x=float(_GIGBAR_POS[0]),
                 y=float(_GIGBAR_POS[1]),
-                brightness=impact,
+                brightness=flash_brt,
                 flash_active=flash_on,
                 active=not blackout,
             )

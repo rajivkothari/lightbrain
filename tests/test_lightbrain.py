@@ -52,7 +52,8 @@ from engine.scenes import (
 )
 from fixtures.aiming import FixtureAimingTool
 from fixtures.djflx_beam import DJFLXBeam as _DJFLXBeamForAiming
-from app.web import server as _web_server
+from app.web    import server as _web_server
+from engine.strobe import StrobeEngine
 
 
 # ===========================================================================
@@ -467,11 +468,17 @@ class TestRockWedge:
         # Red should be full (pure hue, no brightness baked in)
         assert red == 255
 
-    def test_strobe_zero_in_sprint1(self):
+    def test_strobe_dmx_at_max_rate(self):
         u  = DMXUniverse()
         rw = self._rw(1)
         rw.render_to_universe(u, hue=0, saturation=1.0, value=1.0, strobe=1.0)
-        assert u.get_channel(8) == 0   # Ch8 strobe always 0 Sprint 1
+        assert u.get_channel(8) == 255  # Ch8 = 255 at max strobe rate
+
+    def test_strobe_dmx_zero_when_off(self):
+        u  = DMXUniverse()
+        rw = self._rw(1)
+        rw.render_to_universe(u, hue=0, saturation=1.0, value=1.0, strobe=0.0)
+        assert u.get_channel(8) == 0   # Ch8 = 0 when strobe off
 
     def test_white_amber_uv_zero_in_sprint1(self):
         u  = DMXUniverse()
@@ -3330,3 +3337,148 @@ class TestWebSceneAPI:
         pattern = r'^[a-zA-Z0-9_]+$'
         for invalid in ("../evil", "scene id", "scene-id", "", "a/b"):
             assert not re.match(pattern, invalid), f"Should be invalid: {invalid}"
+
+
+# ===========================================================================
+# Sprint 10 — StrobeEngine (EDM lift strobe)
+# ===========================================================================
+
+class TestStrobeEngine:
+    """Rise-synchronized strobe for banger / indian_latin modes."""
+
+    _T = 1000.0  # arbitrary base time for deterministic tests
+
+    def _eng(self):
+        e = StrobeEngine()
+        e._last_t = self._T
+        return e
+
+    def test_inactive_below_threshold(self):
+        e = self._eng()
+        on, rate, freq = e.update(high_energy=0.10, mode_key="banger", now=self._T + 0.05)
+        assert not on
+        assert rate == pytest.approx(0.0)
+        assert freq == pytest.approx(0.0)
+
+    def test_inactive_in_dinner_mode(self):
+        e = self._eng()
+        on, rate, _ = e.update(high_energy=0.9, mode_key="dinner", now=self._T + 0.05)
+        assert not on
+        assert rate == pytest.approx(0.0)
+
+    def test_inactive_in_slow_dance(self):
+        e = self._eng()
+        on, rate, _ = e.update(high_energy=0.9, mode_key="slow_dance", now=self._T + 0.05)
+        assert not on
+        assert rate == pytest.approx(0.0)
+
+    def test_active_when_banger_above_threshold(self):
+        e = self._eng()
+        _, rate, freq = e.update(high_energy=0.8, mode_key="banger", now=self._T + 0.05)
+        assert rate > 0.0
+        assert freq > 0.0
+
+    def test_active_in_indian_latin(self):
+        e = self._eng()
+        _, rate, _ = e.update(high_energy=0.7, mode_key="indian_latin", now=self._T + 0.05)
+        assert rate > 0.0
+
+    def test_frequency_increases_with_energy(self):
+        e1, e2 = self._eng(), self._eng()
+        _, _, freq_low  = e1.update(0.35, "banger", now=self._T + 0.01)
+        _, _, freq_high = e2.update(0.90, "banger", now=self._T + 0.01)
+        assert freq_high > freq_low
+
+    def test_strobe_on_during_duty_cycle(self):
+        e = self._eng()
+        e._phase = 0.05   # well inside 25% duty cycle
+        on, _, _ = e.update(0.8, "banger", now=self._T + 0.001)
+        assert on
+
+    def test_strobe_off_outside_duty_cycle(self):
+        e = self._eng()
+        e._phase = 0.50   # outside 25% duty cycle
+        on, _, _ = e.update(0.8, "banger", now=self._T + 0.001)
+        assert not on
+
+    def test_hold_keeps_active_briefly_after_drop(self):
+        e = self._eng()
+        # Activate with high energy
+        e.update(0.9, "banger", now=self._T)
+        # Drop energy below threshold — hold should keep it alive
+        on, rate, _ = e.update(0.05, "banger", now=self._T + 0.05)
+        assert rate > 0.0  # still active during hold
+
+    def test_hold_expires_eventually(self):
+        e = self._eng()
+        e.update(0.9, "banger", now=self._T)
+        # dt is capped at 0.1s per call; drain hold (0.22s) over multiple frames
+        t = self._T + 0.1
+        for _ in range(5):
+            on, rate, _ = e.update(0.05, "banger", now=t)
+            t += 0.1
+        assert rate == pytest.approx(0.0)
+
+    def test_reset_clears_phase(self):
+        e = self._eng()
+        e.update(0.9, "banger", now=self._T + 0.1)
+        e.reset()
+        assert e._phase == pytest.approx(0.0)
+        assert e._hold_t == pytest.approx(0.0)
+
+    def test_rate_at_max_energy_near_one(self):
+        e = self._eng()
+        _, rate, _ = e.update(1.0, "banger", now=self._T + 0.01)
+        assert rate > 0.9
+
+    def test_freq_near_max_at_full_energy(self):
+        e = self._eng()
+        _, _, freq = e.update(1.0, "banger", now=self._T + 0.01)
+        assert freq == pytest.approx(16.0, abs=0.1)
+
+    def test_safety_allows_strobe_in_banger(self):
+        from engine.safety import SafetyEngine
+        from engine.modes  import get_mode
+        safety = SafetyEngine()
+        safety.update_from_mode(get_mode("banger"))
+        assert safety.state.strobe_allowed is True
+
+    def test_safety_disallows_strobe_in_dinner(self):
+        from engine.safety import SafetyEngine
+        from engine.modes  import get_mode
+        safety = SafetyEngine()
+        safety.update_from_mode(get_mode("dinner"))
+        assert safety.state.strobe_allowed is False
+
+    def test_safety_apply_passes_strobe_when_allowed(self):
+        from engine.safety import SafetyEngine
+        from engine.modes  import get_mode
+        safety = SafetyEngine()
+        safety.update_from_mode(get_mode("banger"))
+        _, safe_strobe = safety.apply(brightness=1.0, strobe=0.7)
+        assert safe_strobe == pytest.approx(0.7)
+
+    def test_safety_apply_blocks_strobe_when_blackout(self):
+        from engine.safety import SafetyEngine
+        from engine.modes  import get_mode
+        safety = SafetyEngine()
+        safety.update_from_mode(get_mode("banger"))
+        safety.toggle_blackout()
+        _, safe_strobe = safety.apply(brightness=1.0, strobe=0.7)
+        assert safe_strobe == pytest.approx(0.0)
+
+    def test_rockwedge_strobe_dmx_zero_when_off(self):
+        from fixtures.rockwedge import RockWedge
+        from dmx.universe import DMXUniverse
+        rw  = RockWedge("rw0", "test", 1, "room", "all")
+        uni = DMXUniverse()
+        rw.render_to_universe(uni, 1.0, 0.0, 1.0, 0.8, strobe=0.0)
+        assert uni.get_channel(8) == 0   # Ch8 = strobe = off
+
+    def test_rockwedge_strobe_dmx_nonzero_when_on(self):
+        from fixtures.rockwedge import RockWedge
+        from dmx.universe import DMXUniverse
+        rw  = RockWedge("rw0", "test", 1, "room", "all")
+        uni = DMXUniverse()
+        rw.render_to_universe(uni, 1.0, 0.0, 1.0, 0.8, strobe=0.5)
+        assert uni.get_channel(8) >= 11  # Ch8 must be in the strobe range

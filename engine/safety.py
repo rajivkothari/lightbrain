@@ -42,8 +42,7 @@ class SafetyEngine:
             self.state.blackout_active = True
         else:
             self.state.blackout_active = self._blackout_latch
-            # Strobe stays globally off in Sprint 1
-            self.state.strobe_allowed = False  # mode.allow_strobe when ready
+            self.state.strobe_allowed  = mode.allow_strobe and not self.state.blackout_active
             self.state.movement_allowed = mode.allow_movement
             self.state.mode_intensity_scale = mode.intensity_scale
 
@@ -73,5 +72,6 @@ class SafetyEngine:
         )
         safe_brightness = max(0.0, min(1.0, safe_brightness))
 
-        safe_strobe = 0.0  # always 0 in Sprint 1
+        safe_strobe = strobe if self.state.strobe_allowed else 0.0
+        safe_strobe = max(0.0, min(1.0, safe_strobe))
         return safe_brightness, safe_strobe

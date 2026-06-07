@@ -57,7 +57,8 @@ from dmx.output_enttec_pro import EnttecProOutput
 from fixtures.rockwedge import RockWedge
 
 from ui.terminal_debug import TerminalDebugOverlay
-from engine.scenes import SceneManager
+from engine.scenes  import SceneManager
+from engine.strobe  import StrobeEngine
 from app.render.scene import SceneLayout
 from app.web import server as _web
 
@@ -262,7 +263,8 @@ def main():
     scene_mgr = SceneManager(SCENES_DIR, POSITIONS_FILE, STATES_FILE)
     scene_mgr.load_all()
     _all_scenes = scene_mgr.list_scenes()
-    scene_layout = SceneLayout()
+    scene_layout   = SceneLayout()
+    strobe_engine  = StrobeEngine()
 
     # ---- web dashboard ----
     if args.web:
@@ -488,6 +490,15 @@ def main():
                 _render_s = room_out.hsv.s
                 _render_v = room_out.hsv.v
 
+            # --- strobe engine (EDM lift) ---
+            _now = time.monotonic()
+            _strobe_on, _strobe_rate, _ = strobe_engine.update(
+                high_energy=bands_dict.get("high_energy", 0.0),
+                mode_key=mode_key,
+                now=_now,
+            )
+            _eff_strobe = _strobe_rate if safety.state.strobe_allowed else 0.0
+
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
                 fixture.render_to_universe(
@@ -496,7 +507,7 @@ def main():
                     hue=_render_h,
                     saturation=_render_s,
                     value=_render_v,
-                    strobe=room_out.strobe,
+                    strobe=_eff_strobe,
                     white=eff_white,
                     amber=eff_amber,
                     uv=eff_uv,
@@ -567,6 +578,7 @@ def main():
                     pulse_brt=room_out.pulse_brightness,
                     mode_key=mode_key, palette_name=room_lane.palette_name,
                     blackout=safety.state.blackout_active,
+                    strobe_on=_strobe_on, strobe_rate=_eff_strobe,
                 )
                 _rig_web = scene_mgr.apply_to_rig_state(_rig_web)
                 _web.update_state(
