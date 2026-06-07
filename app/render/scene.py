@@ -246,13 +246,21 @@ class SceneLayout:
         ))
 
         # ------------------------------------------------------------------
-        # Beams (2 DJFLX) — angles sweep via sine
+        # Beams: 2 DJFLX (outer) + 2 GigBAR movers (inner)
         # ------------------------------------------------------------------
-        # Beams (2 DJFLX) — mirror-symmetric sweep so both converge/diverge together
+        # DJFLX: mirror-symmetric sweep so both converge/diverge together
         sweep_l = -35.0 + math.sin(self._beam_phase) * 22.0
         sweep_r =  35.0 - math.sin(self._beam_phase) * 22.0
 
-        beam_len = 400.0 + impact * 80.0   # pulses slightly with impact
+        # GigBAR movers: faster phase, smaller range, project up into floor
+        gigbar_phase = self._beam_phase * 1.4 + 0.8
+        gigbar_sweep_l =  math.sin(gigbar_phase) * 28.0
+        gigbar_sweep_r = -math.sin(gigbar_phase) * 28.0
+
+        beam_len = 400.0 + impact * 80.0
+
+        # GigBAR mover head positions: ±27.5 px from bar centre on the 110-wide bar
+        _gb_y = float(_GIGBAR_POS[1])
 
         beams = [
             BeamState(
@@ -277,6 +285,30 @@ class SceneLayout:
                 length=beam_len,
                 spread=6.0,
                 movement_speed=beam_speed,
+                active=not blackout,
+            ),
+            BeamState(
+                fixture_id="gigbar_mover_l",
+                x=float(_GIGBAR_POS[0] - 27.5),
+                y=_gb_y,
+                color_rgb=main_rgb,
+                brightness=eff_brightness * 0.8,
+                angle_degrees=gigbar_sweep_l,
+                length=280.0 + impact * 40.0,
+                spread=4.0,
+                movement_speed=beam_speed * 1.4,
+                active=not blackout,
+            ),
+            BeamState(
+                fixture_id="gigbar_mover_r",
+                x=float(_GIGBAR_POS[0] + 27.5),
+                y=_gb_y,
+                color_rgb=main_rgb,
+                brightness=eff_brightness * 0.8,
+                angle_degrees=gigbar_sweep_r,
+                length=280.0 + impact * 40.0,
+                spread=4.0,
+                movement_speed=beam_speed * 1.4,
                 active=not blackout,
             ),
         ]

@@ -940,9 +940,16 @@ class TestSceneLayout:
         rig = self._build()
         assert len(rig.uplights) == 18
 
-    def test_two_beams(self):
+    def test_four_beams(self):
+        # 2 DJFLX + 2 GigBAR movers
         rig = self._build()
-        assert len(rig.beams) == 2
+        assert len(rig.beams) == 4
+
+    def test_gigbar_movers_present(self):
+        rig = self._build()
+        ids = {b.fixture_id for b in rig.beams}
+        assert "gigbar_mover_l" in ids
+        assert "gigbar_mover_r" in ids
 
     def test_rgb_values_valid(self):
         rig = self._build("banger")

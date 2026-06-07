@@ -386,77 +386,91 @@ function _drawWash(ctx, w, s) {
   _fixtureLabel(ctx, lbl, x, y + fr + 11*s, s, on);
 }
 
-// GigBAR Move+ILS drawn as a 5-head horizontal bar fixture
+// GigBAR Move+ILS: 5-head bar  [wash · mover · derby · mover · wash]
 function _drawGigbarWash(ctx, w, s) {
   const cx = w.x*s, cy = w.y*s;
   const on = w.active && w.brt > 0.01;
   const barW = 110*s;
-  const nHeads = 5;
-  const headLabels = ['W', 'W', 'D', 'W', 'W'];  // W=wash, D=derby center
+  // Head layout: outer wash, moving wash L, derby ball, moving wash R, outer wash
+  const HEADS = ['wash', 'mover', 'derby', 'mover', 'wash'];
+  const headXs = HEADS.map((_, i) => cx - barW/2 + barW * i / (HEADS.length - 1));
 
   // Bar chassis
   ctx.strokeStyle = on ? _H_ON : _H_OFF;
   ctx.lineWidth = Math.max(1.5, 3*s);
   ctx.beginPath(); ctx.moveTo(cx - barW/2, cy); ctx.lineTo(cx + barW/2, cy); ctx.stroke();
-  // Truss mount bracket at top
+  // Truss mount bracket
   ctx.lineWidth = Math.max(1, 1.5*s);
-  ctx.beginPath(); ctx.moveTo(cx - 8*s, cy - 6*s); ctx.lineTo(cx + 8*s, cy - 6*s); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy - 6*s); ctx.stroke();
-
-  // Individual heads
-  const headXs = [];
-  for (let i = 0; i < nHeads; i++) headXs.push(cx - barW/2 + barW * i/(nHeads-1));
+  ctx.beginPath(); ctx.moveTo(cx - 9*s, cy - 7*s); ctx.lineTo(cx + 9*s, cy - 7*s); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy - 7*s); ctx.lineTo(cx, cy); ctx.stroke();
 
   headXs.forEach((hx, i) => {
-    const hr = (i === 2 ? 7 : 5) * s;  // center derby head slightly larger
+    const type = HEADS[i];
+    const hr = (type === 'derby' ? 7 : type === 'mover' ? 6 : 5) * s;
     ctx.strokeStyle = on ? _H_ON : _H_OFF;
     ctx.lineWidth = Math.max(1, 1.2*s);
     ctx.beginPath(); ctx.arc(hx, cy, hr, 0, Math.PI*2); ctx.stroke();
-    if (i !== 2) {
-      // Wash heads: inner ring
+
+    if (type === 'wash') {
+      // Static wash: inner concentric ring
       ctx.beginPath(); ctx.arc(hx, cy, hr*0.45, 0, Math.PI*2); ctx.stroke();
+    } else if (type === 'mover') {
+      // Moving head: upward triangle shows pan/tilt capability
+      const ts = hr * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(hx, cy - ts);
+      ctx.lineTo(hx - ts*0.8, cy + ts*0.55);
+      ctx.lineTo(hx + ts*0.8, cy + ts*0.55);
+      ctx.closePath(); ctx.stroke();
     } else {
-      // Derby head: crosshair to distinguish it
+      // Derby ball: crosshair
       ctx.beginPath(); ctx.moveTo(hx - hr, cy); ctx.lineTo(hx + hr, cy); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(hx, cy - hr); ctx.lineTo(hx, cy + hr); ctx.stroke();
     }
+
     if (on) {
       const [R,G,B] = w.rgb;
       ctx.fillStyle = `rgba(${R},${G},${B},0.5)`;
-      ctx.beginPath(); ctx.arc(hx, cy, hr*0.28, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(hx, cy, hr * 0.25, 0, Math.PI*2); ctx.fill();
     }
   });
 
   if (on) {
     const brt = Math.max(0.2, w.brt) * (1 + _beatFlash * 0.4);
     const [R,G,B] = w.rgb;
-    // Per-head glow
+    // Per-head glow (skip movers — their beam cones light the scene)
     headXs.forEach((hx, i) => {
-      const gr = (i === 2 ? 80 : 100) * s + w.pulse * 40 * s;
+      if (HEADS[i] === 'mover') return;
+      const gr = (HEADS[i] === 'derby' ? 65 : 90) * s + w.pulse * 35 * s;
       const g = ctx.createRadialGradient(hx, cy, 0, hx, cy, gr);
-      g.addColorStop(0, `rgba(${R},${G},${B},${Math.min(1, brt*0.45).toFixed(2)})`);
+      g.addColorStop(0, `rgba(${R},${G},${B},${Math.min(1, brt*0.48).toFixed(2)})`);
       g.addColorStop(1, `rgba(${R},${G},${B},0)`);
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(hx, cy, gr, 0, Math.PI*2); ctx.fill();
     });
   }
 
-  _fixtureLabel(ctx, 'GIGBAR (5-HEAD)', cx, cy + 22*s, s, on);
+  _fixtureLabel(ctx, 'GIGBAR MOVE+ILS', cx, cy + 22*s, s, on);
 }
 
 function _drawBeam(ctx, b, s) {
   const ox = b.x*s, oy = b.y*s;
   const on = b.active && b.brt > 0.01;
-  // Mount bar (horizontal truss)
-  ctx.strokeStyle = on ? 'rgba(110,110,170,0.55)' : 'rgba(40,40,70,0.5)';
-  ctx.lineWidth = Math.max(2, 3*s);
-  ctx.beginPath(); ctx.moveTo(ox - 18*s, oy); ctx.lineTo(ox + 18*s, oy); ctx.stroke();
-  // Pivot head (double-ring)
-  ctx.strokeStyle = on ? _H_ON : _H_OFF;
-  ctx.lineWidth = Math.max(1, 1.5*s);
-  const pr = 8*s;
-  ctx.beginPath(); ctx.arc(ox, oy, pr,      0, Math.PI*2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(ox, oy, pr*0.38, 0, Math.PI*2); ctx.stroke();
+  const isGigbar = b.id === 'gigbar_mover_l' || b.id === 'gigbar_mover_r';
+
+  if (!isGigbar) {
+    // DJFLX: standalone mount bar + double-ring pivot
+    ctx.strokeStyle = on ? 'rgba(110,110,170,0.55)' : 'rgba(40,40,70,0.5)';
+    ctx.lineWidth = Math.max(2, 3*s);
+    ctx.beginPath(); ctx.moveTo(ox - 18*s, oy); ctx.lineTo(ox + 18*s, oy); ctx.stroke();
+    ctx.strokeStyle = on ? _H_ON : _H_OFF;
+    ctx.lineWidth = Math.max(1, 1.5*s);
+    const pr = 8*s;
+    ctx.beginPath(); ctx.arc(ox, oy, pr,       0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ox, oy, pr*0.38,  0, Math.PI*2); ctx.stroke();
+  }
+  // GigBAR mover housings are drawn inside _drawGigbarWash — no duplicate icons here
+
   if (on) {
     const rad = b.angle * Math.PI / 180;
     const len = b.length * s;
@@ -495,27 +509,35 @@ function _drawBeam(ctx, b, s) {
     ctx.beginPath();
     ctx.moveTo(ox, oy); ctx.lineTo(tx + px*halfSpread, ty + py*halfSpread); ctx.stroke();
   }
-  const lbl = b.id === 'beam_l' ? 'BEAM L' : 'BEAM R';
-  _fixtureLabel(ctx, lbl, ox, oy + pr + 13*s, s, on);
+  if (!isGigbar) {
+    _fixtureLabel(ctx, b.id === 'beam_l' ? 'BEAM L' : 'BEAM R', ox, oy + 21*s, s, on);
+  }
 }
 
+// Derby ball: rotating coloured spots projected onto the dance floor
 function _drawSparkle(ctx, sp, s) {
   if (!sp.active || sp.amount < 0.05) return;
-  const cx = sp.x*s, cy = sp.y*s;
   const [R,G,B] = sp.rgb;
-  const count = Math.floor(sp.amount * 30);
-  const rad = 75*s;
-  const t = Math.floor(Date.now() / 120);
-  ctx.fillStyle = `rgba(${R},${G},${B},0.9)`;
-  for (let i = 0; i < count; i++) {
-    const h1 = Math.imul(i*2654435761 + t, 0x9e3779b9) >>> 0;
-    const h2 = Math.imul(i*1013904223 + t, 0x6c62272e) >>> 0;
-    const angle = (h1 % 1000) / 1000 * Math.PI * 2;
-    const dist  = (h2 % 1000) / 1000 * rad;
-    ctx.beginPath();
-    ctx.arc(cx + Math.cos(angle)*dist, cy + Math.sin(angle)*dist, Math.max(1.5, 2*s), 0, Math.PI*2);
-    ctx.fill();
-  }
+  const t = Date.now() / 1000;
+  const nSpots = Math.max(4, Math.floor(sp.amount * 9));
+  // Floor centre and radii (two rings of spots)
+  const fcx = ((FL + FR) / 2) * s;
+  const fcy = ((FT + FB) / 2) * s;
+  const innerR = (FR - FL) * 0.15 * s;
+  const outerR = (FR - FL) * 0.34 * s;
+  [[innerR, t * 0.85], [outerR, -t * 0.55]].forEach(([dist, phase]) => {
+    for (let i = 0; i < nSpots; i++) {
+      const angle = (i / nSpots) * Math.PI * 2 + phase;
+      const bx = fcx + Math.cos(angle) * dist;
+      const by = fcy + Math.sin(angle) * dist;
+      if (bx < FL*s || bx > FR*s || by < FT*s || by > FB*s) continue;
+      const gr = 18*s;
+      const g = ctx.createRadialGradient(bx, by, 0, bx, by, gr);
+      g.addColorStop(0, `rgba(${R},${G},${B},${(sp.amount * 0.6).toFixed(2)})`);
+      g.addColorStop(1, `rgba(${R},${G},${B},0)`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bx, by, gr, 0, Math.PI*2); ctx.fill();
+    }
+  });
 }
 
 function _drawImpact(ctx, im, s, W, H) {
@@ -533,8 +555,8 @@ function _drawLegend(ctx, s, W) {
   const items = [
     ['□', 'Uplight  ×18'],
     ['⊚', 'Wash L / R'],
-    ['⊟', 'GigBAR 5-head'],
-    ['◎', 'Moving Beam'],
+    ['⊟', 'GigBAR (▲=mover,+= derby)'],
+    ['◎', 'DJFLX Beam  ×2'],
   ];
   items.forEach(([icon, label], i) => {
     ctx.fillStyle = 'rgba(100,100,160,0.9)';
