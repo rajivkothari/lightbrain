@@ -296,9 +296,10 @@ def main():
 
     last_bands = AudioBands()
     last_lanes: dict = {"impact": 0.0, "room": 0.0}
-    quit_flag  = False
-    _last_hue  = 0.0       # raw hue from previous frame — reference for snap()
-    _prev_mode_key = mode_key  # detect mode changes within a frame
+    quit_flag      = False
+    _last_hue      = 0.0    # raw hue from previous frame — reference for snap()
+    _prev_mode_key = mode_key
+    _strobe_master = 1.0    # 0–1 multiplier, set via web slider
 
     try:
         while not quit_flag:
@@ -405,6 +406,8 @@ def main():
                     scene_mgr.release_scene()
                 elif _wtype == "blackout":
                     safety.toggle_blackout()
+                elif _wtype == "strobe_master":
+                    _strobe_master = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
 
             # --- MIDI ---
             if midi_in is not None:
@@ -502,7 +505,7 @@ def main():
                 mode_key=mode_key,
                 now=_now,
             )
-            _eff_strobe = _strobe_rate if safety.state.strobe_allowed else 0.0
+            _eff_strobe = _strobe_rate * _strobe_master if safety.state.strobe_allowed else 0.0
 
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
@@ -609,6 +612,10 @@ def main():
                     fps=             _fps_display,
                     dmx_output=      dmx_out.output_type,
                     fixtures=        _web.serialize_rig_state(_rig_web),
+                    impact_lane=     float(last_lanes.get("impact", 0.0)),
+                    room_lane=       float(last_lanes.get("room",   0.0)),
+                    strobe_rate=     float(_eff_strobe),
+                    strobe_master=   float(_strobe_master),
                 )
 
             # --- frame rate cap ---

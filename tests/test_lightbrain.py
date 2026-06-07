@@ -3388,7 +3388,7 @@ class TestStrobeEngine:
 
     def test_frequency_increases_with_energy(self):
         e1, e2 = self._eng(), self._eng()
-        _, _, freq_low  = e1.update(0.35, "banger", now=self._T + 0.01)
+        _, _, freq_low  = e1.update(0.65, "banger", now=self._T + 0.01)
         _, _, freq_high = e2.update(0.90, "banger", now=self._T + 0.01)
         assert freq_high > freq_low
 

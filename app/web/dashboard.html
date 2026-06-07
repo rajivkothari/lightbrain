@@ -104,7 +104,7 @@
     /* ---- Energy bars ---- */
     .bars { display: flex; flex-direction: column; gap: 5px; }
     .bar-row { display: flex; align-items: center; gap: 8px; }
-    .bar-label { width: 52px; font-size: 0.68rem; color: var(--dim); text-align: right; }
+    .bar-label { width: 60px; font-size: 0.68rem; color: var(--dim); text-align: right; flex-shrink: 0; }
     .bar-bg { flex: 1; height: 9px; background: var(--surface);
               border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
     .bar-fill { height: 100%; border-radius: 2px; width: 0%; transition: width 0.08s ease-out; }
@@ -112,6 +112,16 @@
     .bar-fill.mid     { background: linear-gradient(90deg, #22cc66, #44ffaa); }
     .bar-fill.high    { background: linear-gradient(90deg, #ccaa00, #ffee44); }
     .bar-fill.overall { background: linear-gradient(90deg, #cc4400, #ff8844); }
+    .bar-fill.impact  { background: linear-gradient(90deg, #ff5522, #ffaa44); }
+    .bar-fill.room    { background: linear-gradient(90deg, #6622cc, #aa66ff); }
+    .bar-fill.strobe  { background: linear-gradient(90deg, #6666cc, #ccccff); }
+    .bar-fill.strobe.firing { background: linear-gradient(90deg, #aaaaff, #ffffff); }
+    .bar-sublabel { font-size: 0.6rem; color: var(--dim); margin-left: 4px; }
+
+    /* ---- Strobe master slider ---- */
+    .slider-row { display:flex; align-items:center; gap:8px; }
+    .slider-row input[type=range] { flex:1; accent-color:var(--accent); cursor:pointer; }
+    .slider-val { font-size:0.72rem; color:var(--text); width:36px; text-align:right; flex-shrink:0; }
 
     /* ---- Buttons ---- */
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
@@ -227,7 +237,7 @@
     <!-- LIVE TAB -->
     <div id="tab-live" class="tab-pane">
       <div class="section">
-        <div class="section-label">Audio Energy</div>
+        <div class="section-label">Audio Bands</div>
         <div class="bars">
           <div class="bar-row"><span class="bar-label">Low</span>
             <div class="bar-bg"><div class="bar-fill low"     id="bar-low"></div></div></div>
@@ -237,6 +247,31 @@
             <div class="bar-bg"><div class="bar-fill high"    id="bar-high"></div></div></div>
           <div class="bar-row"><span class="bar-label">Overall</span>
             <div class="bar-bg"><div class="bar-fill overall" id="bar-overall"></div></div></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-label">Lighting Lanes</div>
+        <div class="bars">
+          <div class="bar-row">
+            <span class="bar-label">Impact<span class="bar-sublabel">flashes</span></span>
+            <div class="bar-bg"><div class="bar-fill impact" id="bar-impact"></div></div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">Room<span class="bar-sublabel">color</span></span>
+            <div class="bar-bg"><div class="bar-fill room" id="bar-room"></div></div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">Strobe<span class="bar-sublabel">EDM</span></span>
+            <div class="bar-bg"><div class="bar-fill strobe" id="bar-strobe"></div></div>
+          </div>
+        </div>
+        <div style="margin-top:7px">
+          <div class="section-label" style="margin-bottom:4px">Strobe Master</div>
+          <div class="slider-row">
+            <input type="range" id="strobe-master" min="0" max="100" value="100"
+                   oninput="onStrobeMaster(this.value)">
+            <span class="slider-val" id="strobe-master-val">100%</span>
+          </div>
         </div>
       </div>
       <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})">
@@ -634,15 +669,21 @@ const DEFAULT_MODES = [
   {key:'slow_dance',   display_name:'Slow Dance'},
 ];
 
-let currentMode  = null;
-let currentScene = null;
-let modesReady   = false;
-let scenesReady  = false;
+let currentMode         = null;
+let currentScene        = null;
+let modesReady          = false;
+let scenesReady         = false;
+let _strobeMasterSynced = false;
 
 function cmd(payload) {
   fetch('/api/command', {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
   }).catch(()=>{});
+}
+
+function onStrobeMaster(v) {
+  document.getElementById('strobe-master-val').textContent = v + '%';
+  cmd({type:'strobe_master', value: parseFloat(v) / 100});
 }
 
 function buildModes(modes) {
@@ -694,6 +735,21 @@ function applyState(s) {
   document.getElementById('bar-mid').style.width     = clamp(s.mid_energy);
   document.getElementById('bar-high').style.width    = clamp(s.high_energy);
   document.getElementById('bar-overall').style.width = clamp(s.overall_energy);
+  document.getElementById('bar-impact').style.width  = clamp(s.impact_lane);
+  document.getElementById('bar-room').style.width    = clamp(s.room_lane);
+  const strobeBar = document.getElementById('bar-strobe');
+  strobeBar.style.width = clamp(s.strobe_rate);
+  strobeBar.classList.toggle('firing', (s.strobe_rate || 0) > 0.01);
+  // Sync strobe master slider once on first message
+  if (!_strobeMasterSynced && s.strobe_master !== undefined) {
+    _strobeMasterSynced = true;
+    const sm = document.getElementById('strobe-master');
+    if (sm) {
+      const pct = Math.round((s.strobe_master || 1) * 100);
+      sm.value = pct;
+      document.getElementById('strobe-master-val').textContent = pct + '%';
+    }
+  }
 
   // Grids
   buildModes(s.modes); buildScenes(s.scenes);

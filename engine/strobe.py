@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 
 
 _STROBE_MODES  = frozenset({"banger", "indian_latin"})
-_THRESHOLD     = 0.28    # high_energy must exceed this to activate
+_THRESHOLD     = 0.55    # high_energy must exceed this to activate
 _MIN_FREQ      =  2.0    # Hz at threshold
 _MAX_FREQ      = 16.0    # Hz at full energy
 _DUTY_CYCLE    = 0.25    # fraction of each period the fixture fires ("on" time)

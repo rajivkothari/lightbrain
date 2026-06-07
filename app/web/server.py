@@ -54,6 +54,10 @@ _engine_state: Dict[str, Any] = {
     "scenes":         [],   # [{id, name, index}]
     "modes":          [],   # [{key, display_name}]
     "fixtures":       {},   # serialized RigVisualState (updated each frame)
+    "impact_lane":    0.0,
+    "room_lane":      0.0,
+    "strobe_rate":    0.0,
+    "strobe_master":  1.0,
 }
 
 _command_queue: _queue.Queue = _queue.Queue()
