@@ -96,10 +96,6 @@
       background: #080810;
     }
 
-    /* ---- Controls row (live tab) ---- */
-    .controls-row { display: flex; gap: 10px; flex-wrap: wrap; }
-    .ctrl-col { flex: 1; min-width: 160px; }
-
     /* ---- Section ---- */
     .section { margin-bottom: 12px; }
     .section-label { font-size: 0.67rem; text-transform: uppercase;
@@ -118,12 +114,12 @@
     .bar-fill.overall { background: linear-gradient(90deg, #cc4400, #ff8844); }
 
     /* ---- Buttons ---- */
-    .grid { display: flex; flex-wrap: wrap; gap: 5px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
     .btn {
       background: var(--card); border: 1px solid var(--border); color: var(--text);
-      font-family: inherit; font-size: 0.75rem; padding: 8px 9px;
+      font-family: inherit; font-size: 0.75rem; padding: 7px 8px;
       cursor: pointer; border-radius: 4px; text-align: center;
-      transition: background 0.12s, border-color 0.12s; line-height: 1.3; min-width: 100px;
+      transition: background 0.12s, border-color 0.12s; line-height: 1.3;
     }
     .btn:hover  { background: #1c1c34; border-color: var(--accent); }
     .btn:active { transform: scale(0.97); }
@@ -231,39 +227,33 @@
 
     <!-- LIVE TAB -->
     <div id="tab-live" class="tab-pane">
-      <div class="controls-row">
-        <div class="ctrl-col">
-          <div class="section">
-            <div class="section-label">Audio Energy</div>
-            <div class="bars">
-              <div class="bar-row"><span class="bar-label">Low</span>
-                <div class="bar-bg"><div class="bar-fill low"     id="bar-low"></div></div></div>
-              <div class="bar-row"><span class="bar-label">Mid</span>
-                <div class="bar-bg"><div class="bar-fill mid"     id="bar-mid"></div></div></div>
-              <div class="bar-row"><span class="bar-label">High</span>
-                <div class="bar-bg"><div class="bar-fill high"    id="bar-high"></div></div></div>
-              <div class="bar-row"><span class="bar-label">Overall</span>
-                <div class="bar-bg"><div class="bar-fill overall" id="bar-overall"></div></div></div>
-            </div>
-          </div>
-          <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})">
-            BLACKOUT
-          </button>
+      <div class="section">
+        <div class="section-label">Audio Energy</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-label">Low</span>
+            <div class="bar-bg"><div class="bar-fill low"     id="bar-low"></div></div></div>
+          <div class="bar-row"><span class="bar-label">Mid</span>
+            <div class="bar-bg"><div class="bar-fill mid"     id="bar-mid"></div></div></div>
+          <div class="bar-row"><span class="bar-label">High</span>
+            <div class="bar-bg"><div class="bar-fill high"    id="bar-high"></div></div></div>
+          <div class="bar-row"><span class="bar-label">Overall</span>
+            <div class="bar-bg"><div class="bar-fill overall" id="bar-overall"></div></div></div>
         </div>
-        <div class="ctrl-col">
-          <div class="section">
-            <div class="section-label">Mode</div>
-            <div class="grid" id="mode-grid"></div>
-          </div>
-          <div class="section">
-            <div class="section-label">Scene Presets</div>
-            <div class="grid" id="scene-grid"></div>
-            <div style="margin-top:5px">
-              <button class="btn btn-full btn-release" onclick="cmd({type:'release_scene'})">
-                <span class="shortcut">F10</span>Release Scene
-              </button>
-            </div>
-          </div>
+      </div>
+      <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})">
+        BLACKOUT
+      </button>
+      <div class="section" style="margin-top:10px">
+        <div class="section-label">Mode</div>
+        <div class="grid" id="mode-grid"></div>
+      </div>
+      <div class="section">
+        <div class="section-label">Scene Presets</div>
+        <div class="grid" id="scene-grid"></div>
+        <div style="margin-top:5px">
+          <button class="btn btn-full btn-release" onclick="cmd({type:'release_scene'})">
+            <span class="shortcut">F10</span>Release Scene
+          </button>
         </div>
       </div>
     </div>
