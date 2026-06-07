@@ -145,6 +145,49 @@ Short version: same file + same mode + same settings + same seed = identical pre
 
 ---
 
+## Codebase Audit — Safety & Correctness
+
+**Status: Complete — 437 tests passing**
+
+Three-phase surgical audit: bugs, logic errors, technical debt.
+
+### Phase 1: BUG fixes (9 issues)
+
+- [x] **Blackout safety bypass** (main.py) — flash_frames and strobe_burst could fire lights during blackout; added blackout gate on both + universe-level blackout guard before every DMX send
+- [x] **Envelope peak stuck** (smoothing.py) — _peak_value never reset after cooldown; brightness got stuck at historical peak on subsequent transients
+- [x] **beat_strength negative** (beat_detector.py) — strength could go below 0.0; added max(0.0, ...) clamp
+- [x] **Aiming tool invisible beam** (aiming.py) — R/G/B channels never set so beam was black during aiming; now sets white (255,255,255)
+- [x] **MIDI thread silent death** (midi/input.py) — bare `except: pass` silently killed MIDI; now logs error
+- [x] **Command crash on bad input** (main.py) — float() on untrusted web input could crash main loop; wrapped in try/except
+- [x] **Dead code in offline_analyzer** — `i += win_frames` was dead inside a for loop
+
+### Phase 2: LOGIC fixes (10 issues)
+
+- [x] **Strobe frequency below minimum** (strobe.py) — `t` not clamped to [0,1] during hold phase; could produce sub-2Hz "slow blink"
+- [x] **Fallback brightness formula** (lanes.py) — inconsistent with mode formula; could exceed 1.0 if _FALLBACK_BASE were non-zero
+- [x] **ArtNet no blackout on disconnect** (output_artnet.py) — fixtures frozen at last values on exit; now sends blackout frame
+- [x] **Hybrid drops ambient_warm** (hybrid.py) — blend_rig_states omitted ambient_warm; always zeroed
+- [x] **MIDI blackout threshold** (midi/input.py) — `> 64` changed to `>= 64` per MIDI switch convention
+- [x] **MIDI mode key validation** (main.py) — mode events now validate key exists in MODES dict
+- [x] **WebSocket disconnect cleanup** (server.py, ipad_server.py) — handlers use `finally` to clean up dead connections
+- [x] **Redundant import in hot path** (main.py) — `import colorsys as _cs2` ran every frame with scene active
+
+### Phase 3: DEBT fixes (5 items)
+
+- [x] **Scene loading** (scenes.py) — swallowed exceptions now logged with warning
+- [x] **Keyboard thread** (main.py) — crash now logged instead of silently swallowed
+- [x] **15 new tests** — Enttec Pro frame byte-level verification (8 tests), FFT normalization bounds (4 tests), beat/smoothing/strobe regression tests (3 tests)
+
+### Deferred (not fixed — requires design decisions)
+
+- Thread safety on `_engine_state` dict (server.py) — CPython GIL makes this low-risk; proper fix needs lock or copy-on-write
+- Scene overrides bypassing mode intensity_scale — needs design decision on priority chain
+- Double master_dimmer application path (lanes.py vs main.py) — currently masked because lanes always receives 1.0
+- Visualizer surface allocation in hot path — performance optimization, not correctness
+- `curve_type` unused field in EnvelopeConfig — placeholder for future feature
+
+---
+
 ## Phase 13 — Sprint 13: iPad Web Controller
 
 **Status: Complete — 422 tests passing**
@@ -374,3 +417,4 @@ python -m app.main --demo --web
 | 11 | 414 ✅ | Per-fixture color zones, mode hue crossfade, ambient warm tint in canvas |
 | 12 | 414 ✅ | Strobe master slider, lighting lanes clarity (Impact/Room/Strobe bars) |
 | 13 | 422 ✅ | iPad PWA controller, master/uplight faders, flash/strobe hit, headless mode |
+| Audit | 437 ✅ | Full codebase audit: 9 bugs fixed, 10 logic errors fixed, 5 debt items cleaned |
