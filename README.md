@@ -7,7 +7,7 @@ interprets them through mode profiles, palettes, and scene presets tuned for
 wedding moments.
 
 **Current status:** Hardware arrives in ~2 weeks. System runs fully in mock
-mode today. 580 automated tests passing (2 skipped on Windows).
+mode today. 590 automated tests passing (2 skipped on Windows).
 
 ---
 
@@ -118,7 +118,7 @@ lightbrain/
     test_dmxking_rockwedge.py  Hardware DMX test
     test_song_preview.py    Offline analysis + deterministic replay
   tests/
-    test_lightbrain.py      580 automated tests (2 skipped on Windows)
+    test_lightbrain.py      590 automated tests (2 skipped on Windows)
   docs/
     ARCHITECTURE.md         System design + module guide
     ROADMAP.md              Sprint history + completed features
@@ -186,6 +186,7 @@ python -m app.main --device 2
 | `--mode MODE` | Starting mode (open_dance / dinner / banger / indian_latin / speech / slow_dance) |
 | `--web` | Enable web dashboard on port 8765 |
 | `--web-port N` | Override dashboard port |
+| `--web-host HOST` | Bind dashboard to HOST instead of 127.0.0.1 (use 0.0.0.0 for LAN access) |
 | `--ipad-port N` | Enable iPad PWA on port N (default 8080) |
 | `--headless` | No terminal overlay or pygame window (use with web/iPad) |
 | `--serial PORT` | DMX output via Enttec USB Pro (e.g. /dev/ttyUSB0 or COM3) |
@@ -200,16 +201,19 @@ machine's IP from another device on the same network).
 
 ### What you can do
 
-- **Mode** buttons — switch lighting behavior instantly
+- **Mode** buttons — switch lighting behavior instantly; double-tap to **ARM** a mode (fires automatically on next energy peak or beat)
+- **Cooldown indicator** — mode button opacity dims proportionally during the 10 s beat-swap lockout after an energy-triggered palette change
 - **Scene presets** — activate wedding moments (Grand Entrance, First Dance, etc.)
-- **Strobe Master** — fader controls the level for both auto EDM strobe and manual strobe
-- **STROBE HOLD** — hold to strobe at whatever level the master fader is set; release to stop
-- **FLASH** — single bright hit
+- **Strobe speed presets** — SLOW / MED / FAST / MAX preset buttons; ARM button arms strobe for next beat
+- **STROBE HOLD** — hold to strobe at current speed; release to stop
+- **BUMP** — single full-white 75 ms accent hit
 - **Kill switches** — STROBE / DERBY / LASER buttons; when red = that element is silenced
-- **BLACKOUT** — instant fade to black (0.8s fade-out); click again to restore
-- **Canvas** — live 2D fixture visualizer; border glows when strobe fires, flashes on FLASH
+- **BLACKOUT** — instant black on press; 1.5 s linear fade-up on release
+- **Canvas** — live 2D fixture visualizer; border glows when strobe fires, flashes on BUMP
+- **3D tab** — Three.js rig visualizer in an iframe; left panel mirrors all Live controls; Uplights preview count selector (6 / 12 / 18); WHITE momentary hold button
+- **Fader shortcuts** — 0% / 50% / 100% quick-set buttons above the master dimmer
 
-The dashboard connects via WebSocket and updates at ~10 fps. Commands send
+The dashboard connects via WebSocket and updates at ~15 fps. Commands send
 instantly via fetch POST.
 
 ---
@@ -223,11 +227,12 @@ The iPad controller has three tabs:
 
 ### PERF tab (live performance)
 - **Audio Energy** bars — low / mid / high / overall
-- **Mode** buttons — 3 per row, compact layout
+- **Mode** buttons — 3 per row; double-tap within 300 ms to **ARM** (fires on next energy peak/beat); armed button pulses blue
+- **Cooldown opacity** — mode button alpha scales with the 10 s beat-swap lockout fraction
 - **Scene Presets** — F1–F9 shortcuts, Release button
-- **Faders** — Master / Uplight / Strobe (synced from engine on connect)
+- **Faders** — Master / Uplight / Strobe (synced from engine on connect); 0% / 50% / 100% quick-set buttons above each fader
 - **Kill Switches** — STROBE / DERBY / LASER; tap to kill (shows "OFF" + red when killed), tap again to restore
-- **Momentary** — FLASH (tap) and STROBE HOLD (hold and release)
+- **Momentary row** — BUMP (tap), STROBE HOLD (hold), WHITE HOLD (hold for full white scene)
 
 ### TEST tab (fixture testing, no hardware required)
 - Tap any color button to lock all fixtures to that color: Blackout, Dim, White,

@@ -74,8 +74,9 @@ Mock  Enttec            Art-Net
         │                                                │
         │  WebServer (FastAPI, port 8765)                │
         │    GET  /              dashboard.html          │
+        │    GET  /visualizer3d  Three.js 3D rig view    │
         │    GET  /api/state     JSON snapshot           │
-        │    WS   /ws            live state at ~10 fps   │
+        │    WS   /ws            live state at ~15 fps   │
         │    POST /api/command   control commands        │
         │    CRUD /api/scenes    scene editor            │
         │    GET  /api/presets   position/state presets  │
@@ -107,16 +108,17 @@ Supported command types (all arrive as JSON):
 | `scene` | dashboard | Activate scene preset |
 | `activate_scene` | iPad | Activate scene preset |
 | `release_scene` | both | Return to active mode |
-| `blackout` | both | Toggle blackout (0.8s fade-out) |
-| `strobe_master` | dashboard | Set 0–1 strobe master level |
-| `set_fader` | iPad | Set master / uplight / strobe fader |
+| `blackout` | both | Toggle blackout (instant black ON; 1.5 s fade-up OFF) |
+| `strobe_master` | both | Set 0–1 strobe master level |
+| `set_fader` | both | Set master / uplight / strobe fader |
 | `momentary` | both | flash / strobe_burst / strobe_hold |
 | `toggle_kill` | both | Toggle strobe / derby / laser kill |
+| `arm_strobe` | both | Toggle strobe ARM (fires on next beat) |
+| `arm_mode` | both | Pre-arm a mode key; fires on `high_energy > 0.8` or beat |
+| `white_hold` | both | Momentary full-white override while `state: true` |
 | `fixture_test` | iPad | Lock all fixtures to test pattern |
 | `release_fixture_test` | iPad | Return to live engine |
 | `fixture_test_aim` | iPad | Set moving head pan/tilt |
-| `aim_fixture` | iPad | Live joystick aim |
-| `save_position` | iPad | Save named pan/tilt preset |
 
 ---
 
@@ -124,7 +126,7 @@ Supported command types (all arrive as JSON):
 
 `_web.update_state(**kwargs)` is called once per frame and merges into a
 shared dict. The WebSocket broadcast loop sends this dict to all connected
-clients at ~10 fps. Key fields:
+clients at ~15 fps. Key fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -148,8 +150,18 @@ clients at ~10 fps. Key fields:
 | `kill_derby` | bool | Derby kill switch active |
 | `kill_laser` | bool | Laser kill switch active |
 | `flash_active` | bool | True while flash frames are draining |
+| `white_hold_active` | bool | White hold override active |
+| `white_hold` | bool | Alias for `white_hold_active` (3D tab compat) |
+| `strobe_armed` | bool | Strobe ARM engaged |
+| `armed_mode` | str | Mode key pre-armed for drop-sync (empty = none) |
+| `blackout_recovering` | bool | True during 1.5 s fade-up after blackout release |
+| `palette_cooldown` | float | Beat-swap lockout 0.0–1.0 (PaletteBlender) |
+| `cooldown_pct` | float | Alias for `palette_cooldown` |
+| `cooldown_active` | bool | True when `cooldown_pct > 0` |
 | `test_mode` | bool | Fixture test override active |
 | `test_pattern` | str | Active test pattern name |
+| `rig_layout` | list | [{name, type, address, channels, end}] — static after startup |
+| `dmx_channels` | list | 512-element int array — updated each frame |
 
 ---
 
