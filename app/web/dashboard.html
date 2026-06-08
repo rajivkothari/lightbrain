@@ -96,6 +96,16 @@
       background: #080810;
     }
 
+    /* ---- 3D visualizer iframe (right panel, shown on the 3D tab) ---- */
+    #viz3d-frame {
+      width: 100%;
+      flex: 1;
+      min-height: calc(100vh - 70px);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #05070b;
+    }
+
     /* ---- Section ---- */
     .section { margin-bottom: 12px; }
     .section-label { font-size: 0.67rem; text-transform: uppercase;
@@ -309,6 +319,7 @@
       <button class="tab active" onclick="showTab('live')">Live</button>
       <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
       <button class="tab" onclick="showTab('rig')" id="tab-btn-rig">Rig</button>
+      <button class="tab" onclick="showTab('threed')" id="tab-btn-3d">3D</button>
     </div>
 
     <!-- LIVE TAB -->
@@ -442,11 +453,24 @@
         </div>
       </div>
     </div>
+
+    <!-- 3D TAB (left pane) -->
+    <div id="tab-3d" class="tab-pane" style="display:none">
+      <div class="section">
+        <div class="section-label">3D Visualizer</div>
+        <p style="font-size:0.72rem; line-height:1.5; color:var(--dim,#888);">
+          Live 3D view in the panel on the right. Drag to orbit, scroll to zoom,
+          right-drag to pan. Use the Layers panel in the 3D view to show or hide
+          fixture groups. Rendering pauses automatically when you leave this tab.
+        </p>
+      </div>
+    </div>
   </div>
 
-  <!-- ===== RIGHT PANEL: canvas always visible ===== -->
+  <!-- ===== RIGHT PANEL: 2D canvas (default) + 3D iframe ===== -->
   <div class="right-panel">
     <canvas id="rig-canvas"></canvas>
+    <iframe id="viz3d-frame" title="3D Visualizer" style="display:none"></iframe>
   </div>
 
 </div>
@@ -1190,14 +1214,37 @@ async function editorSave() {
 // ============================================================
 // TAB SWITCHING
 // ============================================================
+let _viz3dLoaded = false;
 function showTab(name) {
   document.getElementById('tab-live').style.display   = name==='live'   ? '' : 'none';
   document.getElementById('tab-scenes').style.display = name==='scenes' ? '' : 'none';
   document.getElementById('tab-rig').style.display    = name==='rig'    ? '' : 'none';
+  document.getElementById('tab-3d').style.display     = name==='threed' ? '' : 'none';
   document.querySelectorAll('.tab').forEach(t => {
     const key = t.getAttribute('onclick').replace("showTab('","").replace("')","");
     t.classList.toggle('active', key === name);
   });
+
+  // Right panel: 2D canvas for every tab except 3D, which shows the iframe.
+  // The iframe is created lazily on first open and paused while hidden so it
+  // never burns GPU in the background.
+  const frame  = document.getElementById('viz3d-frame');
+  const canvas = document.getElementById('rig-canvas');
+  if (name === 'threed') {
+    if (!_viz3dLoaded) { frame.src = '/visualizer3d?embed=1'; _viz3dLoaded = true; }
+    canvas.style.display = 'none';
+    frame.style.display  = '';
+    const resume = () => { try { frame.contentWindow.postMessage({type:'lb-resume'}, '*'); } catch(_){} };
+    if (frame.contentWindow) resume();
+    frame.addEventListener('load', resume, {once:true});
+  } else {
+    frame.style.display  = 'none';
+    canvas.style.display = '';
+    if (_viz3dLoaded && frame.contentWindow) {
+      try { frame.contentWindow.postMessage({type:'lb-pause'}, '*'); } catch(_){}
+    }
+  }
+
   if (name === 'scenes') _edLoad();
   if (name === 'rig')    _rigDraw(_lastDmxChannels);
 }

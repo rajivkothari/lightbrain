@@ -267,6 +267,12 @@ def _build_app() -> "FastAPI":
         with open(html_path, encoding="utf-8") as f:
             return f.read()
 
+    @fastapi_app.get("/visualizer3d", response_class=HTMLResponse)
+    async def visualizer3d() -> str:
+        html_path = os.path.join(os.path.dirname(__file__), "visualizer3d.html")
+        with open(html_path, encoding="utf-8") as f:
+            return f.read()
+
     @fastapi_app.get("/api/state")
     async def api_state() -> JSONResponse:
         return JSONResponse(dict(_engine_state))

@@ -85,6 +85,40 @@
   }
   #layers input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
 
+  /* Embedded in the dashboard 3D tab: drop the standalone connect/help chrome. */
+  body.embed #ctrl, body.embed #help { display: none; }
+
+  /* --- Control dock: full rig control from the 3D view --- */
+  #controls {
+    bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 6px; max-width: 94vw;
+  }
+  .ctl-line { display: flex; align-items: center; gap: 8px; }
+  .ctl-label {
+    width: 46px; flex-shrink: 0; text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 9px; color: rgba(232,237,244,0.5);
+  }
+  .ctl-row { display: flex; flex-wrap: wrap; gap: 5px; }
+  .ctl-btn {
+    background: rgba(255,255,255,0.06); color: #e8edf4;
+    border: 1px solid var(--hair); border-radius: 7px;
+    padding: 7px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    white-space: nowrap;
+  }
+  .ctl-btn.wide { letter-spacing: 0.04em; }
+  .ctl-btn:active { transform: scale(0.95); }
+  .ctl-btn.active { background: var(--accent); color: #051018; border-color: var(--accent); }
+  .ctl-btn.armed { border-color: #ff5a5a; color: #ffd0d0; animation: arm-pulse 0.7s ease-out infinite; }
+  .ctl-btn.held  { background: #fff; color: #101018; border-color: #fff; box-shadow: 0 0 18px rgba(255,255,255,0.7); }
+  .ctl-btn.kill-on { background: var(--err); color: #fff; border-color: var(--err); }
+  .ctl-gap { width: 10px; }
+  @keyframes arm-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255,80,80,0.75); }
+    70%  { box-shadow: 0 0 0 6px rgba(255,80,80,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,80,80,0); }
+  }
+
   .eyebrow {
     text-transform: uppercase; letter-spacing: 0.14em;
     font-size: 10px; color: var(--accent); margin-bottom: 6px; font-weight: 600;
@@ -183,6 +217,29 @@
     <input id="wsUrl" type="text" spellcheck="false" />
     <button id="connectBtn">Connect</button>
     <button id="demoBtn">Demo</button>
+  </div>
+
+  <!-- Control dock: full control of the rig from the 3D view (commands POST to
+       /api/command on the same backend). Mode/scene rows are built from state. -->
+  <div id="controls" class="panel">
+    <div class="ctl-line"><span class="ctl-label">Mode</span><div class="ctl-row" id="ctl-modes"></div></div>
+    <div class="ctl-line" id="ctl-scenes-line"><span class="ctl-label">Scene</span><div class="ctl-row" id="ctl-scenes"></div></div>
+    <div class="ctl-line">
+      <span class="ctl-label">Rig</span>
+      <div class="ctl-row">
+        <button class="ctl-btn wide" id="ctl-blackout" data-act>BLACKOUT</button>
+        <button class="ctl-btn" id="ctl-kill-strobe" data-act title="Kill strobe">&#x26A1;</button>
+        <button class="ctl-btn" id="ctl-kill-derby"  data-act title="Kill derby">&#x2B55;</button>
+        <button class="ctl-btn" id="ctl-kill-laser"  data-act title="Kill laser">&#x25B6;</button>
+        <span class="ctl-gap"></span>
+        <button class="ctl-btn" id="ctl-d0"   data-act>0%</button>
+        <button class="ctl-btn" id="ctl-d50"  data-act>50%</button>
+        <button class="ctl-btn" id="ctl-d100" data-act>100%</button>
+        <span class="ctl-gap"></span>
+        <button class="ctl-btn" id="ctl-bump"  data-act>BUMP</button>
+        <button class="ctl-btn wide" id="ctl-white" data-act>WHITE HOLD</button>
+      </div>
+    </div>
   </div>
 
   <!-- Three.js + addons via CDN. Zero build tooling. -->
@@ -700,6 +757,126 @@
     });
 
     updateHud(s);
+    buildControls(s);
+    updateControls(s);
+  }
+
+  // =========================================================================
+  // 4b. CONTROL DOCK — full rig control from the 3D view
+  // =========================================================================
+  // The view is normally a passive consumer, but it can also drive the engine:
+  // commands POST to /api/command on the backend (same origin when embedded in
+  // the dashboard). In pure demo mode there's no backend, so these are inert.
+  const DEFAULT_MODES = [
+    { key: 'open_dance', display_name: 'Open Dance' },
+    { key: 'dinner', display_name: 'Dinner' },
+    { key: 'banger', display_name: 'Banger' },
+    { key: 'indian_latin', display_name: 'Indian / Latin' },
+    { key: 'slow_dance', display_name: 'Slow Dance' },
+    { key: 'speech', display_name: 'Speech' },
+  ];
+  let _modesBuilt = false;
+  let _scenesSig = '';
+  const _ctlTap = {};   // per-mode tap state for single/double (arm) detection
+
+  function cmdUrl() {
+    if (location.protocol !== 'file:') return '/api/command';
+    return 'http://localhost:8765/api/command';   // best-effort for file:// standalone
+  }
+  function cmd(payload) {
+    fetch(cmdUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload) }).catch(() => {});
+  }
+
+  // single tap = set_mode; double tap = arm_mode (drop-sync "third hand")
+  function modeTapCtl(key) {
+    const tp = _ctlTap[key] || { n: 0, timer: null };
+    tp.n++;
+    if (tp.timer) clearTimeout(tp.timer);
+    tp.timer = setTimeout(() => {
+      if (tp.n >= 2) cmd({ type: 'arm_mode', value: key });
+      else           cmd({ type: 'set_mode', value: key });
+      tp.n = 0; tp.timer = null;
+    }, 260);
+    _ctlTap[key] = tp;
+  }
+
+  function buildControls(s) {
+    // modes (once)
+    if (!_modesBuilt) {
+      const list = (s.modes && s.modes.length) ? s.modes : DEFAULT_MODES;
+      const row = document.getElementById('ctl-modes');
+      row.innerHTML = '';
+      list.forEach(m => {
+        const b = document.createElement('button');
+        b.className = 'ctl-btn mode'; b.dataset.key = m.key;
+        b.textContent = m.display_name || m.key;
+        b.addEventListener('touchstart', e => { e.preventDefault(); modeTapCtl(m.key); }, { passive: false });
+        b.addEventListener('mousedown', () => modeTapCtl(m.key));
+        row.appendChild(b);
+      });
+      _modesBuilt = true;
+    }
+    // scenes (rebuild when the list changes)
+    const scenes = s.scenes || [];
+    const sig = scenes.map(x => x.id).join(',');
+    if (sig !== _scenesSig) {
+      _scenesSig = sig;
+      const row = document.getElementById('ctl-scenes');
+      row.innerHTML = '';
+      scenes.forEach(sc => {
+        const b = document.createElement('button');
+        b.className = 'ctl-btn scene'; b.dataset.id = sc.id;
+        b.textContent = sc.name || sc.id;
+        b.addEventListener('mousedown', () => cmd({ type: 'activate_scene', value: sc.id }));
+        b.addEventListener('touchstart', e => { e.preventDefault(); cmd({ type: 'activate_scene', value: sc.id }); }, { passive: false });
+        row.appendChild(b);
+      });
+      const rel = document.createElement('button');
+      rel.className = 'ctl-btn'; rel.textContent = 'Release';
+      rel.addEventListener('mousedown', () => cmd({ type: 'release_scene' }));
+      row.appendChild(rel);
+      document.getElementById('ctl-scenes-line').style.display = scenes.length ? '' : 'none';
+    }
+  }
+
+  let _ctlWired = false;
+  function wireControls() {
+    if (_ctlWired) return; _ctlWired = true;
+    const on = (id, fn) => document.getElementById(id).addEventListener('mousedown', fn);
+    on('ctl-blackout',    () => cmd({ type: 'blackout' }));
+    on('ctl-kill-strobe', () => cmd({ type: 'toggle_kill', target: 'strobe' }));
+    on('ctl-kill-derby',  () => cmd({ type: 'toggle_kill', target: 'derby' }));
+    on('ctl-kill-laser',  () => cmd({ type: 'toggle_kill', target: 'laser' }));
+    on('ctl-d0',   () => cmd({ type: 'set_fader', fader: 'master', value: 0 }));
+    on('ctl-d50',  () => cmd({ type: 'set_fader', fader: 'master', value: 0.5 }));
+    on('ctl-d100', () => cmd({ type: 'set_fader', fader: 'master', value: 1 }));
+    on('ctl-bump', () => cmd({ type: 'momentary', effect: 'flash', action: 'start' }));
+    // momentary white hold — press and release
+    const w = document.getElementById('ctl-white');
+    const wDown = e => { if (e.cancelable) e.preventDefault(); cmd({ type: 'white_hold', state: true }); };
+    const wUp   = () => cmd({ type: 'white_hold', state: false });
+    w.addEventListener('mousedown', wDown);
+    w.addEventListener('mouseup', wUp);
+    w.addEventListener('mouseleave', wUp);
+    w.addEventListener('touchstart', wDown, { passive: false });
+    w.addEventListener('touchend', wUp);
+    w.addEventListener('touchcancel', wUp);
+  }
+
+  function updateControls(s) {
+    const cur = s.mode, armed = s.armed_mode || null;
+    document.querySelectorAll('#ctl-modes .mode').forEach(b => {
+      b.classList.toggle('active', b.dataset.key === cur);
+      b.classList.toggle('armed', b.dataset.key === armed);
+    });
+    document.querySelectorAll('#ctl-scenes .scene').forEach(b =>
+      b.classList.toggle('active', b.dataset.id === s.scene));
+    document.getElementById('ctl-blackout').classList.toggle('active', !!s.blackout);
+    document.getElementById('ctl-kill-strobe').classList.toggle('kill-on', !!s.kill_strobe);
+    document.getElementById('ctl-kill-derby').classList.toggle('kill-on', !!s.kill_derby);
+    document.getElementById('ctl-kill-laser').classList.toggle('kill-on', !!s.kill_laser);
+    document.getElementById('ctl-white').classList.toggle('held', !!s.white_hold);
   }
 
   // =========================================================================
@@ -713,8 +890,13 @@
   // render-fps meter
   let _fpsAccum = 0, _fpsFrames = 0, _renderFps = 0;
 
+  // Pausable loop — the dashboard postMessages lb-pause/lb-resume when the 3D
+  // tab is hidden/shown, so an embedded view burns no GPU while you're elsewhere.
+  let _running = false;
+  let _rafId = 0;
+  let _strobeActive = false;   // set each frame; drives the strobe fixture flash
   function animate() {
-    requestAnimationFrame(animate);
+    _rafId = requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.1);
     const t = clock.elapsedTime;
     const k = 1 - Math.exp(-dt * SMOOTH); // frame-rate independent lerp factor
@@ -722,12 +904,15 @@
     const masterGate = global.blackout ? 0 : global.master;
 
     // Client-side strobe regeneration: a 2-16 Hz strobe cannot survive the 15 Hz
-    // network stream (Nyquist), so we rebuild it here at full refresh rate from
-    // strobe_rate. strobe_master sets how dark the off-phase goes.
+    // network stream (Nyquist), so we rebuild it here at full refresh rate.
+    // NOTE: the backend's strobe_rate is a 0-1 SPEED proxy, not Hz (see
+    // engine/strobe.py: rate = t, freq = 2..16 Hz). Map it back to real Hz.
+    _strobeActive = (!global.kill_strobe && global.strobe_rate > 0.001);
     let strobeGate = 1.0;
-    if (!global.kill_strobe && global.strobe_rate > 0) {
-      const phase = (t * global.strobe_rate) % 1.0;
-      strobeGate = (phase < 0.5) ? 1.0 : (1.0 - clamp(global.strobe_master, 0, 1));
+    if (_strobeActive) {
+      const freq  = 2.0 + clamp(global.strobe_rate, 0, 1) * 14.0; // mirror StrobeEngine 2-16 Hz
+      const phase = (t * freq) % 1.0;
+      strobeGate  = (phase < 0.5) ? 1.0 : 0.0;   // hard black between flashes
     }
 
     // Per-type gates fold in kill switches and uplight_dimmer.
@@ -876,7 +1061,10 @@
     const c = rec.cur, g = rec.tgt;
     c.brt = lerp(c.brt, g.brt, k);
     c.flash = g.flash; // flash is binary, don't smooth it away
-    const v = (c.flash ? 1.0 : c.brt) * master;
+    // During a strobe, the strobe fixture is full white; the on/off comes from
+    // the strobe gate already folded into `master` (impactGate).
+    const base = _strobeActive ? 1.0 : (c.flash ? 1.0 : c.brt);
+    const v = base * master;
     rec.mat.opacity = clamp(v, 0, 1);
     // faked floor flash (white, additive)
     rec.puddle.mat.color.setRGB(1, 1, 1);
@@ -1067,7 +1255,7 @@
       low_energy: Math.max(0, Math.sin(t * 4)), mid_energy: 0.4 + 0.3 * Math.sin(t * 2.3),
       high_energy: Math.max(0, Math.sin(t * 7)) * 0.7, overall_energy: overall,
       master_dimmer: 1.0, uplight_dimmer: 1.0,
-      strobe_master: 1.0, strobe_rate: strobing ? 12 : 0,
+      strobe_master: 1.0, strobe_rate: strobing ? 0.85 : 0,   // 0-1 speed proxy, like the engine
       kill_strobe: false, kill_derby: false, kill_laser: false, test_mode: false,
       fps: 60, dmx_output: 'MOCK',
       fixtures: { uplights, washes, beams, sparkles, impacts, ambient_warm: 0.12 }
@@ -1099,10 +1287,37 @@
     bloomPass.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // ---- pausable render loop control ----
+  function startRender() {
+    if (_running) return;
+    _running = true;
+    clock.getDelta();   // drop the accumulated gap so dt doesn't spike on resume
+    animate();
+  }
+  function stopRender() {
+    if (!_running) return;
+    _running = false;
+    cancelAnimationFrame(_rafId);
+  }
+
+  // ---- embedded mode: hide the connect/help chrome, obey pause/resume ----
+  const EMBED = new URLSearchParams(location.search).has('embed');
+  if (EMBED) {
+    document.body.classList.add('embed');
+    window.addEventListener('message', e => {
+      const d = e.data;
+      if (!d || typeof d !== 'object') return;
+      if (d.type === 'lb-pause')  stopRender();
+      if (d.type === 'lb-resume') startRender();
+    });
+  }
+
   // start
   document.getElementById('boot').remove();
-  animate();
-  connectWs(wsInput.value); // tries live engine, auto-falls back to demo
+  wireControls();
+  connectWs(wsInput.value);          // tries live engine, auto-falls back to demo
+  // Embedded: stay paused until the dashboard shows the 3D tab. Standalone: run now.
+  if (!EMBED) startRender();
   </script>
 </body>
 </html>

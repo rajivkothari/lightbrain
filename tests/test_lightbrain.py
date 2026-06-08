@@ -3188,6 +3188,23 @@ class TestWebServerState:
         assert "/ws" in content          # WebSocket endpoint referenced
         assert "/api/command" in content  # command endpoint referenced
 
+    def test_visualizer3d_route_served(self):
+        from app.web.server import _build_app
+        from starlette.testclient import TestClient
+        client = TestClient(_build_app())
+        r = client.get("/visualizer3d")
+        assert r.status_code == 200
+        assert "RKADE LightBrain" in r.text
+        assert "embed" in r.text          # embedded-mode handling present
+
+    def test_dashboard_has_3d_tab(self):
+        html_path = os.path.join(ROOT, "app", "web", "dashboard.html")
+        with open(html_path, encoding="utf-8") as f:
+            content = f.read()
+        assert "viz3d-frame" in content        # iframe present
+        assert "/visualizer3d?embed=1" in content  # lazy-loaded source
+        assert "lb-pause" in content           # pause-when-hidden wired
+
 
 # ===========================================================================
 # Sprint 9 — Web rig state serialization + scene API wiring
