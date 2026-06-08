@@ -34,9 +34,15 @@
   Engineering constraints honored:
     1. Zero build tools — single HTML file, vanilla JS, Three.js via CDN.
     2. Decoupled render loop — rAF @ 60Hz+, exponential lerp between 15Hz frames.
-    3. Primitive geometry — cylinder body + additive cone + SpotLight per beam.
-    4. Lux-map overlap — real SpotLights sum on the floor (red+blue -> magenta);
-       additive cones blend in the air the same way.
+    3. Primitive geometry — cylinder body + additive translucent cone per beam.
+    4. Lux-map overlap — faked floor hits: a flat additive circle is laid on
+       the floor where each beam lands, so red+blue -> magenta natively.
+    5. WebGL light limits — NO THREE.SpotLight / THREE.PointLight is ever
+       created. Forward rendering caps punctual lights at ~16 shader uniforms,
+       so all illumination is faked with unlit additive meshes (cones in the
+       air, circles on the floor). Only global Hemisphere/Ambient lights exist;
+       those don't consume the punctual-light arrays. The rig scales to
+       hundreds of fixtures without touching the light limit.
 -->
 <style>
   :root {
@@ -245,9 +251,10 @@
   room.position.y = ROOM_H / 2;
   scene.add(room);
 
-  // --- floor plane: receives the SpotLights. This is the "lux map". ---
-  // Real lights sum on a standard material, so a red beam + blue beam landing on
-  // the same patch render magenta with no special blending code. (Constraint 4.)
+  // --- floor plane: catches the faked light "puddles". This is the "lux map". ---
+  // Additive circle meshes are laid on this plane where beams land; a red and a
+  // blue puddle overlapping render magenta natively via additive blending,
+  // with no real lights and no shader-uniform cost. (Constraints 4 & 5.)
   const floorGeo = new THREE.PlaneGeometry(ROOM_W + 6, ROOM_D + 6, 1, 1);
   const floorMat = new THREE.MeshStandardMaterial({
     color: 0x14171d, roughness: 0.62, metalness: 0.05
@@ -275,16 +282,34 @@
   addTrussBar(mapX(600), mapZ(120), mapX(600), mapZ(700));    // spine
 
   // --- baseline lighting so the room isn't pitch black ---
+  // Only Hemisphere + Ambient lights are used. These are global and do NOT
+  // consume the per-fragment punctual-light uniform arrays, so there is no
+  // WebGL light-limit risk. ALL fixture illumination is faked with additive
+  // meshes (see below) — no SpotLight or PointLight is ever instantiated.
   scene.add(new THREE.HemisphereLight(0x202a3a, 0x05060a, 0.25));
-  const fillAmbient = new THREE.AmbientLight(0xffffff, 0.06);
-  scene.add(fillAmbient);
-  // "ambient_warm" tint driven by the engine's warm W/A channels
-  const warmLight = new THREE.PointLight(0xffb066, 0.0, 60, 1.2);
-  warmLight.position.set(0, TRUSS_H, 0);
-  scene.add(warmLight);
+  // "ambient_warm" tint driven by the engine's warm W/A channels.
+  const warmAmbient = new THREE.AmbientLight(0xffb066, 0.0);
+  scene.add(warmAmbient);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.05));
+
+  // Shared additive "puddle" — a flat circle mesh laid on the floor at the
+  // point a beam/wash strikes it. Overlapping red + blue puddles sum to
+  // magenta via AdditiveBlending. This is the entire lux map. (Constraint 5.)
+  const PUDDLE_GEO = new THREE.CircleGeometry(1, 32);
+  function makePuddle() {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(PUDDLE_GEO, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = 0.02;
+    scene.add(mesh);
+    return { mesh, mat };
+  }
 
   // =========================================================================
-  // 3. FIXTURE FACTORY — primitives only (cylinders + cones + SpotLights)
+  // 3. FIXTURE FACTORY — primitives only (cylinders + additive cones + puddles)
   // =========================================================================
   // Each fixture is registered with a `cur` (rendered) and `tgt` (latest network)
   // state. The render loop lerps cur -> tgt every frame. (Constraint 2.)
@@ -309,7 +334,7 @@
     });
   }
 
-  // ---- moving-head beam: cylinder body + additive cone + SpotLight ----
+  // ---- moving-head beam: cylinder body + additive cone + faked floor puddle ----
   function createBeam(f) {
     const x = mapX(f.x), z = mapZ(f.y);
     const group = new THREE.Group();
@@ -332,16 +357,10 @@
     const lens = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), lensMat);
     group.add(lens);
 
-    // real SpotLight — illuminates the floor; additive in light space.
-    // decay=0 keeps floor pools at predictable brightness so the additive
-    // red+blue -> magenta overlap reads clearly regardless of throw distance.
-    const light = new THREE.SpotLight(0xffffff, 0, 60, 0.4, 0.35, 0.0);
-    light.position.copy(group.position);
-    light.target.position.set(x, 0, z);
-    scene.add(light);
-    scene.add(light.target);
+    // faked floor hit — additive circle placed where the beam strikes the floor
+    const puddle = makePuddle();
 
-    return registerFixture(f.id, 'beam', { group, cone, coneMat, lens, lensMat, light,
+    return registerFixture(f.id, 'beam', { group, cone, coneMat, lens, lensMat, puddle,
       cur: beamState(f), tgt: beamState(f), home: { x, z } });
   }
 
@@ -356,7 +375,7 @@
     };
   }
 
-  // ---- wash: cylinder body + wide additive cone + wide SpotLight ----
+  // ---- wash: cylinder body + wide additive cone + wide faked floor puddle ----
   function createWash(f) {
     const x = mapX(f.x), z = mapZ(f.y);
     const group = new THREE.Group();
@@ -374,13 +393,9 @@
     cone.quaternion.setFromUnitVectors(UP, DOWN);
     group.add(cone);
 
-    const light = new THREE.SpotLight(0xffffff, 0, 55, 0.95, 0.6, 0.0);
-    light.position.copy(group.position);
-    light.target.position.set(x, 0, z);
-    scene.add(light);
-    scene.add(light.target);
+    const puddle = makePuddle();
 
-    return registerFixture(f.id, 'wash', { group, cone, coneMat, light,
+    return registerFixture(f.id, 'wash', { group, cone, coneMat, puddle,
       cur: washState(f), tgt: washState(f), home: { x, z } });
   }
 
@@ -459,10 +474,10 @@
       opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), mat);
     group.add(ball);
-    const light = new THREE.PointLight(0xffffff, 0, 40, 1.0);
-    light.position.copy(group.position);
-    scene.add(light);
-    return registerFixture(f.id, 'impact', { group, ball, mat, light,
+    // faked floor flash — large additive circle under the strobe
+    const puddle = makePuddle();
+    puddle.mesh.position.set(mapX(f.x), 0.03, mapZ(f.y));
+    return registerFixture(f.id, 'impact', { group, ball, mat, puddle,
       cur: { brt: 0, flash: 0 }, tgt: { brt: 0, flash: 0 } });
   }
 
@@ -564,8 +579,8 @@
       }
     });
 
-    // ambient warm tint
-    warmLight.intensity = lerp(warmLight.intensity, global.warm * 1.4 * masterGate, k);
+    // ambient warm tint (global AmbientLight — not a punctual light)
+    warmAmbient.intensity = lerp(warmAmbient.intensity, global.warm * 0.5 * masterGate, k);
 
     controls.update();
     renderer.render(scene, camera);
@@ -615,11 +630,13 @@
 
     rec.lensMat.color.setRGB(c.r * lit, c.g * lit, c.b * lit);
 
-    // SpotLight
-    rec.light.color.setRGB(c.r, c.g, c.b);
-    rec.light.intensity = lit * BEAM_LIGHT_K;
-    rec.light.angle = THREE.MathUtils.degToRad(clamp(halfDeg + 2, 3, 40));
-    rec.light.target.position.copy(_aim);
+    // faked floor hit: a flat additive circle at the beam/floor intersection.
+    // Footprint radius == cone base radius. Additive blend handles overlaps.
+    const p = rec.puddle;
+    p.mesh.position.set(_aim.x, 0.02, _aim.z);
+    p.mesh.scale.setScalar(Math.max(baseR, 0.2) * 1.15);
+    p.mat.color.setRGB(c.r, c.g, c.b);
+    p.mat.opacity = clamp(lit * BEAM_LIGHT_K * 0.16, 0, 0.95);
   }
 
   function updateWash(rec, k, master, t) {
@@ -636,9 +653,12 @@
     rec.coneMat.color.setRGB(c.r, c.g, c.b);
     rec.coneMat.opacity = clamp(lit * 0.32, 0, 0.6);
 
-    rec.light.color.setRGB(c.r, c.g, c.b);
-    rec.light.intensity = lit * WASH_LIGHT_K;
-    rec.light.angle = THREE.MathUtils.degToRad(clamp(halfDeg, 10, 60));
+    // faked floor hit: wide additive circle straight below the wash.
+    const p = rec.puddle;
+    p.mesh.position.set(rec.home.x, 0.02, rec.home.z);
+    p.mesh.scale.setScalar(Math.max(baseR, 0.4));
+    p.mat.color.setRGB(c.r, c.g, c.b);
+    p.mat.opacity = clamp(lit * WASH_LIGHT_K * 0.12, 0, 0.7);
   }
 
   function updateUplight(rec, k, master) {
@@ -674,7 +694,10 @@
     c.flash = g.flash; // flash is binary, don't smooth it away
     const v = (c.flash ? 1.0 : c.brt) * master;
     rec.mat.opacity = clamp(v, 0, 1);
-    rec.light.intensity = v * 10;
+    // faked floor flash (white, additive)
+    rec.puddle.mat.color.setRGB(1, 1, 1);
+    rec.puddle.mesh.scale.setScalar(6);
+    rec.puddle.mat.opacity = clamp(v * 0.5, 0, 0.8);
   }
 
   // =========================================================================
