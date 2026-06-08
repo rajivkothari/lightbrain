@@ -31,10 +31,10 @@ INPUT
                 last-8-beats rolling average)
                          │
                    LaneSmoother
-               (EMA envelope followers:
-                Impact 10ms attack / 250ms decay
-                Room   600ms / 3000ms
-                + WAU white/amber/UV channels)
+               (EMA envelope followers, per-mode profiles:
+                Impact  5–80ms attack / 180–600ms decay
+                Room  400–1500ms attack / 2000–6000ms decay
+                + floor/beam/sparkle lanes)
                          │
               ┌──────────┴──────────┐
               │                     │

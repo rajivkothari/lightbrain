@@ -262,7 +262,7 @@ def main():
     beat_detector = BeatDetector()
 
     # ---- engine ----
-    smoother    = LaneSmoother()
+    smoother    = LaneSmoother(mode_key)
     safety      = SafetyEngine()
     safety.update_from_mode(current_mode)
     room_lane   = RoomLane(current_palette, mode=current_mode)

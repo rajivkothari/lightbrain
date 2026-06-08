@@ -445,7 +445,7 @@ Requires pygame 2.5+: `pip install "pygame>=2.5.0"`. On headless servers
 set `SDL_VIDEODRIVER=dummy` (tests only).
 
 **DMX channels all zero on startup**
-Room energy takes ~1–2 seconds to build from silence (600ms EMA attack).
+Room energy build time varies by mode: ~0.4s for banger, ~1.5s for dinner/speech — each mode has a dedicated EMA profile. Wait a moment after startup.
 Wait a moment — values will appear.
 
 **Flash / Strobe look like nothing happens in the visualizer**

@@ -102,7 +102,7 @@ class DeterministicEngine:
         if self._settings.saturation_scale_override is not None:
             mode = _override(mode, "saturation_scale", self._settings.saturation_scale_override)
 
-        smoother = LaneSmoother()
+        smoother = LaneSmoother(self._settings.mode_key)
         safety   = SafetyEngine()
         safety.update_from_mode(mode)
         room_lane = RoomLane(palette, mode=mode)
