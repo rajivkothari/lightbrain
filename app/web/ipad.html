@@ -167,6 +167,28 @@
       font-variant-numeric: tabular-nums; flex-shrink: 0;
     }
 
+    /* ---- Dim shortcuts ---- */
+    .dim-shortcuts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+    .btn-dim-shortcut {
+      min-height: 40px; border-radius: 8px; border: 2px solid var(--border);
+      background: var(--card); color: var(--text);
+      font-family: inherit; font-size: 0.78rem; font-weight: 700;
+      letter-spacing: 0.08em; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.1s, transform 0.06s;
+    }
+    .btn-dim-shortcut:active { transform: scale(0.95); background: #1c1c42; }
+
+    /* ---- Mode ARM pulse (drop-sync) ---- */
+    .mode-btn.armed {
+      border-color: #0099ff; color: #88ccff;
+      animation: mode-arm-pulse 1s ease-in-out infinite;
+    }
+    @keyframes mode-arm-pulse {
+      0%,100% { box-shadow: 0 0 8px rgba(0,150,255,0.3); }
+      50%      { box-shadow: 0 0 18px rgba(0,150,255,0.7); }
+    }
+
     /* ---- Momentary buttons ---- */
     .momentary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
     .btn-moment {
@@ -189,6 +211,15 @@
     .btn-strobe {
       background: linear-gradient(135deg, #443300, #665500);
       border-color: #887722; color: #ffdd66;
+    }
+    .btn-white-hold {
+      background: linear-gradient(135deg, #1a1a2e, #2a2a44);
+      border-color: #8888bb; color: #ddddef;
+    }
+    .btn-white-hold.held {
+      background: linear-gradient(135deg, #ccccee, #eeeeff);
+      border-color: #ffffff; color: #000022; filter: brightness(1.2);
+      transform: scale(0.95);
     }
 
     /* ---- Fixture test view ---- */
@@ -377,6 +408,11 @@
   <div class="btn-grid cols-2" id="scene-grid"></div>
 
   <div class="sec-label">Faders</div>
+  <div class="dim-shortcuts">
+    <button class="btn-dim-shortcut" onclick="onFader('master',0)">0%</button>
+    <button class="btn-dim-shortcut" onclick="onFader('master',50)">50%</button>
+    <button class="btn-dim-shortcut" onclick="onFader('master',100)">100%</button>
+  </div>
   <div class="fader-group">
     <div class="fader-row">
       <span class="fader-label">Master</span>
@@ -417,6 +453,12 @@
             ontouchstart="momentaryStart('flash')" ontouchend="momentaryEnd('flash')"
             onmousedown="momentaryStart('flash')" onmouseup="momentaryEnd('flash')">
       FLASH
+    </button>
+    <button class="btn-moment btn-white-hold" id="btn-white"
+            ontouchstart="momentaryStart('white_hold')" ontouchend="momentaryEnd('white_hold')"
+            ontouchcancel="momentaryEnd('white_hold')"
+            onmousedown="momentaryStart('white_hold')" onmouseup="momentaryEnd('white_hold')">
+      WHITE
     </button>
     <button class="btn-moment btn-strobe" id="btn-strobe"
             ontouchstart="momentaryStart('strobe_hold')" ontouchend="momentaryEnd('strobe_hold')"
@@ -546,6 +588,10 @@ let _joyPan = 270;
 let _joyTilt = 135;
 let _joyActive = false;
 
+// Drop-sync mode ARM (double-tap detection)
+const _modeTapTimes = {};
+const _tapThresh = 300; // ms
+
 const DEFAULT_MODES = [
   {key:'open_dance',   display_name:'Open Dance'},
   {key:'dinner',       display_name:'Dinner'},
@@ -608,6 +654,8 @@ function sendBlackout() {
 }
 
 function onFader(name, pct) {
+  const slider = document.getElementById(`fader-${name}`);
+  if (slider) slider.value = pct;
   document.getElementById(`fader-${name}-val`).textContent = pct + '%';
   send({type: 'set_fader', fader: name, value: parseFloat(pct) / 100});
 }
@@ -619,11 +667,13 @@ function toggleKill(target) {
 function momentaryStart(effect) {
   send({type: 'momentary', effect: effect, action: 'start'});
   if (effect === 'strobe_hold') document.getElementById('btn-strobe').classList.add('held');
+  if (effect === 'white_hold')  document.getElementById('btn-white').classList.add('held');
 }
 
 function momentaryEnd(effect) {
   send({type: 'momentary', effect: effect, action: 'stop'});
   if (effect === 'strobe_hold') document.getElementById('btn-strobe').classList.remove('held');
+  if (effect === 'white_hold')  document.getElementById('btn-white').classList.remove('held');
 }
 
 function savePosition() {
@@ -648,7 +698,19 @@ function buildModes(modes) {
     const b = document.createElement('button');
     b.className = 'btn mode-btn'; b.dataset.key = m.key;
     b.textContent = m.display_name;
-    b.onclick = () => sendMode(m.key);
+    b.onclick = () => {
+      const now = Date.now();
+      const last = _modeTapTimes[m.key] || 0;
+      if (now - last < _tapThresh) {
+        // Double-tap: arm this mode for drop-sync trigger
+        send({type: 'arm_mode', value: m.key});
+        _modeTapTimes[m.key] = 0;
+      } else {
+        // Single tap: immediate mode switch, reset any pending double-tap
+        sendMode(m.key);
+        _modeTapTimes[m.key] = now;
+      }
+    };
     grid.appendChild(b);
   });
   _modesBuilt = true;
@@ -705,6 +767,17 @@ function applyState(s) {
     document.querySelectorAll('.mode-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.key === _currentMode));
   }
+
+  // Armed mode (drop-sync) — pulsing border on pre-armed button
+  const armedMode = s.armed_mode || '';
+  document.querySelectorAll('.mode-btn').forEach(b =>
+    b.classList.toggle('armed', !!armedMode && b.dataset.key === armedMode));
+
+  // Palette cooldown — dim mode buttons proportionally while beat-swap is locked
+  const cd = typeof s.palette_cooldown === 'number' ? s.palette_cooldown : 0;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.style.opacity = cd > 0.05 ? (0.5 + 0.5 * (1 - cd)).toFixed(2) : '';
+  });
 
   // Active scene
   if (s.scene !== _currentScene) {

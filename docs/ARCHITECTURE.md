@@ -177,15 +177,15 @@ all 512 channels regardless of everything else.
 
 ## Blackout fade
 
-When blackout is activated:
-1. `safety.state.blackout_active` is set immediately (safety wins)
-2. Engine snapshots current render values (brightness, hue, white, amber, uv)
-3. `_blackout_fading = True` — `universe.blackout()` is skipped
-4. Each frame, render values are alpha-blended toward zero over `BLACKOUT_FADE_S = 0.8s`
-5. When alpha reaches 0, `_blackout_fading = False` — hard blackout resumes
+**On activation:** `safety.state.blackout_active` is set immediately. No fade —
+`universe.blackout()` fires on the very next frame, zeroing all 512 channels
+instantly. This ensures live-event safety (strobe malfunction, talent entrance).
 
-Deactivating blackout clears `_blackout_fading` immediately and resumes
-normal rendering on the next frame.
+**On release:** Engine sets `_blackout_recovering = True` and records
+`_blackout_recovery_start`. Each frame, render values are multiplied by
+`alpha = min(1.0, (now - _blackout_recovery_start) / BLACKOUT_RECOVERY_S)`.
+When alpha reaches 1.0, `_blackout_recovering = False` and normal rendering resumes.
+Recovery takes `BLACKOUT_RECOVERY_S = 1.5s` regardless of OS jitter.
 
 ---
 

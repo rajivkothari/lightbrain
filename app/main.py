@@ -82,7 +82,7 @@ PALETTES_DIR    = os.path.join(ROOT, "config", "palettes")
 SCENES_DIR      = os.path.join(ROOT, "config", "scenes")
 POSITIONS_FILE  = os.path.join(ROOT, "fixtures", "positions.json")
 STATES_FILE     = os.path.join(ROOT, "fixtures", "states.json")
-BLACKOUT_FADE_S = 0.8      # seconds to fade out when blackout is activated
+BLACKOUT_RECOVERY_S = 1.5  # seconds to fade up when blackout is released
 
 # Fixed render params for each fixture test pattern (sent as-is to render_to_universe)
 _TEST_PATTERNS: dict = {
@@ -405,21 +405,14 @@ def main():
     _strobe_hold       = False   # iPad hold-to-strobe button state
     _test_mode         = False   # fixture test mode — overrides audio engine
     _test_pattern      = ""      # active test pattern name
-    _blackout_fading   = False   # True while blackout fade-out is in progress
-    _blackout_fade_start = 0.0   # monotonic time when fade began
-    _blackout_fade_alpha = 1.0   # 1.0=full, 0.0=dark
-    _fade_v_snap       = 0.0    # _render_v snapshot at fade start
-    _fade_brt_snap     = 1.0    # _master_dimmer snapshot at fade start
-    _fade_w_snap       = 0.0    # eff_white snapshot at fade start
-    _fade_a_snap       = 0.0    # eff_amber snapshot at fade start
-    _fade_uv_snap      = 0.0    # eff_uv snapshot at fade start
-    _last_render_v     = 0.0    # end-of-frame _render_v for next snapshot
-    _last_eff_white    = 0.0
-    _last_eff_amber    = 0.0
-    _last_eff_uv       = 0.0
+    _blackout_recovering     = False  # True while fading up after blackout release
+    _blackout_recovery_start = 0.0   # monotonic time when recovery began
+    _last_render_v           = 0.0   # end-of-frame (unused but harmless; kept for clarity)
     _kill_strobe       = False   # kill switch: silence all strobe output
     _kill_derby        = False   # kill switch: stop derby rotation/color
     _kill_laser        = False   # kill switch: force laser off
+    _armed_mode        = ""      # mode key pre-armed for drop-sync trigger
+    _white_hold        = False   # momentary full-white override
 
     try:
         while not quit_flag:
@@ -436,17 +429,10 @@ def main():
                     _was_bo = safety.state.blackout_active
                     safety.toggle_blackout()
                     if not _was_bo:
-                        _blackout_fading   = True
-                        _blackout_fade_start = time.monotonic()
-                        _blackout_fade_alpha = 1.0
-                        _fade_v_snap   = _last_render_v
-                        _fade_brt_snap = _master_dimmer
-                        _fade_w_snap   = _last_eff_white
-                        _fade_a_snap   = _last_eff_amber
-                        _fade_uv_snap  = _last_eff_uv
+                        _blackout_recovering = False
                     else:
-                        _blackout_fading   = False
-                        _blackout_fade_alpha = 1.0
+                        _blackout_recovering     = True
+                        _blackout_recovery_start = time.monotonic()
                 elif key in _SCENE_FKEYS:
                     idx = int(key[1:]) - 1  # F1→0 … F9→8
                     if idx < len(_all_scenes):
@@ -485,17 +471,10 @@ def main():
                         _was_bo = safety.state.blackout_active
                         safety.toggle_blackout()
                         if not _was_bo:
-                            _blackout_fading   = True
-                            _blackout_fade_start = time.monotonic()
-                            _blackout_fade_alpha = 1.0
-                            _fade_v_snap   = _last_render_v
-                            _fade_brt_snap = _master_dimmer
-                            _fade_w_snap   = _last_eff_white
-                            _fade_a_snap   = _last_eff_amber
-                            _fade_uv_snap  = _last_eff_uv
+                            _blackout_recovering = False
                         else:
-                            _blackout_fading   = False
-                            _blackout_fade_alpha = 1.0
+                            _blackout_recovering     = True
+                            _blackout_recovery_start = time.monotonic()
                     else:
                         new_mode    = get_mode(mode_key)
                         new_palette = all_palettes.get(
@@ -559,17 +538,10 @@ def main():
                     _was_bo = safety.state.blackout_active
                     safety.toggle_blackout()
                     if not _was_bo:
-                        _blackout_fading   = True
-                        _blackout_fade_start = time.monotonic()
-                        _blackout_fade_alpha = 1.0
-                        _fade_v_snap   = _last_render_v
-                        _fade_brt_snap = _master_dimmer
-                        _fade_w_snap   = _last_eff_white
-                        _fade_a_snap   = _last_eff_amber
-                        _fade_uv_snap  = _last_eff_uv
+                        _blackout_recovering = False
                     else:
-                        _blackout_fading   = False
-                        _blackout_fade_alpha = 1.0
+                        _blackout_recovering     = True
+                        _blackout_recovery_start = time.monotonic()
                 elif _wtype == "strobe_master":
                     try:
                         _strobe_master = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
@@ -634,6 +606,12 @@ def main():
                         _strobe_burst_end = time.monotonic() + 2.0
                     elif _eff == "strobe_hold":
                         _strobe_hold = (_act == "start")
+                    elif _eff == "white_hold":
+                        _white_hold = (_act == "start")
+                elif _wtype == "arm_strobe":
+                    _strobe_armed = not _strobe_armed
+                elif _wtype == "arm_mode":
+                    _armed_mode = _wcmd.get("value", "")
                 elif _wtype == "toggle_kill":
                     _ktarget = _wcmd.get("target", "")
                     if _ktarget == "strobe":
@@ -689,19 +667,12 @@ def main():
                         if evt.value > 0.5:
                             if not safety.state.blackout_active:
                                 safety.toggle_blackout()
-                                _blackout_fading   = True
-                                _blackout_fade_start = time.monotonic()
-                                _blackout_fade_alpha = 1.0
-                                _fade_v_snap   = _last_render_v
-                                _fade_brt_snap = _master_dimmer
-                                _fade_w_snap   = _last_eff_white
-                                _fade_a_snap   = _last_eff_amber
-                                _fade_uv_snap  = _last_eff_uv
+                                _blackout_recovering = False
                         else:
                             if safety.state.blackout_active:
                                 safety.toggle_blackout()
-                                _blackout_fading   = False
-                                _blackout_fade_alpha = 1.0
+                                _blackout_recovering     = True
+                                _blackout_recovery_start = time.monotonic()
 
             if quit_flag:
                 break
@@ -724,6 +695,26 @@ def main():
             last_lanes = smoother.update(bands_dict)
             last_lanes["bpm"]  = beat_detector.bpm
             last_lanes["beat"] = beat_detected
+
+            # --- drop-sync mode ARM trigger ---
+            if _armed_mode and (
+                bands_dict.get("high_energy", 0.0) > 0.8 or beat_detected
+            ):
+                if _armed_mode in MODES:
+                    new_mode    = get_mode(_armed_mode)
+                    new_palette = all_palettes.get(new_mode.palette_key, current_palette)
+                    _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                     last_lanes.get("wau_amber", 0.0),
+                                     last_lanes.get("wau_uv",    0.0))
+                    transitioner.switch(new_mode)
+                    current_mode    = new_mode
+                    current_palette = new_palette
+                    mode_key        = _armed_mode
+                    safety.update_from_mode(current_mode)
+                    room_lane.set_mode(current_mode)
+                    room_lane.set_palette(current_palette)
+                    smoother.apply_mode_profile(mode_key)
+                _armed_mode = ""
 
             # --- lane render ---
             room_out = room_lane.render(
@@ -790,11 +781,7 @@ def main():
             _frame_v   = _render_v
             _frame_w   = eff_white
 
-            # snapshot clean values each frame so blackout fade can start from them
             _last_render_v  = _render_v
-            _last_eff_white = eff_white
-            _last_eff_amber = eff_amber
-            _last_eff_uv    = eff_uv
 
             if _flash_frames > 0 and not safety.state.blackout_active:
                 _flash_frames -= 1
@@ -805,18 +792,23 @@ def main():
             elif _flash_frames > 0:
                 _flash_frames = 0
 
-            # --- blackout fade override ---
-            if _blackout_fading:
-                _elapsed_fade = time.monotonic() - _blackout_fade_start
-                _blackout_fade_alpha = max(0.0, 1.0 - _elapsed_fade / BLACKOUT_FADE_S)
-                if _blackout_fade_alpha <= 0.0:
-                    _blackout_fading = False
-                _frame_v    = _fade_v_snap   * _blackout_fade_alpha
-                _frame_brt  = _fade_brt_snap * _blackout_fade_alpha
-                _frame_w    = _fade_w_snap   * _blackout_fade_alpha
-                eff_amber   = _fade_a_snap   * _blackout_fade_alpha
-                eff_uv      = _fade_uv_snap  * _blackout_fade_alpha
-                _eff_strobe = 0.0
+            # --- white hold (momentary full-white override) ---
+            if _white_hold and not safety.state.blackout_active:
+                _frame_brt = 1.0
+                _frame_v   = 1.0
+                _frame_s   = 0.0
+                _frame_w   = 1.0
+
+            # --- blackout recovery fade-up ---
+            if _blackout_recovering:
+                _recovery_alpha = min(1.0, (time.monotonic() - _blackout_recovery_start) / BLACKOUT_RECOVERY_S)
+                _frame_v   *= _recovery_alpha
+                _frame_brt *= _recovery_alpha
+                _frame_w   *= _recovery_alpha
+                eff_amber  *= _recovery_alpha
+                eff_uv     *= _recovery_alpha
+                if _recovery_alpha >= 1.0:
+                    _blackout_recovering = False
 
             # --- fixture test override (bypasses audio engine) ---
             if _test_mode and not safety.state.blackout_active:
@@ -848,8 +840,8 @@ def main():
                     uv=eff_uv,
                 )
 
-            # --- universe-level blackout guard (skip while fade is in progress) ---
-            if safety.state.blackout_active and not _blackout_fading:
+            # --- universe-level blackout guard (skip during recovery fade-up) ---
+            if safety.state.blackout_active and not _blackout_recovering:
                 universe.blackout()
 
             # --- post to DMX thread (non-blocking ~1µs copy into single-slot buffer) ---
@@ -934,7 +926,8 @@ def main():
                     mode_display=    current_mode.display_name,
                     scene=           scene_mgr.active_scene_id,
                     scene_name=      _active_s.name if _active_s else "",
-                    blackout=        safety.state.blackout_active,
+                    blackout=           safety.state.blackout_active,
+                    blackout_recovering=_blackout_recovering,
                     bpm=             float(last_lanes.get("bpm", 0.0)),
                     beat=            bool(last_lanes.get("beat", False)),
                     low_energy=      float(bands_dict.get("low_energy",    0.0)),
@@ -956,6 +949,10 @@ def main():
                     kill_derby=      _kill_derby,
                     kill_laser=      _kill_laser,
                     flash_active=    _flash_frames > 0,
+                    white_hold_active= _white_hold,
+                    armed_mode=      _armed_mode,
+                    palette_cooldown= float(room_lane._blender.cooldown_progress),
+                    dmx_channels=    _dmx_snapshot,
                 )
 
             # --- frame rate cap (hybrid sleep/spin-lock, ~50µs jitter) ---

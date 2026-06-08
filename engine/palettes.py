@@ -282,3 +282,8 @@ class PaletteBlender:
     @property
     def palette_name(self) -> str:
         return self._palette.name
+
+    @property
+    def cooldown_progress(self) -> float:
+        """1.0 = just swapped (fully locked), 0.0 = ready for next beat swap."""
+        return max(0.0, 1.0 - (time.monotonic() - self._last_beat_swap) / _BEAT_COOLDOWN_S)

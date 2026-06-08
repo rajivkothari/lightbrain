@@ -42,7 +42,8 @@ _engine_state: Dict[str, Any] = {
     "mode_display":   "Open Dance",
     "scene":          None,
     "scene_name":     "",
-    "blackout":       False,
+    "blackout":             False,
+    "blackout_recovering":  False,
     "bpm":            0.0,
     "beat":           False,
     "low_energy":     0.0,
@@ -62,10 +63,16 @@ _engine_state: Dict[str, Any] = {
     "uplight_dimmer": 1.0,
     "test_mode":      False,
     "test_pattern":   "",
-    "kill_strobe":    False,
-    "kill_derby":     False,
-    "kill_laser":     False,
-    "flash_active":   False,
+    "strobe_armed":        False,
+    "kill_strobe":         False,
+    "kill_derby":          False,
+    "kill_laser":          False,
+    "flash_active":        False,
+    "white_hold_active":   False,
+    "armed_mode":          "",
+    "palette_cooldown":    0.0,
+    "rig_layout":          [],   # [{name, type, address, channels, end}] — static after load
+    "dmx_channels":        [],   # 512-element int list — updated each frame
 }
 
 _command_queue: _queue.Queue = _queue.Queue()
