@@ -139,6 +139,7 @@
     <div class="row"><span class="k">Scene</span><span class="v" id="sceneName">—</span></div>
     <div class="row"><span class="k">BPM</span><span class="v" id="bpm">—</span></div>
     <div class="row"><span class="k">Master</span><span class="v" id="master">—</span></div>
+    <div id="flags" style="display:none; margin-top:6px; color:var(--warn); font-weight:600; letter-spacing:0.04em;"></div>
     <div class="bars">
       <div class="bar low"><span id="bLow"></span></div>
       <div class="bar mid"><span id="bMid"></span></div>
@@ -151,6 +152,7 @@
     <div><span class="dot" id="dot"></span><span id="connText">connecting…</span></div>
     <div class="row"><span class="k">Source</span><span class="v" id="srcText">—</span></div>
     <div class="row"><span class="k">Net Hz</span><span class="v" id="netHz">0</span></div>
+    <div class="row"><span class="k">Engine Hz</span><span class="v" id="engineHz">—</span></div>
     <div class="row"><span class="k">Render</span><span class="v" id="renderFps">0</span></div>
     <div class="row"><span class="k">Fixtures</span><span class="v" id="fxCount">0</span></div>
   </div>
@@ -180,6 +182,10 @@
   <script type="module">
   import * as THREE from 'three';
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+  import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
   // =========================================================================
   // 1. CONSTANTS — coordinate mapping from the engine's 2D scene to 3D world
@@ -227,6 +233,25 @@
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   appEl.appendChild(renderer.domElement);
 
+  // Soft vertical gradient used as the cone alphaMap so beams fade at both ends
+  // instead of reading as hard-edged "plastic". Fading both ends keeps it
+  // correct regardless of cone UV orientation.
+  function makeBeamGradientTex() {
+    const c = document.createElement('canvas');
+    c.width = 4; c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 0, 64);
+    grad.addColorStop(0.0, '#000');
+    grad.addColorStop(0.18, '#fff');
+    grad.addColorStop(0.7, '#aaa');
+    grad.addColorStop(1.0, '#000');
+    g.fillStyle = grad; g.fillRect(0, 0, 4, 64);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    return tex;
+  }
+  const BEAM_GRADIENT = makeBeamGradientTex();
+
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070b);
   scene.fog = new THREE.Fog(0x05070b, 28, 75);
@@ -241,6 +266,20 @@
   controls.maxPolarAngle = Math.PI * 0.49; // don't dip below the floor
   controls.minDistance = 8;
   controls.maxDistance = 60;
+
+  // --- post-processing: UnrealBloom so bright beams glow like real light ---
+  // RenderPass -> UnrealBloomPass -> OutputPass is the canonical order; OutputPass
+  // applies tone mapping + sRGB so colors stay correct through the bloom buffer.
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.9,   // strength
+    0.5,   // radius
+    0.55   // threshold — only the brighter-than-this pixels bloom
+  );
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
 
   // --- dark room (inside of a box) ---
   const roomGeo = new THREE.BoxGeometry(ROOM_W + 6, ROOM_H, ROOM_D + 6);
@@ -328,6 +367,7 @@
       color: 0xffffff,
       transparent: true,
       opacity: 0.0,
+      alphaMap: BEAM_GRADIENT,   // soft fade along the beam length (less "plastic")
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide
@@ -495,8 +535,10 @@
   // We never move geometry here; we only set target values. The render loop
   // does the smoothing so motion stays smooth at display refresh rate.
   let global = {
-    master: 1.0, strobe_master: 1.0, blackout: false,
-    beat: false, overall: 0, warm: 0
+    master: 1.0, uplight_dimmer: 1.0, strobe_master: 1.0, strobe_rate: 0,
+    blackout: false, beat: false, overall: 0, warm: 0,
+    kill_strobe: false, kill_derby: false, kill_laser: false,
+    test_mode: false, engineFps: 0
   };
 
   function applyState(s) {
@@ -504,7 +546,14 @@
 
     // ---- global modifiers ----
     global.master = (s.master_dimmer != null) ? s.master_dimmer : 1.0;
+    global.uplight_dimmer = (s.uplight_dimmer != null) ? s.uplight_dimmer : 1.0;
     global.strobe_master = (s.strobe_master != null) ? s.strobe_master : 1.0;
+    global.strobe_rate = s.strobe_rate || 0;          // Hz — regenerated client-side
+    global.kill_strobe = !!s.kill_strobe;
+    global.kill_derby  = !!s.kill_derby;              // kills sparkle/derby fixtures
+    global.kill_laser  = !!s.kill_laser;              // kills moving-beam fixtures
+    global.test_mode   = !!s.test_mode;
+    global.engineFps   = s.fps || 0;
     global.blackout = !!s.blackout;
     global.beat = !!s.beat;
     global.overall = s.overall_energy || 0;
@@ -569,13 +618,29 @@
 
     const masterGate = global.blackout ? 0 : global.master;
 
+    // Client-side strobe regeneration: a 2-16 Hz strobe cannot survive the 15 Hz
+    // network stream (Nyquist), so we rebuild it here at full refresh rate from
+    // strobe_rate. strobe_master sets how dark the off-phase goes.
+    let strobeGate = 1.0;
+    if (!global.kill_strobe && global.strobe_rate > 0) {
+      const phase = (t * global.strobe_rate) % 1.0;
+      strobeGate = (phase < 0.5) ? 1.0 : (1.0 - clamp(global.strobe_master, 0, 1));
+    }
+
+    // Per-type gates fold in kill switches and uplight_dimmer.
+    const beamGate    = masterGate * (global.kill_laser ? 0 : 1) * strobeGate;
+    const washGate    = masterGate * strobeGate;
+    const upGate      = masterGate * global.uplight_dimmer;
+    const sparkleGate = masterGate * (global.kill_derby ? 0 : 1);
+    const impactGate  = masterGate * (global.kill_strobe ? 0 : 1) * strobeGate;
+
     fixtures.forEach(rec => {
       switch (rec.type) {
-        case 'beam':    updateBeam(rec, k, masterGate, t); break;
-        case 'wash':    updateWash(rec, k, masterGate, t); break;
-        case 'uplight': updateUplight(rec, k, masterGate); break;
-        case 'sparkle': updateSparkle(rec, k, masterGate, t); break;
-        case 'impact':  updateImpact(rec, k, masterGate, t); break;
+        case 'beam':    updateBeam(rec, k, beamGate, t); break;
+        case 'wash':    updateWash(rec, k, washGate, t); break;
+        case 'uplight': updateUplight(rec, k, upGate); break;
+        case 'sparkle': updateSparkle(rec, k, sparkleGate, t); break;
+        case 'impact':  updateImpact(rec, k, impactGate, t); break;
       }
     });
 
@@ -583,7 +648,7 @@
     warmAmbient.intensity = lerp(warmAmbient.intensity, global.warm * 0.5 * masterGate, k);
 
     controls.update();
-    renderer.render(scene, camera);
+    composer.render(); // bloom pipeline (RenderPass -> Bloom -> OutputPass)
 
     // fps meter
     _fpsAccum += dt; _fpsFrames++;
@@ -724,6 +789,18 @@
     document.getElementById('bHigh').style.width = clamp((s.high_energy||0)*100,0,100) + '%';
     document.getElementById('bOvr').style.width  = clamp((s.overall_energy||0)*100,0,100) + '%';
     document.getElementById('fxCount').textContent = fixtures.size;
+    document.getElementById('engineHz').textContent = s.fps ? Math.round(s.fps) : '—';
+
+    // active-flag chips: strobe, kills, test mode
+    const flags = [];
+    if (s.strobe_rate > 0 && !s.kill_strobe) flags.push('STROBE ' + Math.round(s.strobe_rate) + 'Hz');
+    if (s.kill_strobe) flags.push('KILL STROBE');
+    if (s.kill_derby)  flags.push('KILL DERBY');
+    if (s.kill_laser)  flags.push('KILL LASER');
+    if (s.test_mode)   flags.push('TEST' + (s.test_pattern ? ' ' + s.test_pattern : ''));
+    const fl = document.getElementById('flags');
+    fl.textContent = flags.join(' · ');
+    fl.style.display = flags.length ? 'block' : 'none';
 
     if (s.beat) {
       const bn = document.getElementById('bpm');
@@ -857,12 +934,18 @@
                         brt: 1, amount: Math.max(0, Math.sin(t * 1.1)), active: true }];
     const impacts  = [{ id: 'impact_0', x: 600, y: 660, brt: 0.2, flash: beat, active: true }];
 
+    // demo a strobe burst on every other 8-second bar so the strobe path shows
+    const strobing = (Math.floor(t / 8) % 2) === 1;
+
     return {
       mode: 'open_dance', mode_display: 'Open Dance (Demo)', scene: null, scene_name: 'Mock Sweep',
       blackout: false, bpm: 128, beat,
       low_energy: Math.max(0, Math.sin(t * 4)), mid_energy: 0.4 + 0.3 * Math.sin(t * 2.3),
       high_energy: Math.max(0, Math.sin(t * 7)) * 0.7, overall_energy: overall,
-      master_dimmer: 1.0, strobe_master: 1.0, fps: 60, dmx_output: 'MOCK',
+      master_dimmer: 1.0, uplight_dimmer: 1.0,
+      strobe_master: 1.0, strobe_rate: strobing ? 12 : 0,
+      kill_strobe: false, kill_derby: false, kill_laser: false, test_mode: false,
+      fps: 60, dmx_output: 'MOCK',
       fixtures: { uplights, washes, beams, sparkles, impacts, ambient_warm: 0.12 }
     };
   }
@@ -883,6 +966,8 @@
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
+    bloomPass.setSize(window.innerWidth, window.innerHeight);
   });
 
   // start
