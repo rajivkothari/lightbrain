@@ -58,7 +58,14 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+      transition: width 0.2s ease;
     }
+    /* Collapse left panel when 3D tab is active — only show tab buttons */
+    .main-layout.viz-mode .left-panel {
+      width: auto;
+      flex-shrink: 1;
+    }
+    .main-layout.viz-mode .tab-pane { display: none !important; }
 
     /* ---- Right panel: canvas, always visible ---- */
     .right-panel {
@@ -185,6 +192,10 @@
     }
     .btn-kill-dash:hover { background: #1a0000; border-color: #884444; }
     .btn-kill-dash.active { background: #330000; border-color: var(--red); color: var(--red); }
+
+    /* ---- 3D tab HUD ---- */
+    #viz-hud { display: none; }
+    .main-layout.viz-mode #viz-hud { display: flex !important; }
 
     /* ---- Canvas blackout / flash state ---- */
     #rig-canvas.blacked-out {
@@ -332,6 +343,7 @@
       <button class="tab active" onclick="showTab('live')">Live</button>
       <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
       <button class="tab" onclick="showTab('rig')" id="tab-btn-rig">Rig</button>
+      <button class="tab" onclick="showTab('3d')" id="tab-btn-3d">3D</button>
     </div>
 
     <!-- LIVE TAB -->
@@ -473,8 +485,16 @@
   </div>
 
   <!-- ===== RIGHT PANEL: canvas always visible ===== -->
-  <div class="right-panel">
+  <div class="right-panel" style="position:relative">
     <canvas id="rig-canvas"></canvas>
+    <!-- 3D tab HUD overlay — only visible in viz-mode -->
+    <div id="viz-hud" style="display:none; position:absolute; bottom:12px; left:12px; right:12px;
+         background:rgba(8,8,16,0.7); border:1px solid rgba(80,80,120,0.4); border-radius:6px;
+         padding:8px 14px; display:flex; gap:24px; align-items:center; pointer-events:none;">
+      <span id="viz-mode-name"  style="font-size:1.1rem; font-weight:700; letter-spacing:0.1em; color:#aaaaff"></span>
+      <span id="viz-scene-name" style="font-size:0.85rem; color:#888899"></span>
+      <span id="viz-bpm"        style="font-size:1.1rem; font-weight:700; color:#66ff88; margin-left:auto"></span>
+    </div>
   </div>
 
 </div>
@@ -947,6 +967,14 @@ function applyState(s) {
   // Sync strobe speed buttons
   if (s.strobe_master !== undefined) syncStrobeSpeed(s.strobe_master);
 
+  // 3D HUD
+  const vizMode = document.getElementById('viz-mode-name');
+  if (vizMode) vizMode.textContent = (s.mode_display || s.mode || '').toUpperCase();
+  const vizScene = document.getElementById('viz-scene-name');
+  if (vizScene) vizScene.textContent = s.scene_name ? `SCENE: ${s.scene_name.toUpperCase()}` : '';
+  const vizBpm = document.getElementById('viz-bpm');
+  if (vizBpm) vizBpm.textContent = s.bpm > 1 ? `${Math.round(s.bpm)} BPM` : '';
+
   // Grids
   buildModes(s.modes); buildScenes(s.scenes);
 
@@ -1241,6 +1269,10 @@ function showTab(name) {
     const key = t.getAttribute('onclick').replace("showTab('","").replace("')","");
     t.classList.toggle('active', key === name);
   });
+  // 3D tab collapses left panel and shows HUD overlay
+  document.querySelector('.main-layout').classList.toggle('viz-mode', name === '3d');
+  // Trigger canvas resize after layout shift
+  if (name === '3d') setTimeout(() => { const c = document.getElementById('rig-canvas'); if(c) { c.dispatchEvent(new Event('resize')); _initCanvas(); } }, 50);
   if (name === 'scenes') _edLoad();
   if (name === 'rig')    _rigDraw(_lastDmxChannels);
 }
