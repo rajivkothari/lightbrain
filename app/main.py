@@ -411,6 +411,7 @@ def main():
     _uplight_dimmer    = 1.0    # 0–1, uplight-only brightness
     _flash_frames      = 0      # countdown frames for manual flash hit
     _strobe_burst_end  = 0.0    # monotonic time when strobe burst expires
+    _strobe_armed      = False   # latching arm toggle — strobe runs until disarmed
     _strobe_hold       = False   # iPad hold-to-strobe button state
     _strobe_hold_phase = 0.0    # software oscillator phase for strobe hold
     _dmx_snapshot      = [0] * 512  # last rendered universe for Rig tab
@@ -645,6 +646,8 @@ def main():
                         _strobe_burst_end = time.monotonic() + 2.0
                     elif _eff == "strobe_hold":
                         _strobe_hold = (_act == "start")
+                elif _wtype == "arm_strobe":
+                    _strobe_armed = not _strobe_armed
                 elif _wtype == "toggle_kill":
                     _ktarget = _wcmd.get("target", "")
                     if _ktarget == "strobe":
@@ -785,7 +788,7 @@ def main():
                 _eff_strobe = _strobe_master
 
             # --- strobe hold (iPad hold-to-strobe — software oscillator) ---
-            if _strobe_hold and not safety.state.blackout_active:
+            if (_strobe_hold or _strobe_armed) and not safety.state.blackout_active:
                 _hold_freq = 2.0 + _strobe_master * 14.0
                 _strobe_hold_phase = (_strobe_hold_phase + _frame_time * _hold_freq) % 1.0
                 _eff_strobe = _strobe_master
@@ -806,7 +809,7 @@ def main():
             _last_eff_uv    = eff_uv
 
             # --- strobe hold flicker (software side — toggles brightness) ---
-            if _strobe_hold and not safety.state.blackout_active:
+            if (_strobe_hold or _strobe_armed) and not safety.state.blackout_active:
                 if _strobe_hold_phase >= 0.25:
                     _frame_v   = 0.0
                     _frame_w   = 0.0
@@ -978,6 +981,7 @@ def main():
                     uplight_dimmer=  float(_uplight_dimmer),
                     test_mode=       _test_mode,
                     test_pattern=    _test_pattern,
+                    strobe_armed=    _strobe_armed,
                     kill_strobe=     _kill_strobe,
                     kill_derby=      _kill_derby,
                     kill_laser=      _kill_laser,

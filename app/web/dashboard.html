@@ -154,7 +154,21 @@
     .btn-speed-dash .spd-hz { font-size: 0.58rem; color: var(--dim); }
     .btn-speed-dash.active  { border-color: #aaaaff; color: #ddddff; background: #181838; }
     .btn-speed-dash.active .spd-hz { color: #8888cc; }
-    .momentary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 5px; }
+    .momentary-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 5px; }
+    .btn-strobe-arm {
+      background: #001a2e; border-color: #004477; color: #66aaff;
+      font-weight: 700; letter-spacing: 0.08em;
+    }
+    .btn-strobe-arm:hover { background: #00253d; border-color: #0066aa; }
+    .btn-strobe-arm.armed {
+      background: #003366; border-color: #0099ff; color: #fff;
+      box-shadow: 0 0 10px rgba(0,150,255,0.5);
+      animation: arm-pulse 1s ease-in-out infinite;
+    }
+    @keyframes arm-pulse {
+      0%,100% { box-shadow: 0 0 8px rgba(0,150,255,0.4); }
+      50%      { box-shadow: 0 0 16px rgba(0,150,255,0.8); }
+    }
     .btn-strobe-hold {
       background: #2a2000; border-color: #665500; color: #ffcc44;
       font-weight: 700; letter-spacing: 0.08em; user-select: none;
@@ -360,10 +374,14 @@
             <button class="btn btn-speed-dash" id="dash-spd-max"  onclick="setStrobeSpeed(1.0)">MAX<span class="spd-hz">16 Hz</span></button>
           </div>
           <div class="momentary-row" style="margin-top:5px">
+            <button class="btn btn-full btn-strobe-arm" id="strobe-arm-btn"
+                    onclick="toggleStrobeArm()">
+              &#x25CE; ARM
+            </button>
             <button class="btn btn-full btn-strobe-hold" id="strobe-hold-btn"
                     onmousedown="strobeHoldStart()" onmouseup="strobeHoldEnd()"
                     onmouseleave="strobeHoldEnd()">
-              &#x26A1; STROBE HOLD
+              &#x26A1; HOLD
             </button>
             <button class="btn btn-full" onclick="cmd({type:'momentary',effect:'flash',action:'start'})">
               BUMP
@@ -850,6 +868,10 @@ function syncStrobeSpeed(v) {
   });
 }
 
+function toggleStrobeArm() {
+  cmd({type: 'arm_strobe'});
+}
+
 let _strobeHeld = false;
 function strobeHoldStart() {
   if (_strobeHeld) return;
@@ -948,6 +970,10 @@ function applyState(s) {
   bo.classList.toggle('active', _blackoutActive);
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
   document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
+
+  // ARM button sync
+  const armBtn = document.getElementById('strobe-arm-btn');
+  if (armBtn) armBtn.classList.toggle('armed', !!s.strobe_armed);
 
   // Kill switches — red = element is silenced/OFF
   const killLabels = {strobe:'⚡ STROBE', derby:'⊕ DERBY', laser:'▶ LASER'};

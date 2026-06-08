@@ -62,6 +62,7 @@ _engine_state: Dict[str, Any] = {
     "uplight_dimmer": 1.0,
     "test_mode":      False,
     "test_pattern":   "",
+    "strobe_armed":   False,
     "kill_strobe":    False,
     "kill_derby":     False,
     "kill_laser":     False,

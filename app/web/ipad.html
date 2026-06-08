@@ -186,7 +186,7 @@
     }
 
     /* ---- Momentary buttons ---- */
-    .momentary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .momentary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
     .btn-moment {
       min-height: 60px; border-radius: 10px; border: 2px solid;
       font-family: inherit; font-size: 0.9rem; font-weight: 700;
@@ -199,6 +199,20 @@
       background: linear-gradient(135deg, #665500, #887700);
       border-color: #ffcc00; filter: brightness(1.4);
       transform: scale(0.95);
+    }
+    .btn-arm {
+      background: linear-gradient(135deg, #001830, #002a4a);
+      border-color: #004477; color: #66aaff;
+    }
+    .btn-arm.armed {
+      background: linear-gradient(135deg, #003366, #0055aa);
+      border-color: #0099ff; color: #fff;
+      box-shadow: 0 0 14px rgba(0,150,255,0.5);
+      animation: arm-pulse 1s ease-in-out infinite;
+    }
+    @keyframes arm-pulse {
+      0%,100% { box-shadow: 0 0 10px rgba(0,150,255,0.4); }
+      50%      { box-shadow: 0 0 20px rgba(0,150,255,0.8); }
     }
     .btn-flash {
       background: linear-gradient(135deg, #333355, #444488);
@@ -441,6 +455,9 @@
 
   <div class="sec-label">Momentary</div>
   <div class="momentary-grid">
+    <button class="btn-moment btn-arm" id="btn-arm" onclick="toggleStrobeArm()">
+      &#x25CE; ARM
+    </button>
     <button class="btn-moment btn-flash" id="btn-flash"
             ontouchstart="momentaryStart('flash')" ontouchend="momentaryEnd('flash')"
             onmousedown="momentaryStart('flash')" onmouseup="momentaryEnd('flash')">
@@ -450,7 +467,7 @@
             ontouchstart="momentaryStart('strobe_hold')" ontouchend="momentaryEnd('strobe_hold')"
             ontouchcancel="momentaryEnd('strobe_hold')"
             onmousedown="momentaryStart('strobe_hold')" onmouseup="momentaryEnd('strobe_hold')">
-      STROBE
+      HOLD
     </button>
   </div>
 
@@ -665,6 +682,10 @@ function syncStrobeSpeed(v) {
   });
 }
 
+function toggleStrobeArm() {
+  send({type: 'arm_strobe'});
+}
+
 function toggleKill(target) {
   send({type: 'toggle_kill', target: target});
 }
@@ -788,6 +809,10 @@ function applyState(s) {
   if (s.test_mode !== undefined) {
     _updateTestUI(!!s.test_mode, s.test_pattern || '');
   }
+
+  // ARM button sync
+  const armBtn = document.getElementById('btn-arm');
+  if (armBtn) armBtn.classList.toggle('armed', !!s.strobe_armed);
 
   // Kill switches
   _syncKill('strobe', !!s.kill_strobe);
