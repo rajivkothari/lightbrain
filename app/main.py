@@ -403,6 +403,7 @@ def main():
     _flash_frames      = 0      # countdown frames for manual flash hit
     _strobe_burst_end  = 0.0    # monotonic time when strobe burst expires
     _strobe_hold       = False   # iPad hold-to-strobe button state
+    _strobe_hold_phase = 0.0    # software oscillator phase for strobe hold
     _test_mode         = False   # fixture test mode — overrides audio engine
     _test_pattern      = ""      # active test pattern name
     _blackout_fading   = False   # True while blackout fade-out is in progress
@@ -640,14 +641,8 @@ def main():
                         _kill_strobe = not _kill_strobe
                     elif _ktarget == "derby":
                         _kill_derby = not _kill_derby
-                        for _fx in fixtures:
-                            if hasattr(_fx, "set_derby_enabled"):
-                                _fx.set_derby_enabled(not _kill_derby)
                     elif _ktarget == "laser":
                         _kill_laser = not _kill_laser
-                        for _fx in fixtures:
-                            if hasattr(_fx, "enable_laser"):
-                                _fx.enable_laser(not _kill_laser)
                 elif _wtype == "fixture_test":
                     _pname = _wcmd.get("pattern", "white")
                     if _pname in _TEST_PATTERNS:
@@ -779,9 +774,13 @@ def main():
             if time.monotonic() < _strobe_burst_end and not safety.state.blackout_active:
                 _eff_strobe = _strobe_master
 
-            # --- strobe hold (iPad hold-to-strobe button — DJ manual override) ---
+            # --- strobe hold (iPad hold-to-strobe — software oscillator) ---
             if _strobe_hold and not safety.state.blackout_active:
+                _hold_freq = 2.0 + _strobe_master * 14.0
+                _strobe_hold_phase = (_strobe_hold_phase + _frame_time * _hold_freq) % 1.0
                 _eff_strobe = _strobe_master
+            else:
+                _strobe_hold_phase = 0.0
 
             # --- prepare per-frame render values ---
             _frame_brt = _master_dimmer
@@ -795,6 +794,17 @@ def main():
             _last_eff_white = eff_white
             _last_eff_amber = eff_amber
             _last_eff_uv    = eff_uv
+
+            # --- strobe hold flicker (software side — toggles brightness) ---
+            if _strobe_hold and not safety.state.blackout_active:
+                if _strobe_hold_phase >= 0.25:
+                    _frame_v   = 0.0
+                    _frame_w   = 0.0
+                    _frame_brt = 0.0
+                else:
+                    _frame_v   = 1.0
+                    _frame_w   = 1.0
+                    _frame_brt = 1.0
 
             if _flash_frames > 0 and not safety.state.blackout_active:
                 _flash_frames -= 1
@@ -833,6 +843,11 @@ def main():
             # --- kill switch overrides (last word before fixture write) ---
             if _kill_strobe:
                 _eff_strobe = 0.0
+            for _fx in fixtures:
+                if hasattr(_fx, "set_derby_enabled"):
+                    _fx.set_derby_enabled(not _kill_derby)
+                if hasattr(_fx, "enable_laser"):
+                    _fx.enable_laser(not _kill_laser)
 
             # --- fixture write (all fixtures get same lane output) ---
             for fixture in fixtures:
