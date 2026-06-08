@@ -220,6 +220,9 @@
     .btn-sm.danger { border-color: #442222; color: #ff6666; }
     .btn-sm.danger:hover { background: #2a0000; }
     .btn-sm.primary { border-color: var(--accent); color: #8888ff; }
+    .btn-sm.active { background: #181838; border-color: var(--accent); color: #8888ff; }
+    .btn-sm.held { background: #383838; border-color: #fff; color: #fff; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 5px; }
 
     .form-group { margin-bottom: 10px; }
     label { display: block; font-size: 0.7rem; color: var(--dim);
@@ -454,16 +457,54 @@
       </div>
     </div>
 
-    <!-- 3D TAB (left pane) -->
+    <!-- 3D TAB (left pane) — full rig control beside the 3D render -->
     <div id="tab-3d" class="tab-pane" style="display:none">
       <div class="section">
-        <div class="section-label">3D Visualizer</div>
-        <p style="font-size:0.72rem; line-height:1.5; color:var(--dim,#888);">
-          Live 3D view in the panel on the right. Drag to orbit, scroll to zoom,
-          right-drag to pan. Use the Layers panel in the 3D view to show or hide
-          fixture groups. Rendering pauses automatically when you leave this tab.
-        </p>
+        <div class="section-label">Mode</div>
+        <div class="grid" id="mode-grid-3d"></div>
       </div>
+      <div class="section">
+        <div class="section-label">Scene</div>
+        <div class="grid" id="scene-grid-3d"></div>
+      </div>
+      <div class="section">
+        <div class="section-label">Strobe</div>
+        <div class="btn-row" id="strobe-3d">
+          <button class="btn btn-sm" id="strobe3d-off" onclick="strobe3dOff()">OFF</button>
+          <button class="btn btn-sm strobe3d-rate" data-m="0.2"  onclick="strobe3dRate(this)">SLOW</button>
+          <button class="btn btn-sm strobe3d-rate" data-m="0.45" onclick="strobe3dRate(this)">MED</button>
+          <button class="btn btn-sm strobe3d-rate" data-m="0.7"  onclick="strobe3dRate(this)">FAST</button>
+          <button class="btn btn-sm strobe3d-rate" data-m="1.0"  onclick="strobe3dRate(this)">MAX</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-label">Uplights (preview)</div>
+        <div class="btn-row" id="uplights-3d">
+          <button class="btn btn-sm upl3d" data-n="6"  onclick="uplights3d(6)">6</button>
+          <button class="btn btn-sm upl3d" data-n="12" onclick="uplights3d(12)">12</button>
+          <button class="btn btn-sm upl3d active" data-n="18" onclick="uplights3d(18)">18</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-label">Master</div>
+        <div class="btn-row">
+          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:0})">0%</button>
+          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:0.5})">50%</button>
+          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:1})">100%</button>
+          <button class="btn btn-sm" onclick="cmd({type:'momentary',effect:'flash',action:'start'})">BUMP</button>
+          <button class="btn btn-sm" id="white3d"
+                  onmousedown="white3d(true)" onmouseup="white3d(false)" onmouseleave="white3d(false)">WHITE</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-label">Kill Switches</div>
+        <div class="kill-row">
+          <button class="btn-kill-dash" id="dash3d-kill-strobe" onclick="toggleKill('strobe')">&#x26A1; STROBE</button>
+          <button class="btn-kill-dash" id="dash3d-kill-derby"  onclick="toggleKill('derby')">&#x2B55; DERBY</button>
+          <button class="btn-kill-dash" id="dash3d-kill-laser"  onclick="toggleKill('laser')">&#x25B6; LASER</button>
+        </div>
+      </div>
+      <button class="btn btn-full btn-blackout" id="blackout-btn-3d" onclick="cmd({type:'blackout'})">BLACKOUT</button>
     </div>
   </div>
 
@@ -870,30 +911,71 @@ function toggleKill(target) {
 function buildModes(modes) {
   if (modesReady) return;
   const list = (modes && modes.length) ? modes : DEFAULT_MODES;
-  const grid = document.getElementById('mode-grid');
-  grid.innerHTML = '';
-  list.forEach(m => {
-    const b = document.createElement('button');
-    b.className = 'btn mode-btn'; b.dataset.key = m.key;
-    b.textContent = m.display_name;
-    b.onclick = () => cmd({type:'mode', value:m.key});
-    grid.appendChild(b);
+  ['mode-grid', 'mode-grid-3d'].forEach(gid => {        // Live tab + 3D tab
+    const grid = document.getElementById(gid);
+    if (!grid) return;
+    grid.innerHTML = '';
+    list.forEach(m => {
+      const b = document.createElement('button');
+      b.className = 'btn mode-btn'; b.dataset.key = m.key;
+      b.textContent = m.display_name;
+      b.onclick = () => cmd({type:'mode', value:m.key});
+      grid.appendChild(b);
+    });
   });
   modesReady = true;
 }
 
 function buildScenes(scenes) {
   if (scenesReady || !scenes || !scenes.length) return;
-  const grid = document.getElementById('scene-grid');
-  grid.innerHTML = '';
-  scenes.forEach((s, i) => {
-    const b = document.createElement('button');
-    b.className = 'btn scene-btn'; b.dataset.id = s.id;
-    b.innerHTML = `<span class="shortcut">F${i+1}</span>${s.name}`;
-    b.onclick = () => cmd({type:'scene', value:s.id});
-    grid.appendChild(b);
+  ['scene-grid', 'scene-grid-3d'].forEach(gid => {
+    const grid = document.getElementById(gid);
+    if (!grid) return;
+    grid.innerHTML = '';
+    scenes.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.className = 'btn scene-btn'; b.dataset.id = s.id;
+      b.innerHTML = `<span class="shortcut">F${i+1}</span>${s.name}`;
+      b.onclick = () => cmd({type:'scene', value:s.id});
+      grid.appendChild(b);
+    });
   });
   scenesReady = true;
+}
+
+// ---- 3D-tab control helpers (reuse cmd(); uplights drive the iframe) ----
+function _viz3dPost(msg) {
+  const f = document.getElementById('viz3d-frame');
+  if (f && f.contentWindow) { try { f.contentWindow.postMessage(msg, '*'); } catch(_){} }
+}
+let _upl3d = 18;
+function uplights3d(n) {
+  _upl3d = n;
+  document.querySelectorAll('#uplights-3d .upl3d').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
+  _viz3dPost({type:'lb-uplights', n});
+}
+let _strobe3dLatch = null;
+function strobe3dRate(btn) {
+  cmd({type:'strobe_master', value: parseFloat(btn.dataset.m)});
+  cmd({type:'momentary', effect:'strobe_hold', action:'start'});
+  _strobe3dLatch = btn.dataset.m;
+  reflectStrobe3d();
+}
+function strobe3dOff() {
+  cmd({type:'momentary', effect:'strobe_hold', action:'stop'});
+  _strobe3dLatch = null; reflectStrobe3d();
+}
+function reflectStrobe3d() {
+  document.querySelectorAll('#strobe-3d .strobe3d-rate').forEach(b =>
+    b.classList.toggle('active', b.dataset.m === _strobe3dLatch));
+}
+let _white3dHeld = false;
+function white3d(state) {
+  if (state === _white3dHeld) return;
+  _white3dHeld = state;
+  document.getElementById('white3d').classList.toggle('held', state);
+  cmd({type:'white_hold', state});
 }
 
 function applyState(s) {
@@ -955,16 +1037,28 @@ function applyState(s) {
   bo.classList.toggle('active', _blackoutActive);
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
   document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
+  const bo3 = document.getElementById('blackout-btn-3d');
+  if (bo3) {
+    bo3.classList.toggle('active', _blackoutActive);
+    bo3.textContent = _blackoutActive ? '■  BLACKOUT ACTIVE' : 'BLACKOUT';
+  }
+  if (_blackoutActive && _strobe3dLatch) { _strobe3dLatch = null; reflectStrobe3d(); }
 
-  // Kill switches — red = element is silenced/OFF
+  // White hold (3D tab) — reflect engine state
+  const w3 = document.getElementById('white3d');
+  if (w3) w3.classList.toggle('held', !!s.white_hold);
+
+  // Kill switches — red = element is silenced/OFF (mirrored on Live + 3D tabs)
   const killLabels = {strobe:'⚡ STROBE', derby:'⊕ DERBY', laser:'▶ LASER'};
   const killOffLabels = {strobe:'⚡ STROBE OFF', derby:'⊕ DERBY OFF', laser:'▶ LASER OFF'};
   ['strobe','derby','laser'].forEach(t => {
-    const el = document.getElementById('dash-kill-' + t);
-    if (!el) return;
     const killed = !!s['kill_' + t];
-    el.classList.toggle('active', killed);
-    el.textContent = killed ? killOffLabels[t] : killLabels[t];
+    ['dash-kill-', 'dash3d-kill-'].forEach(pfx => {
+      const el = document.getElementById(pfx + t);
+      if (!el) return;
+      el.classList.toggle('active', killed);
+      el.textContent = killed ? killOffLabels[t] : killLabels[t];
+    });
   });
 
   // Flash feedback — brief canvas pop
@@ -1234,7 +1328,10 @@ function showTab(name) {
     if (!_viz3dLoaded) { frame.src = '/visualizer3d?embed=1'; _viz3dLoaded = true; }
     canvas.style.display = 'none';
     frame.style.display  = '';
-    const resume = () => { try { frame.contentWindow.postMessage({type:'lb-resume'}, '*'); } catch(_){} };
+    const resume = () => { try {
+      frame.contentWindow.postMessage({type:'lb-resume'}, '*');
+      frame.contentWindow.postMessage({type:'lb-uplights', n:_upl3d}, '*');
+    } catch(_){} };
     if (frame.contentWindow) resume();
     frame.addEventListener('load', resume, {once:true});
   } else {

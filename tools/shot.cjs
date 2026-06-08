@@ -70,7 +70,8 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 function startServer() {
   return new Promise(resolve => {
     const srv = http.createServer((req, res) => {
-      const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || PAGE;
+      let rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || PAGE;
+      if (rel === 'visualizer3d') rel = 'visualizer3d.html';   // mirror the server route
       const fp = path.join(WEB_DIR, rel);
       if (!fp.startsWith(WEB_DIR) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
         res.statusCode = 404; return res.end('not found');
@@ -108,7 +109,7 @@ function startServer() {
   if (DEMO) { try { await page.click('#demoBtn', { timeout: 1500 }); } catch (_) {} }
   await page.waitForTimeout(Math.max(0, WAIT - 700));
   for (const js of EVALS) { try { await page.evaluate(js); } catch (e) { errs.push('EVAL: ' + e.message); } }
-  if (EVALS.length) await page.waitForTimeout(1200);
+  if (EVALS.length) await page.waitForTimeout(3200);
 
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   await page.screenshot({ path: OUT });

@@ -85,8 +85,10 @@
   }
   #layers input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
 
-  /* Embedded in the dashboard 3D tab: drop the standalone connect/help chrome. */
-  body.embed #ctrl, body.embed #help { display: none; }
+  /* Embedded in the dashboard 3D tab: drop the standalone connect/help chrome
+     and the bottom control dock — the dashboard's left panel drives the rig.
+     The Layers + View panel stays (it's visualizer-only preview). */
+  body.embed #ctrl, body.embed #help, body.embed #controls { display: none; }
 
   .view-row { display: flex; gap: 4px; margin-top: 4px; }
   .view-btn {
@@ -1458,6 +1460,7 @@
       if (!d || typeof d !== 'object') return;
       if (d.type === 'lb-pause')  stopRender();
       if (d.type === 'lb-resume') startRender();
+      if (d.type === 'lb-uplights') setUplights(d.n);   // dashboard drives the preview count
     });
   }
 
