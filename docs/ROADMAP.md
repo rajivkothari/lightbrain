@@ -158,7 +158,7 @@ what was built in each sprint and what comes next.
 
 ## Sprint 13 — iPad Web Controller ✅
 
-**422 tests passing** *(580 passed, 2 skipped as of current branch)*
+**422 tests passing** *(590 passed, 2 skipped as of current branch)*
 
 - iPad PWA (port 8080) — full-screen standalone, dark theme, large touch targets
 - Master / uplight / strobe fader sync from engine state
@@ -171,7 +171,7 @@ what was built in each sprint and what comes next.
 
 ## Codebase Audit ✅
 
-**437 tests passing (post-audit)** *(580 passed, 2 skipped as of current branch)*
+**437 tests passing (post-audit)** *(590 passed, 2 skipped as of current branch)*
 
 - 9 bugs fixed (including blackout fade logic, EnvelopeFollower initialization)
 - 10 logic errors corrected
@@ -179,18 +179,18 @@ what was built in each sprint and what comes next.
 
 ---
 
-## Post-Audit Additions (current branch)
+## Post-Audit Additions — Phase A
 
 These were added after the formal audit in direct development:
 
-- **Blackout fade** — 0.8s alpha-blend fade-out instead of hard cut; snapshots render values at toggle time
+- **Blackout reversal (safety)** — instant-black on activation (0 frames to black); 1.5 s linear fade-up on release. Old fade-to-black on activation was a live-event safety hazard.
 - **Fixture test page** — iPad TEST tab with 12 color patterns, moving head aim snaps, RELEASE TEST
 - **Chauvet Wash FX2 mapper** (`fixtures/chauvet_wash_fx2.py`) — 8Ch mode, full RGBUV+strobe
 - **Chauvet GigBAR Move+ILS mapper** (`fixtures/chauvet_gigbar_move_ils.py`) — 29Ch: par, derby, flash LEDs, laser, spot head
 - **Kill switches** — STROBE / DERBY / LASER toggle buttons on dashboard and iPad; override at last step before DMX write
 - **Manual strobe bypass** — STROBE HOLD and STROBE BURST no longer gated by `strobe_allowed`; respect strobe_master level
 - **Strobe master on manual** — hold/burst use `_strobe_master` instead of hardcoded 1.0
-- **STROBE HOLD + FLASH on dashboard** — momentary buttons added to desktop UI
+- **STROBE HOLD + BUMP on dashboard** — momentary buttons added to desktop UI
 - **BPM fix** — minimum beat interval raised from 200ms to 333ms (max 180 BPM); halving normalization added
 - **Mode button cleanup** — removed redundant key sub-label from buttons (iPad + dashboard)
 - **Flash/strobe canvas feedback** — canvas border glows yellow on strobe, pops blue-white on flash
@@ -199,6 +199,29 @@ These were added after the formal audit in direct development:
 - **Kill switch per-frame enforcement** — derby/laser kills re-applied every render frame; previously fire-and-forget on toggle
 - **FLASH renamed to BUMP** — clarifies it is a 75ms full-white accent hit, not a continuous strobe
 - **DMX address collision checker** — `check_dmx_address_map()` validates layout at startup; raises with full address table on overlap or out-of-bounds; `channel_count` property added to all fixture types
+- **iPad token auth** — `web_server_token` in `app_config.json` gates WebSocket connections with `?token=` query param
+- **`--web-host` CLI flag** — allows binding the dashboard to `0.0.0.0` for LAN access; defaults to `127.0.0.1`
+- **Uplight DMX scaling** — `_uplight_dimmer` applied per-fixture in the render loop for `RockWedge` and `Wash FX2` fixtures; previously missing from DMX write path
+
+---
+
+## Post-Audit Additions — Phase B ✅
+
+**590 tests passing, 2 skipped**
+
+Five UX improvements targeting the DJ–lighting relationship plus a Three.js 3D rig visualizer:
+
+- **Blackout instant-black** (safety fix carried from Phase A): activation is now frame-0 black; release is 1.5 s linear fade-up (`BLACKOUT_RECOVERY_S = 1.5`). `_blackout_recovering` flag alpha-multiplies all render values during recovery.
+
+- **Drop-sync ARM** — double-tap a mode button (within 300 ms) to pre-arm it. Fires automatically when `high_energy > 0.8` OR `beat_detected`. Armed state broadcast as `armed_mode` field; mode button pulses blue animation. Resets after fire or manual mode change.
+
+- **Cooldown telemetry** — `PaletteBlender.beat_cooldown_fraction(now)` and `RoomLane.beat_cooldown_fraction(now)` expose the 10 s beat-swap lockout as a 0.0–1.0 fraction. Dashboard and iPad mode button opacity scales from 100 % → 40 % during lockout. Broadcast as `cooldown_pct` and `cooldown_active` aliases.
+
+- **Fader shortcuts** — 0% / 50% / 100% quick-set buttons above the master dimmer fader on dashboard and iPad. Eliminates imprecise drag targeting at critical moments.
+
+- **Momentary White Hold** — fourth button in the 2×2 momentary grid (iPad) and in the 3D tab panel (dashboard). Sends `{type: "white_hold", state: true/false}`. Engine overrides `_frame_brt=1.0, _frame_v=1.0, _frame_s=0.0, _frame_w=1.0` for the entire frame while held; released instantly on finger-up.
+
+- **Three.js 3D rig visualizer** — `app/web/visualizer3d.html` (1 482 lines). Served at `/visualizer3d`; embedded in the dashboard 3D tab as a lazy-loaded iframe. Left panel mirrors all Live tab controls (Mode, Scene, Strobe rate presets, Uplight count selector, Master shortcuts, WHITE hold, Kill switches, Blackout). Paused via `postMessage({type:'lb-pause'})` when tab is hidden; resumed with `lb-resume`; uplight count driven by `lb-uplights`.
 
 ---
 
