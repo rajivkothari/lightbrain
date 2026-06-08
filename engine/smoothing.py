@@ -87,7 +87,8 @@ class EnvelopeFollower:
         if now is None:
             now = time.monotonic()
         dt_s = max(0.0, now - self._last_update)
-        self._last_update = now
+        if now > self._last_update:
+            self._last_update = now
 
         # Clamp and apply threshold gate
         raw = max(0.0, min(raw, self.config.max_threshold))

@@ -162,6 +162,24 @@
       background: var(--accent); border: 2px solid #8888ff;
       margin-top: -12px; box-shadow: 0 0 8px rgba(88,88,255,0.4);
     }
+
+    /* ---- Strobe speed buttons ---- */
+    .strobe-speed-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;
+    }
+    .btn-speed {
+      min-height: 52px; border-radius: 10px; border: 2px solid #334;
+      background: var(--card); color: var(--dim);
+      font-family: inherit; font-size: 0.78rem; font-weight: 700;
+      letter-spacing: 0.1em; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; transition: background 0.1s, border-color 0.1s, color 0.1s, transform 0.06s;
+    }
+    .btn-speed .speed-hz { font-size: 0.6rem; font-weight: 400; opacity: 0.7; }
+    .btn-speed:active { transform: scale(0.95); }
+    .btn-speed.active {
+      background: #1a1a38; border-color: #aaaaff; color: #ddddff;
+    }
     .fader-val {
       font-size: 0.78rem; color: var(--text); width: 40px; text-align: right;
       font-variant-numeric: tabular-nums; flex-shrink: 0;
@@ -190,7 +208,7 @@
     }
 
     /* ---- Momentary buttons ---- */
-    .momentary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .momentary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
     .btn-moment {
       min-height: 60px; border-radius: 10px; border: 2px solid;
       font-family: inherit; font-size: 0.9rem; font-weight: 700;
@@ -203,6 +221,20 @@
       background: linear-gradient(135deg, #665500, #887700);
       border-color: #ffcc00; filter: brightness(1.4);
       transform: scale(0.95);
+    }
+    .btn-arm {
+      background: linear-gradient(135deg, #001830, #002a4a);
+      border-color: #004477; color: #66aaff;
+    }
+    .btn-arm.armed {
+      background: linear-gradient(135deg, #003366, #0055aa);
+      border-color: #0099ff; color: #fff;
+      box-shadow: 0 0 14px rgba(0,150,255,0.5);
+      animation: arm-pulse 1s ease-in-out infinite;
+    }
+    @keyframes arm-pulse {
+      0%,100% { box-shadow: 0 0 10px rgba(0,150,255,0.4); }
+      50%      { box-shadow: 0 0 20px rgba(0,150,255,0.8); }
     }
     .btn-flash {
       background: linear-gradient(135deg, #333355, #444488);
@@ -426,12 +458,22 @@
              oninput="onFader('uplight',this.value)">
       <span class="fader-val" id="fader-uplight-val">100%</span>
     </div>
-    <div class="fader-row">
-      <span class="fader-label">Strobe</span>
-      <input type="range" min="0" max="100" value="100" id="fader-strobe"
-             oninput="onFader('strobe',this.value)">
-      <span class="fader-val" id="fader-strobe-val">100%</span>
-    </div>
+  </div>
+
+  <div class="sec-label">Strobe Speed</div>
+  <div class="strobe-speed-grid" id="strobe-speed-grid">
+    <button class="btn-speed" id="spd-slow" onclick="setStrobeSpeed(0.14)">
+      SLOW<span class="speed-hz">4 Hz</span>
+    </button>
+    <button class="btn-speed" id="spd-med" onclick="setStrobeSpeed(0.43)">
+      MED<span class="speed-hz">8 Hz</span>
+    </button>
+    <button class="btn-speed" id="spd-fast" onclick="setStrobeSpeed(0.71)">
+      FAST<span class="speed-hz">12 Hz</span>
+    </button>
+    <button class="btn-speed" id="spd-max" onclick="setStrobeSpeed(1.0)">
+      MAX<span class="speed-hz">16 Hz</span>
+    </button>
   </div>
 
   <div class="sec-label">Kill Switches</div>
@@ -449,10 +491,13 @@
 
   <div class="sec-label">Momentary</div>
   <div class="momentary-grid">
+    <button class="btn-moment btn-arm" id="btn-arm" onclick="toggleStrobeArm()">
+      &#x25CE; ARM
+    </button>
     <button class="btn-moment btn-flash" id="btn-flash"
             ontouchstart="momentaryStart('flash')" ontouchend="momentaryEnd('flash')"
             onmousedown="momentaryStart('flash')" onmouseup="momentaryEnd('flash')">
-      FLASH
+      BUMP
     </button>
     <button class="btn-moment btn-white-hold" id="btn-white"
             ontouchstart="momentaryStart('white_hold')" ontouchend="momentaryEnd('white_hold')"
@@ -464,7 +509,7 @@
             ontouchstart="momentaryStart('strobe_hold')" ontouchend="momentaryEnd('strobe_hold')"
             ontouchcancel="momentaryEnd('strobe_hold')"
             onmousedown="momentaryStart('strobe_hold')" onmouseup="momentaryEnd('strobe_hold')">
-      STROBE
+      HOLD
     </button>
   </div>
 
@@ -604,9 +649,19 @@ const DEFAULT_MODES = [
 // ============================================================
 // WEBSOCKET
 // ============================================================
+function _getToken() {
+  // Read ?token=xxx from the page URL — the DJ navigates to
+  // http://<ip>:8080/?token=<configured_token>
+  return new URLSearchParams(window.location.search).get('token') || '';
+}
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  _ws = new WebSocket(`${proto}//${location.host}/ws`);
+  const tok   = _getToken();
+  const url   = tok
+    ? `${proto}//${location.host}/ws?token=${encodeURIComponent(tok)}`
+    : `${proto}//${location.host}/ws`;
+  _ws = new WebSocket(url);
 
   _ws.onopen = () => {
     _connected = true;
@@ -660,6 +715,35 @@ function onFader(name, pct) {
   send({type: 'set_fader', fader: name, value: parseFloat(pct) / 100});
 }
 
+const _STROBE_PRESETS = [
+  {id: 'spd-slow', val: 0.14},
+  {id: 'spd-med',  val: 0.43},
+  {id: 'spd-fast', val: 0.71},
+  {id: 'spd-max',  val: 1.0 },
+];
+
+function setStrobeSpeed(v) {
+  send({type: 'set_fader', fader: 'strobe', value: v});
+  syncStrobeSpeed(v);
+}
+
+function syncStrobeSpeed(v) {
+  // Highlight the button whose value is closest to v
+  let bestId = null, bestDist = Infinity;
+  _STROBE_PRESETS.forEach(p => {
+    const d = Math.abs(p.val - v);
+    if (d < bestDist) { bestDist = d; bestId = p.id; }
+  });
+  _STROBE_PRESETS.forEach(p => {
+    const el = document.getElementById(p.id);
+    if (el) el.classList.toggle('active', p.id === bestId);
+  });
+}
+
+function toggleStrobeArm() {
+  send({type: 'arm_strobe'});
+}
+
 function toggleKill(target) {
   send({type: 'toggle_kill', target: target});
 }
@@ -677,12 +761,8 @@ function momentaryEnd(effect) {
 }
 
 function savePosition() {
-  const name = document.getElementById('pos-name').value.trim();
-  if (!name) return;
-  const fixture = document.getElementById('aim-fixture').value;
-  send({type: 'save_position', name: name, fixture: fixture, pan: _joyPan, tilt: _joyTilt});
   const fb = document.getElementById('save-feedback');
-  fb.textContent = `Saved "${name}"`;
+  fb.textContent = 'Save position not yet implemented';
   setTimeout(() => fb.textContent = '', 3000);
 }
 
@@ -797,7 +877,7 @@ function applyState(s) {
     _fadersSynced = true;
     syncFader('master',  s.master_dimmer);
     syncFader('uplight', s.uplight_dimmer);
-    syncFader('strobe',  s.strobe_master);
+    syncStrobeSpeed(s.strobe_master);
   }
 
   // Setup view live values
@@ -808,6 +888,10 @@ function applyState(s) {
   if (s.test_mode !== undefined) {
     _updateTestUI(!!s.test_mode, s.test_pattern || '');
   }
+
+  // ARM button sync
+  const armBtn = document.getElementById('btn-arm');
+  if (armBtn) armBtn.classList.toggle('armed', !!s.strobe_armed);
 
   // Kill switches
   _syncKill('strobe', !!s.kill_strobe);
@@ -913,8 +997,7 @@ function initJoystick() {
     _joyTilt = Math.max(0, Math.min(270, _joyTilt));
     document.getElementById('joy-pan').textContent  = _joyPan;
     document.getElementById('joy-tilt').textContent = _joyTilt;
-    send({type: 'aim_fixture', fixture: document.getElementById('aim-fixture').value,
-          pan: _joyPan, tilt: _joyTilt});
+    send({type: 'fixture_test_aim', pan: _joyPan, tilt: _joyTilt});
   }
 
   function end() {

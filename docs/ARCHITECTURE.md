@@ -31,10 +31,10 @@ INPUT
                 last-8-beats rolling average)
                          │
                    LaneSmoother
-               (EMA envelope followers:
-                Impact 10ms attack / 250ms decay
-                Room   600ms / 3000ms
-                + WAU white/amber/UV channels)
+               (EMA envelope followers, per-mode profiles:
+                Impact  5–80ms attack / 180–600ms decay
+                Room  400–1500ms attack / 2000–6000ms decay
+                + floor/beam/sparkle lanes)
                          │
               ┌──────────┴──────────┐
               │                     │
@@ -52,8 +52,8 @@ INPUT
                 1. blackout_active  — hard zero, all output
                 2. strobe_allowed   — gates auto strobe per mode
                 3. master_dimmer    — 0–1 overall scale
-                4. uplight_dimmer   — 0–1 uplight-only scale
-                5. scene overrides  — per-group brightness/color)
+                4. uplight_dimmer   — 0–1 scale applied to RockWedge + WashFX2 on both DMX and visualisation paths
+                5. scene overrides  — per-group color/position applied to visualisation only; DMX routing to individual fixture groups is a known TODO)
                          │
         ┌────────────────┼────────────────────────────┐
         │                │                            │
@@ -161,12 +161,13 @@ after all other strobe/color logic:
 ```
 auto strobe (StrobeEngine × strobe_allowed × strobe_master)
     ↓ override by strobe_burst (DJ manual, blackout-only gate)
-    ↓ override by strobe_hold  (DJ manual, blackout-only gate)
+    ↓ override by strobe_hold  (DJ manual, software oscillator 2–16 Hz,
+    │                           speed set by strobe master fader)
     ↓ zeroed if kill_strobe = True                     ← last word
     → _eff_strobe passed to render_to_universe(strobe=...)
 
-fixtures with set_derby_enabled() → called on toggle_kill("derby")
-fixtures with enable_laser()      → called on toggle_kill("laser")
+fixtures with set_derby_enabled() → enforced every frame (not just on toggle)
+fixtures with enable_laser()      → enforced every frame (not just on toggle)
 ```
 
 Blackout is separate and higher priority than kill switches — when
@@ -189,11 +190,62 @@ Recovery takes `BLACKOUT_RECOVERY_S = 1.5s` regardless of OS jitter.
 
 ---
 
+## DMX address organisation
+
+### Hardware day workflow
+
+```
+1. Physical fixture    2. Wireless DMX         3. rig_config.json
+   menu/dip-switch  →  (transparent relay)  →  dmx_address must
+   sets start addr     pairs to DMXking        match step 1 exactly
+```
+
+Wireless DMX (W-DMX, Lumen Radio, etc.) relays all 512 channels as-is.
+LightBrain never knows whether the cable is copper or radio.
+
+### Planned rig address map
+
+| Fixture | Type | Start | Channels | End |
+|---------|------|------:|:--------:|----:|
+| Wash FX2 Left | `wash_fx2` | 1 | 8 | 8 |
+| Wash FX2 Right | `wash_fx2` | 9 | 8 | 16 |
+| GigBAR Move+ILS | `gigbar_move_ils` | 17 | 29 | 45 |
+
+Personalities to set on hardware: Wash FX2 → **8Ch**, GigBAR → **29Ch**.
+
+### Startup collision check
+
+`check_dmx_address_map(fixtures)` in `fixtures/fixture.py` runs at
+startup before the first DMX frame. It validates:
+
+- No two fixtures share a channel (raises `ValueError` with a full
+  layout table naming both conflicting fixtures and the colliding channel)
+- No fixture address starts below 1 (DMX is 1-indexed)
+- No fixture's last channel exceeds 512
+
+If any check fails the engine exits with a clear error message before
+touching the hardware. This catches `rig_config.json` mistakes
+(typos, wrong personality, copy-paste address errors) before they
+send garbage data to a fixture.
+
+### Adding a new fixture type
+
+1. Subclass `FixtureBase`; implement `channel_count` (returns `NUM_CHANNELS`)
+   and `render_to_universe()`
+2. Add an entry to the fixture loader in `app/main.py`
+3. Add the fixture to the test in `tests/test_dmx_address_map.py`
+   (`TestFixtureChannelCounts`)
+
+---
+
 ## Fixture mapper interface
 
 Every fixture implements `FixtureBase` and provides:
 
 ```python
+@property
+def channel_count(self) -> int: ...   # number of consecutive DMX channels
+
 def render_to_universe(
     self,
     universe: DMXUniverse,
@@ -215,8 +267,8 @@ handled internally.
 
 Fixtures with moving heads additionally expose:
 - `set_spot_aim(pan_deg, tilt_dmx)` — repositions the moving head
-- `set_derby_enabled(enabled)` — kills/restores derby section
-- `enable_laser(enabled)` — kills/restores laser section
+- `set_derby_enabled(enabled)` — kills/restores derby section (enforced per-frame)
+- `enable_laser(enabled)` — kills/restores laser section (enforced per-frame)
 
 ---
 
@@ -276,9 +328,10 @@ Determinism requires:
 
 | Module | Fixture | Channels | Notes |
 |--------|---------|----------|-------|
+| `fixture.py` | Base class + collision checker | — | `FixtureBase`, `check_dmx_address_map()` |
 | `rockwedge.py` | RockWedge | 8 | Current hardware placeholder |
-| `chauvet_wash_fx2.py` | Chauvet Wash FX2 | 8 | 3/4/8/28Ch modes |
-| `chauvet_gigbar_move_ils.py` | Chauvet GigBAR Move+ILS | 29 | Par+Derby+Flash+Laser+Spot |
+| `chauvet_wash_fx2.py` | Chauvet Wash FX2 | 8 | 8Ch personality |
+| `chauvet_gigbar_move_ils.py` | Chauvet GigBAR Move+ILS | 29 | Par+Derby+Flash+Laser+Spot; 29Ch personality |
 | `djflx_beam.py` | DJFLX Beam | 10 | Pan/tilt moving beam |
 
 ### `dmx/`

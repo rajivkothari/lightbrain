@@ -58,7 +58,14 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+      transition: width 0.2s ease;
     }
+    /* Collapse left panel when 3D tab is active — only show tab buttons */
+    .main-layout.viz-mode .left-panel {
+      width: auto;
+      flex-shrink: 1;
+    }
+    .main-layout.viz-mode .tab-pane { display: none !important; }
 
     /* ---- Right panel: canvas, always visible ---- */
     .right-panel {
@@ -144,8 +151,31 @@
     .btn-release { border-color: var(--amber); color: var(--amber); }
     .btn-release:hover { background: #1a1400; border-color: var(--amber); color: var(--amber); }
 
-    /* ---- Strobe / Kill controls ---- */
-    .momentary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 5px; }
+    /* ---- Strobe speed + kill controls ---- */
+    .strobe-speed-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; }
+    .btn-speed-dash {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 2px; padding: 7px 4px;
+      border-color: #334; color: var(--dim);
+    }
+    .btn-speed-dash .spd-hz { font-size: 0.58rem; color: var(--dim); }
+    .btn-speed-dash.active  { border-color: #aaaaff; color: #ddddff; background: #181838; }
+    .btn-speed-dash.active .spd-hz { color: #8888cc; }
+    .momentary-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 5px; }
+    .btn-strobe-arm {
+      background: #001a2e; border-color: #004477; color: #66aaff;
+      font-weight: 700; letter-spacing: 0.08em;
+    }
+    .btn-strobe-arm:hover { background: #00253d; border-color: #0066aa; }
+    .btn-strobe-arm.armed {
+      background: #003366; border-color: #0099ff; color: #fff;
+      box-shadow: 0 0 10px rgba(0,150,255,0.5);
+      animation: arm-pulse 1s ease-in-out infinite;
+    }
+    @keyframes arm-pulse {
+      0%,100% { box-shadow: 0 0 8px rgba(0,150,255,0.4); }
+      50%      { box-shadow: 0 0 16px rgba(0,150,255,0.8); }
+    }
     .btn-strobe-hold {
       background: #2a2000; border-color: #665500; color: #ffcc44;
       font-weight: 700; letter-spacing: 0.08em; user-select: none;
@@ -162,6 +192,10 @@
     }
     .btn-kill-dash:hover { background: #1a0000; border-color: #884444; }
     .btn-kill-dash.active { background: #330000; border-color: var(--red); color: var(--red); }
+
+    /* ---- 3D tab HUD ---- */
+    #viz-hud { display: none; }
+    .main-layout.viz-mode #viz-hud { display: flex !important; }
 
     /* ---- Canvas blackout / flash state ---- */
     #rig-canvas.blacked-out {
@@ -240,6 +274,55 @@
     .form-actions { display: flex; gap: 8px; margin-top: 14px; }
     .editor-empty { color: var(--dim); font-size: 0.8rem; padding: 20px;
                     border: 1px dashed var(--border); border-radius: 4px; text-align: center; }
+
+    /* ---- Rig tab ---- */
+    .rig-section { margin-bottom: 14px; }
+    .rig-status-grid {
+      display: grid; grid-template-columns: auto 1fr; gap: 4px 12px;
+      font-size: 0.72rem;
+    }
+    .rig-key   { color: var(--dim); white-space: nowrap; }
+    .rig-val   { color: var(--text); font-weight: 600; }
+    .rig-val.ok  { color: var(--green); }
+    .rig-val.err { color: var(--red); }
+
+    .fixture-table { width: 100%; border-collapse: collapse; font-size: 0.68rem; }
+    .fixture-table th {
+      text-align: left; font-size: 0.6rem; text-transform: uppercase;
+      letter-spacing: 0.12em; color: var(--dim); border-bottom: 1px solid var(--border);
+      padding: 3px 6px 4px;
+    }
+    .fixture-table td { padding: 4px 6px; border-bottom: 1px solid #1a1a2e; }
+    .fixture-table tr:last-child td { border-bottom: none; }
+    .fx-swatch {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 2px; margin-right: 5px; vertical-align: middle;
+    }
+    .fx-activity {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--surface); border: 1px solid var(--border);
+      vertical-align: middle; transition: background 0.12s;
+    }
+    .fx-activity.live { background: var(--green); box-shadow: 0 0 4px var(--green); }
+
+    /* DMX channel grid */
+    .dmx-grid-wrap { position: relative; }
+    .dmx-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; font-size: 0.62rem; }
+    .dmx-legend-item { display: flex; align-items: center; gap: 4px; color: var(--dim); }
+    .dmx-legend-swatch {
+      width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0;
+    }
+    #dmx-grid-canvas {
+      width: 100%; display: block;
+      border: 1px solid var(--border); border-radius: 3px;
+      cursor: crosshair; image-rendering: pixelated;
+    }
+    .dmx-tooltip {
+      position: fixed; background: #1c1c34; border: 1px solid var(--border);
+      border-radius: 4px; padding: 4px 8px; font-size: 0.68rem;
+      color: var(--text); pointer-events: none; z-index: 100;
+      display: none; white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -259,6 +342,8 @@
     <div class="tabs">
       <button class="tab active" onclick="showTab('live')">Live</button>
       <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
+      <button class="tab" onclick="showTab('rig')" id="tab-btn-rig">Rig</button>
+      <button class="tab" onclick="showTab('3d')" id="tab-btn-3d">3D</button>
     </div>
 
     <!-- LIVE TAB -->
@@ -293,20 +378,25 @@
           </div>
         </div>
         <div style="margin-top:7px">
-          <div class="section-label" style="margin-bottom:4px">Strobe Master</div>
-          <div class="slider-row">
-            <input type="range" id="strobe-master" min="0" max="100" value="100"
-                   oninput="onStrobeMaster(this.value)">
-            <span class="slider-val" id="strobe-master-val">100%</span>
+          <div class="section-label" style="margin-bottom:4px">Strobe Speed</div>
+          <div class="strobe-speed-row" id="dash-speed-row">
+            <button class="btn btn-speed-dash" id="dash-spd-slow" onclick="setStrobeSpeed(0.14)">SLOW<span class="spd-hz">4 Hz</span></button>
+            <button class="btn btn-speed-dash" id="dash-spd-med"  onclick="setStrobeSpeed(0.43)">MED<span class="spd-hz">8 Hz</span></button>
+            <button class="btn btn-speed-dash" id="dash-spd-fast" onclick="setStrobeSpeed(0.71)">FAST<span class="spd-hz">12 Hz</span></button>
+            <button class="btn btn-speed-dash" id="dash-spd-max"  onclick="setStrobeSpeed(1.0)">MAX<span class="spd-hz">16 Hz</span></button>
           </div>
-          <div class="momentary-row">
+          <div class="momentary-row" style="margin-top:5px">
+            <button class="btn btn-full btn-strobe-arm" id="strobe-arm-btn"
+                    onclick="toggleStrobeArm()">
+              &#x25CE; ARM
+            </button>
             <button class="btn btn-full btn-strobe-hold" id="strobe-hold-btn"
                     onmousedown="strobeHoldStart()" onmouseup="strobeHoldEnd()"
                     onmouseleave="strobeHoldEnd()">
-              &#x26A1; STROBE HOLD
+              &#x26A1; HOLD
             </button>
             <button class="btn btn-full" onclick="cmd({type:'momentary',effect:'flash',action:'start'})">
-              FLASH
+              BUMP
             </button>
           </div>
           <div class="section-label" style="margin-top:8px; margin-bottom:4px">Kill Switches</div>
@@ -335,6 +425,51 @@
       </div>
     </div>
 
+    <!-- RIG TAB -->
+    <div id="tab-rig" class="tab-pane" style="display:none">
+
+      <div class="rig-section">
+        <div class="section-label">System</div>
+        <div class="rig-status-grid">
+          <span class="rig-key">DMX Output</span>  <span class="rig-val" id="rig-dmx-output">--</span>
+          <span class="rig-key">Engine FPS</span>  <span class="rig-val" id="rig-fps">--</span>
+          <span class="rig-key">Address Check</span> <span class="rig-val" id="rig-check">--</span>
+        </div>
+      </div>
+
+      <div class="rig-section">
+        <div class="section-label">Fixture Address Map</div>
+        <table class="fixture-table" id="fixture-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Fixture</th>
+              <th>Type</th>
+              <th>Start</th>
+              <th>Ch</th>
+              <th>End</th>
+              <th>Live</th>
+            </tr>
+          </thead>
+          <tbody id="fixture-table-body">
+            <tr><td colspan="7" style="color:var(--dim);text-align:center;padding:12px">
+              Loading…
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rig-section">
+        <div class="section-label">DMX Universe  <span style="color:var(--dim);font-weight:400;font-size:0.6rem;margin-left:6px">512 channels · hover for value</span></div>
+        <div class="dmx-legend" id="dmx-legend"></div>
+        <div class="dmx-grid-wrap">
+          <canvas id="dmx-grid-canvas" height="80"></canvas>
+        </div>
+        <div class="dmx-tooltip" id="dmx-tooltip"></div>
+      </div>
+
+    </div>
+
     <!-- SCENE EDITOR TAB -->
     <div id="tab-scenes" class="tab-pane" style="display:none">
       <div class="editor-layout">
@@ -350,8 +485,16 @@
   </div>
 
   <!-- ===== RIGHT PANEL: canvas always visible ===== -->
-  <div class="right-panel">
+  <div class="right-panel" style="position:relative">
     <canvas id="rig-canvas"></canvas>
+    <!-- 3D tab HUD overlay — only visible in viz-mode -->
+    <div id="viz-hud" style="display:none; position:absolute; bottom:12px; left:12px; right:12px;
+         background:rgba(8,8,16,0.7); border:1px solid rgba(80,80,120,0.4); border-radius:6px;
+         padding:8px 14px; display:flex; gap:24px; align-items:center; pointer-events:none;">
+      <span id="viz-mode-name"  style="font-size:1.1rem; font-weight:700; letter-spacing:0.1em; color:#aaaaff"></span>
+      <span id="viz-scene-name" style="font-size:0.85rem; color:#888899"></span>
+      <span id="viz-bpm"        style="font-size:1.1rem; font-weight:700; color:#66ff88; margin-left:auto"></span>
+    </div>
   </div>
 
 </div>
@@ -706,28 +849,47 @@ function _drawLegend(ctx, s, W) {
 // LIVE TAB — WebSocket + state
 // ============================================================
 const DEFAULT_MODES = [
-  {key:'open_dance',   display_name:'Open Dance'},
-  {key:'dinner',       display_name:'Dinner'},
+  {key:'open_dance',   display_name:'Dance Floor'},
+  {key:'dinner',       display_name:'Ambient'},
   {key:'banger',       display_name:'Banger'},
   {key:'indian_latin', display_name:'Indian / Latin'},
-  {key:'slow_dance',   display_name:'Slow Dance'},
+  {key:'slow_dance',   display_name:'Romantic'},
 ];
 
 let currentMode         = null;
 let currentScene        = null;
 let modesReady          = false;
 let scenesReady         = false;
-let _strobeMasterSynced = false;
-
 function cmd(payload) {
   fetch('/api/command', {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
   }).catch(()=>{});
 }
 
-function onStrobeMaster(v) {
-  document.getElementById('strobe-master-val').textContent = v + '%';
-  cmd({type:'strobe_master', value: parseFloat(v) / 100});
+const _DASH_STROBE_PRESETS = [
+  {id: 'dash-spd-slow', val: 0.14},
+  {id: 'dash-spd-med',  val: 0.43},
+  {id: 'dash-spd-fast', val: 0.71},
+  {id: 'dash-spd-max',  val: 1.0 },
+];
+function setStrobeSpeed(v) {
+  cmd({type:'set_fader', fader:'strobe', value: v});
+  syncStrobeSpeed(v);
+}
+function syncStrobeSpeed(v) {
+  let bestId = null, bestDist = Infinity;
+  _DASH_STROBE_PRESETS.forEach(p => {
+    const d = Math.abs(p.val - v);
+    if (d < bestDist) { bestDist = d; bestId = p.id; }
+  });
+  _DASH_STROBE_PRESETS.forEach(p => {
+    const el = document.getElementById(p.id);
+    if (el) el.classList.toggle('active', p.id === bestId);
+  });
+}
+
+function toggleStrobeArm() {
+  cmd({type: 'arm_strobe'});
 }
 
 let _strobeHeld = false;
@@ -802,16 +964,16 @@ function applyState(s) {
   const strobeBar = document.getElementById('bar-strobe');
   strobeBar.style.width = clamp(s.strobe_rate);
   strobeBar.classList.toggle('firing', (s.strobe_rate || 0) > 0.01);
-  // Sync strobe master slider once on first message
-  if (!_strobeMasterSynced && s.strobe_master !== undefined) {
-    _strobeMasterSynced = true;
-    const sm = document.getElementById('strobe-master');
-    if (sm) {
-      const pct = Math.round((s.strobe_master || 1) * 100);
-      sm.value = pct;
-      document.getElementById('strobe-master-val').textContent = pct + '%';
-    }
-  }
+  // Sync strobe speed buttons
+  if (s.strobe_master !== undefined) syncStrobeSpeed(s.strobe_master);
+
+  // 3D HUD
+  const vizMode = document.getElementById('viz-mode-name');
+  if (vizMode) vizMode.textContent = (s.mode_display || s.mode || '').toUpperCase();
+  const vizScene = document.getElementById('viz-scene-name');
+  if (vizScene) vizScene.textContent = s.scene_name ? `SCENE: ${s.scene_name.toUpperCase()}` : '';
+  const vizBpm = document.getElementById('viz-bpm');
+  if (vizBpm) vizBpm.textContent = s.bpm > 1 ? `${Math.round(s.bpm)} BPM` : '';
 
   // Grids
   buildModes(s.modes); buildScenes(s.scenes);
@@ -836,6 +998,10 @@ function applyState(s) {
   bo.classList.toggle('active', _blackoutActive);
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
   document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
+
+  // ARM button sync
+  const armBtn = document.getElementById('strobe-arm-btn');
+  if (armBtn) armBtn.classList.toggle('armed', !!s.strobe_armed);
 
   // Kill switches — red = element is silenced/OFF
   const killLabels = {strobe:'⚡ STROBE', derby:'⊕ DERBY', laser:'▶ LASER'};
@@ -864,6 +1030,28 @@ function applyState(s) {
     _lastFixtures = s.fixtures;
     _ambientWarm  = s.fixtures.ambient_warm || 0;
     _drawRig(_lastFixtures, _blackoutActive);
+  }
+
+  // Rig tab — system status (always update, cheap)
+  if (s.dmx_output !== undefined) {
+    const el = document.getElementById('rig-dmx-output');
+    if (el) { el.textContent = s.dmx_output || 'MOCK'; el.className = 'rig-val' + (s.dmx_output && s.dmx_output !== 'MOCK' ? ' ok' : ''); }
+  }
+  if (s.fps !== undefined) {
+    const el = document.getElementById('rig-fps');
+    if (el) el.textContent = s.fps + ' fps';
+  }
+  // Build fixture table once on first non-empty rig_layout
+  if (s.rig_layout && s.rig_layout.length && !_rigBuilt) {
+    _buildRigTable(s.rig_layout);
+    _channelMap = _buildChannelMap();
+  }
+  // Live DMX channel grid — only redraw when Rig tab is visible
+  if (s.dmx_channels && s.dmx_channels.length === 512) {
+    _lastDmxChannels = s.dmx_channels;
+    if (document.getElementById('tab-rig').style.display !== 'none') {
+      _rigDraw(s.dmx_channels);
+    }
   }
 }
 
@@ -1076,10 +1264,183 @@ async function editorSave() {
 function showTab(name) {
   document.getElementById('tab-live').style.display   = name==='live'   ? '' : 'none';
   document.getElementById('tab-scenes').style.display = name==='scenes' ? '' : 'none';
-  document.querySelectorAll('.tab').forEach((t,i) =>
-    t.classList.toggle('active', [,'live','scenes'][i+1]===name || t.textContent.toLowerCase().includes(name)));
+  document.getElementById('tab-rig').style.display    = name==='rig'    ? '' : 'none';
+  document.querySelectorAll('.tab').forEach(t => {
+    const key = t.getAttribute('onclick').replace("showTab('","").replace("')","");
+    t.classList.toggle('active', key === name);
+  });
+  // 3D tab collapses left panel and shows HUD overlay
+  document.querySelector('.main-layout').classList.toggle('viz-mode', name === '3d');
+  // Trigger canvas resize after layout shift
+  if (name === '3d') setTimeout(() => { const c = document.getElementById('rig-canvas'); if(c) { c.dispatchEvent(new Event('resize')); _initCanvas(); } }, 50);
   if (name === 'scenes') _edLoad();
+  if (name === 'rig')    _rigDraw(_lastDmxChannels);
 }
+
+// ============================================================
+// RIG TAB
+// ============================================================
+
+// Per-fixture colour palette (consistent across table + grid)
+const _RIG_COLORS = [
+  '#5588ff', '#44ddaa', '#ee8833', '#cc55ee',
+  '#ff5566', '#44bbff', '#aadd44', '#ffaa33',
+];
+let _rigLayout    = [];    // [{name, type, address, channels, end}]
+let _lastDmxChannels = new Array(512).fill(0);
+let _rigBuilt     = false;
+
+// Called once when rig_layout arrives (static after startup)
+function _buildRigTable(layout) {
+  if (_rigBuilt && layout.length === _rigLayout.length) return;
+  _rigLayout = layout;
+  _rigBuilt  = true;
+
+  // Fixture table
+  const tbody = document.getElementById('fixture-table-body');
+  if (!layout.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--dim);text-align:center;padding:12px">No fixtures configured</td></tr>';
+  } else {
+    tbody.innerHTML = layout.map((fx, i) => {
+      const color = _RIG_COLORS[i % _RIG_COLORS.length];
+      return `<tr>
+        <td><span class="fx-swatch" style="background:${color}"></span></td>
+        <td>${fx.name}</td>
+        <td style="color:var(--dim)">${fx.type}</td>
+        <td>${fx.address}</td>
+        <td style="color:var(--dim)">${fx.channels}</td>
+        <td>${fx.end}</td>
+        <td><span class="fx-activity" id="fx-activity-${i}"></span></td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Legend
+  const legend = document.getElementById('dmx-legend');
+  legend.innerHTML = layout.map((fx, i) => {
+    const color = _RIG_COLORS[i % _RIG_COLORS.length];
+    return `<span class="dmx-legend-item">
+      <span class="dmx-legend-swatch" style="background:${color}"></span>${fx.name}
+    </span>`;
+  }).join('') + `<span class="dmx-legend-item">
+    <span class="dmx-legend-swatch" style="background:#252540"></span>Unassigned
+  </span>`;
+
+  // Address check
+  const checkEl = document.getElementById('rig-check');
+  checkEl.textContent = layout.length ? '✓ PASS' : '— no fixtures';
+  checkEl.className   = 'rig-val ' + (layout.length ? 'ok' : '');
+
+  _rigDraw(_lastDmxChannels);
+}
+
+// Build a channel→fixture-index lookup once when layout changes
+function _buildChannelMap() {
+  const map = new Int8Array(512).fill(-1);  // -1 = unassigned
+  _rigLayout.forEach((fx, i) => {
+    for (let c = fx.address - 1; c < fx.end; c++) map[c] = i;
+  });
+  return map;
+}
+
+let _channelMap = null;
+
+function _rigDraw(channels) {
+  _lastDmxChannels = channels;
+  const canvas = document.getElementById('dmx-grid-canvas');
+  if (!canvas) return;
+  if (!_channelMap || _channelMap.length !== 512) _channelMap = _buildChannelMap();
+
+  const COLS = 32;
+  const ROWS = 16;   // 32×16 = 512
+  const CW   = Math.max(1, Math.floor(canvas.clientWidth / COLS));
+  const CH   = 16;
+  canvas.width  = COLS * CW;
+  canvas.height = ROWS * CH;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Parse _RIG_COLORS into r/g/b for blending
+  function hexToRgb(h) {
+    const n = parseInt(h.slice(1), 16);
+    return [(n>>16)&0xff, (n>>8)&0xff, n&0xff];
+  }
+  const rgbs = _RIG_COLORS.map(hexToRgb);
+
+  for (let i = 0; i < 512; i++) {
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
+    const x   = col * CW;
+    const y   = row * CH;
+    const val = channels[i] || 0;
+    const fi  = _channelMap[i];
+
+    let r, g, b;
+    if (fi >= 0) {
+      const base = rgbs[fi % rgbs.length];
+      const t    = val / 255;
+      // Active: full fixture colour; inactive: very dim tinted
+      r = Math.round(base[0] * t + 0x18 * (1 - t));
+      g = Math.round(base[1] * t + 0x18 * (1 - t));
+      b = Math.round(base[2] * t + 0x28 * (1 - t));
+    } else {
+      // Unassigned channel
+      const t = val / 255;
+      r = g = Math.round(0x30 * t + 0x14 * (1 - t));
+      b = Math.round(0x44 * t + 0x20 * (1 - t));
+    }
+
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(x, y, CW - 1, CH - 1);
+  }
+
+  // Update per-fixture activity dots
+  _rigLayout.forEach((fx, i) => {
+    const dot = document.getElementById('fx-activity-' + i);
+    if (!dot) return;
+    let anyActive = false;
+    for (let c = fx.address - 1; c < fx.end; c++) {
+      if ((channels[c] || 0) > 0) { anyActive = true; break; }
+    }
+    dot.classList.toggle('live', anyActive);
+  });
+}
+
+// Tooltip on hover
+(function() {
+  function _onMove(e) {
+    const canvas = document.getElementById('dmx-grid-canvas');
+    const tip    = document.getElementById('dmx-tooltip');
+    if (!canvas || !tip) return;
+    const rect = canvas.getBoundingClientRect();
+    const px   = e.clientX - rect.left;
+    const py   = e.clientY - rect.top;
+    const COLS = 32;
+    const CW   = rect.width / COLS;
+    const CH   = rect.height / 16;
+    const col  = Math.floor(px / CW);
+    const row  = Math.floor(py / CH);
+    const idx  = row * COLS + col;
+    if (idx < 0 || idx >= 512) { tip.style.display = 'none'; return; }
+    const ch  = idx + 1;
+    const val = _lastDmxChannels[idx] || 0;
+    const fi  = _channelMap ? _channelMap[idx] : -1;
+    const fxName = fi >= 0 ? _rigLayout[fi].name : 'Unassigned';
+    tip.textContent  = `Ch ${ch}  ·  ${val}  ·  ${fxName}`;
+    tip.style.display = 'block';
+    tip.style.left    = (e.clientX + 12) + 'px';
+    tip.style.top     = (e.clientY - 24) + 'px';
+  }
+  function _onLeave() {
+    const tip = document.getElementById('dmx-tooltip');
+    if (tip) tip.style.display = 'none';
+  }
+  window.addEventListener('DOMContentLoaded', () => {
+    const c = document.getElementById('dmx-grid-canvas');
+    if (c) { c.addEventListener('mousemove', _onMove); c.addEventListener('mouseleave', _onLeave); }
+  });
+})();
 
 // ============================================================
 // INIT

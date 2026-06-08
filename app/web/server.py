@@ -100,6 +100,25 @@ def set_catalog(
     _engine_state["scenes"] = scenes
 
 
+def set_rig_layout(fixtures: List[Any]) -> None:
+    """
+    Publish the static fixture address map (call once after fixture load).
+
+    Each entry: {name, type, address, channels, end}
+    Used by the dashboard Rig tab to draw the fixture table and channel grid.
+    """
+    _engine_state["rig_layout"] = [
+        {
+            "name":     fx.name,
+            "type":     type(fx).__name__,
+            "address":  fx.dmx_address,
+            "channels": fx.channel_count,
+            "end":      fx.dmx_address + fx.channel_count - 1,
+        }
+        for fx in fixtures
+    ]
+
+
 def set_paths(
     scenes_dir:     str,
     positions_file: str,
@@ -253,8 +272,12 @@ def _build_app() -> "FastAPI":
     async def api_state() -> JSONResponse:
         return JSONResponse(dict(_engine_state))
 
+    _MAX_QUEUE = 64
+
     @fastapi_app.post("/api/command")
     async def api_command(request: Request) -> dict:
+        if _command_queue.qsize() >= _MAX_QUEUE:
+            return JSONResponse({"error": "queue full"}, status_code=429)
         cmd = await request.json()
         _command_queue.put_nowait(cmd)
         return {"ok": True}
@@ -352,8 +375,13 @@ def _build_app() -> "FastAPI":
 _server_thread: Optional[threading.Thread] = None
 
 
-def start(host: str = "0.0.0.0", port: int = 8765) -> None:
-    """Start the web server in a background daemon thread."""
+def start(host: str = "127.0.0.1", port: int = 8765) -> None:
+    """Start the web server in a background daemon thread.
+
+    Defaults to localhost-only (127.0.0.1) so the dashboard is not reachable
+    from other devices on the same network.  Pass host="0.0.0.0" explicitly
+    (or via --web-host CLI flag) to expose it on the LAN.
+    """
     if not _FASTAPI_AVAILABLE:
         print("[Web] fastapi / uvicorn not installed — dashboard disabled.")
         print("[Web] Install with:  pip install fastapi 'uvicorn[standard]'")

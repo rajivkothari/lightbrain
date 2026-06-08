@@ -36,7 +36,7 @@ Lighting reacts to live input level, DJ cuts, loops, scratches, blend points, an
 current palette/mode state. This is intentional — it keeps lighting organic and
 responsive to the actual performance.
 
-### 2. Deterministic Preview Mode (Sprint 3 target)
+### 2. Deterministic Preview Mode
 
 The engine runs an offline pass over a complete audio file with a fixed settings
 snapshot and fixed random seed.
@@ -54,7 +54,7 @@ Audio file (WAV/MP3/FLAC)
 **identical preview every run.** This is critical for user trust. The DJ must be
 able to say "this is exactly what my lighting will look like for this track."
 
-### 3. Saved Program Mode (Sprint 4 target)
+### 3. Saved Program Mode
 
 After previewing a song, the DJ saves the generated lighting pass as a
 **Lighting Program**. Later, when that song plays live, LightBrain can:
@@ -204,7 +204,7 @@ class LightingProgram:
 
 ### Fingerprinting strategy
 
-For Sprint 4, use SHA-256 hash of the first 30 seconds of PCM audio (normalized).
+Use SHA-256 hash of the first 30 seconds of PCM audio (normalized).
 This is cheap, collision-resistant for practical purposes, and doesn't require
 heavy audio fingerprinting libraries.
 
@@ -300,28 +300,22 @@ Seed:     [42         ] [Re-run]
 
 ---
 
-## Implementation Plan
+## Implementation Status
 
-### Sprint 3A: Analysis pipeline
+### Analysis pipeline ✅
 
-1. `audio/file_loader.py` — load WAV/FLAC/MP3 to float32 array
-2. `audio/offline_analyzer.py` — batch FFT, compute `AnalysisTimeline`
-3. Unit tests: same file + same settings = same `AnalysisTimeline`
+`audio/file_loader.py`, `audio/offline_analyzer.py` — batch FFT, `AnalysisTimeline`.
 
-### Sprint 3B: Deterministic engine
+### Deterministic engine ✅
 
-1. Clock injection into `EnvelopeFollower`, `PaletteBlender`, `SceneLayout`
-2. `engine/deterministic.py` — drive engine from timeline with fixed seed
-3. Unit tests: same timeline + same seed = same `FixtureStateTimeline`
+Clock injection in `EnvelopeFollower`, `PaletteBlender`, `SceneLayout`.
+`engine/deterministic.py` drives the engine from a timeline with a fixed seed.
 
-### Sprint 3C: Visualizer playback
+### Visualizer playback ✅
 
-1. `app/render/playback.py` — `FixtureStateTimeline` player
-2. `app/render/waveform.py` — waveform + energy lane strip
-3. `scripts/test_song_preview.py` — CLI runner
-4. Integration tests: playback produces consistent output
+`app/render/playback.py`, `app/render/waveform.py`, `scripts/test_song_preview.py`.
 
-### Sprint 4: Saved Program Mode
+### Saved Program Mode — TODO
 
 1. `data/lighting_program.py` — `LightingProgram` model
 2. `data/program_store.py` — JSON save/load
@@ -357,7 +351,7 @@ Seed:     [42         ] [Re-run]
 
 ## What NOT to Build
 
-To keep the MVP focused, the following are explicitly out of scope for Sprint 3:
+The following are out of scope for the preview mode:
 
 - Acoustic fingerprinting (save using SHA-256 hash, not AcoustID)
 - DJ software integration (Serato/Traktor metadata sync)

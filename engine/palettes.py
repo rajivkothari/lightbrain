@@ -180,7 +180,8 @@ class PaletteBlender:
 
     def reset_time(self, now: float) -> None:
         """Reset internal clock to now for deterministic replay (Sprint 3)."""
-        self._last_time = now
+        self._last_time      = now
+        self._last_beat_swap = now - _BEAT_COOLDOWN_S  # allow first beat immediately
 
     def update(self, energy: float = 0.5, beat_trigger: bool = False,
                now: Optional[float] = None) -> HSVColor:

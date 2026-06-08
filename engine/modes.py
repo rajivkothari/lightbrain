@@ -44,7 +44,7 @@ class Mode:
 MODES: dict = {
     "dinner": Mode(
         key="dinner",
-        display_name="Dinner",
+        display_name="Ambient",
         palette_key="dinner",
         allow_strobe=False,
         intensity_scale=0.7,
@@ -79,7 +79,7 @@ MODES: dict = {
     ),
     "open_dance": Mode(
         key="open_dance",
-        display_name="Open Dance",
+        display_name="Dance Floor",
         palette_key="open_dance",
         allow_strobe=False,
         intensity_scale=1.0,
@@ -129,7 +129,7 @@ MODES: dict = {
     ),
     "slow_dance": Mode(
         key="slow_dance",
-        display_name="Slow Dance",
+        display_name="Romantic",
         palette_key="slow_dance",
         allow_strobe=False,
         intensity_scale=0.75,

@@ -52,6 +52,10 @@ class RockWedge(FixtureBase):
     render_to_universe() maps the lighting engine output onto DMX channels.
     """
 
+    @property
+    def channel_count(self) -> int:
+        return NUM_CHANNELS
+
     def render_to_universe(
         self,
         universe: DMXUniverse,
