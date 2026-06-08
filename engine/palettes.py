@@ -259,6 +259,21 @@ class PaletteBlender:
             return 0.0
         return max(0.0, self._hold_ms - self._hold_elapsed_ms)
 
+    def beat_cooldown_fraction(self, now: Optional[float] = None) -> float:
+        """
+        Fraction of the beat-swap lockout still remaining, 0.0–1.0.
+
+        1.0 immediately after a beat-triggered palette swap, decaying linearly
+        to 0.0 once the full _BEAT_COOLDOWN_S window has elapsed. Lets the UI
+        show the DJ exactly when the next beat swap is allowed.
+        """
+        if now is None:
+            now = time.monotonic()
+        elapsed = now - self._last_beat_swap
+        if elapsed >= _BEAT_COOLDOWN_S:
+            return 0.0
+        return max(0.0, (_BEAT_COOLDOWN_S - elapsed) / _BEAT_COOLDOWN_S)
+
     @property
     def transition_progress(self) -> float:
         """0.0–1.0 fraction through the current transition; 0.0 if holding."""

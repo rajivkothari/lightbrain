@@ -338,6 +338,47 @@
     }
     .btn-save:active { filter: brightness(0.85); }
     .save-feedback { font-size: 0.72rem; color: var(--green); margin-top: 6px; min-height: 1.1em; }
+
+    /* --- Drop-sync arming ("third hand") + cooldown wipe --- */
+    .mode-btn { position: relative; overflow: hidden; }
+    .mode-btn .mode-label { position: relative; z-index: 2; }
+    /* clockwise cooldown wipe: a dark wedge driven by --cd (0..1) */
+    .mode-btn .cd-wipe {
+      position: absolute; inset: 0; z-index: 1; pointer-events: none;
+      background: conic-gradient(rgba(0,0,0,0.55) calc(var(--cd, 0) * 360deg), transparent 0);
+    }
+    .mode-btn.armed {
+      border-color: #ff5a5a; color: #ffd0d0;
+      animation: arm-pulse 0.7s ease-out infinite;
+    }
+    @keyframes arm-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(255,80,80,0.75); }
+      70%  { box-shadow: 0 0 0 7px rgba(255,80,80,0); }
+      100% { box-shadow: 0 0 0 0 rgba(255,80,80,0); }
+    }
+
+    /* --- Absolute master-dimmer tap targets --- */
+    .dim-taps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .dim-tap {
+      font-family: inherit; font-size: 1.35rem; font-weight: 800; letter-spacing: 0.02em;
+      padding: 18px 0; border-radius: 10px; cursor: pointer;
+      background: #15152e; color: #fff; border: 2px solid #3a3a6a;
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    }
+    .dim-tap:active { transform: scale(0.96); filter: brightness(1.25); }
+    .dim-tap.full  { background: #1c1c42; border-color: var(--accent); color: #cdd0ff; }
+
+    /* --- Momentary White Hold --- */
+    .btn-whitehold {
+      width: 100%; margin-top: 8px; padding: 18px 0;
+      font-size: 1.05rem; font-weight: 800; letter-spacing: 0.06em;
+      background: #2a2a36; color: #f4f4ff; border: 2px solid #cfd0e6; border-radius: 10px;
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    }
+    .btn-whitehold:active, .btn-whitehold.held {
+      background: #ffffff; color: #101018; border-color: #ffffff;
+      box-shadow: 0 0 24px rgba(255,255,255,0.7);
+    }
   </style>
 </head>
 <body>
@@ -376,12 +417,21 @@
   <div class="sec-label">Scene Presets</div>
   <div class="btn-grid cols-2" id="scene-grid"></div>
 
+  <div class="sec-label">Master Dimmer</div>
+  <div class="dim-taps">
+    <button class="dim-tap"      ontouchstart="masterTap(0);event.preventDefault()"   onmousedown="masterTap(0)">0%</button>
+    <button class="dim-tap"      ontouchstart="masterTap(50);event.preventDefault()"  onmousedown="masterTap(50)">50%</button>
+    <button class="dim-tap full" ontouchstart="masterTap(100);event.preventDefault()" onmousedown="masterTap(100)">100%</button>
+  </div>
+
   <div class="sec-label">Faders</div>
   <div class="fader-group">
     <div class="fader-row">
       <span class="fader-label">Master</span>
       <input type="range" min="0" max="100" value="100" id="fader-master"
-             oninput="onFader('master',this.value)">
+             oninput="onFader('master',this.value)"
+             ontouchstart="_masterDragging=true" ontouchend="_masterDragging=false"
+             onmousedown="_masterDragging=true" onmouseup="_masterDragging=false">
       <span class="fader-val" id="fader-master-val">100%</span>
     </div>
     <div class="fader-row">
@@ -425,6 +475,12 @@
       STROBE
     </button>
   </div>
+  <button class="btn-moment btn-whitehold" id="btn-whitehold"
+          ontouchstart="whiteHold(true);event.preventDefault()"
+          ontouchend="whiteHold(false)" ontouchcancel="whiteHold(false)"
+          onmousedown="whiteHold(true)" onmouseup="whiteHold(false)" onmouseleave="whiteHold(false)">
+    WHITE HOLD
+  </button>
 
 </div>
 
@@ -540,6 +596,9 @@ let _scenesBuilt = false;
 let _fadersSynced = false;
 let _activeView = 'perf'; // 'perf' | 'test' | 'setup'
 let _testPattern = null;  // active test pattern, null if engine is live
+let _armedMode = null;    // mode key currently armed for the drop (from backend)
+let _masterDragging = false; // true while the user is dragging the master fader
+let _tap = {};            // per-mode-button tap state for single/double detection
 
 // Joystick
 let _joyPan = 270;
@@ -595,6 +654,36 @@ function sendMode(key) {
   send({type: 'set_mode', value: key});
 }
 
+// Single tap = switch now. Double tap = arm for the next drop ("third hand").
+// We need a short disambiguation window, so mode switches accept ~260ms latency.
+function modeTap(key) {
+  const t = _tap[key] || {count: 0, timer: null};
+  t.count++;
+  if (t.timer) clearTimeout(t.timer);
+  t.timer = setTimeout(() => {
+    if (t.count >= 2) armMode(key); else sendMode(key);
+    t.count = 0; t.timer = null;
+  }, 260);
+  _tap[key] = t;
+}
+
+function armMode(key) {
+  send({type: 'arm_mode', value: key});
+}
+
+// Absolute master-dimmer tap target. Do NOT move the slider here; wait for the
+// backend echo so the UI only ever shows confirmed state.
+function masterTap(pct) {
+  send({type: 'set_fader', fader: 'master', value: pct / 100});
+}
+
+// Momentary white hold: press to force full white, release to hand control back.
+function whiteHold(on) {
+  send({type: 'white_hold', state: !!on});
+  const b = document.getElementById('btn-whitehold');
+  if (b) b.classList.toggle('held', !!on);
+}
+
 function sendScene(id) {
   send({type: 'activate_scene', value: id});
 }
@@ -647,8 +736,12 @@ function buildModes(modes) {
   list.forEach(m => {
     const b = document.createElement('button');
     b.className = 'btn mode-btn'; b.dataset.key = m.key;
-    b.textContent = m.display_name;
-    b.onclick = () => sendMode(m.key);
+    // label + cooldown wipe overlay (conic gradient driven by --cd)
+    b.innerHTML = `<span class="cd-wipe"></span><span class="mode-label">${m.display_name}</span>`;
+    // touchstart/touchend for zero-latency triggers; preventDefault suppresses
+    // the synthetic mouse/click so we don't double-fire on touch devices.
+    b.addEventListener('touchstart', e => { e.preventDefault(); modeTap(m.key); }, {passive: false});
+    b.addEventListener('mousedown', () => modeTap(m.key)); // desktop fallback
     grid.appendChild(b);
   });
   _modesBuilt = true;
@@ -706,6 +799,21 @@ function applyState(s) {
       b.classList.toggle('active', b.dataset.key === _currentMode));
   }
 
+  // Armed mode pulse ("third hand"). Backend clears armed_mode when the drop
+  // fires, so the pulse stops on its own.
+  const armed = s.armed_mode || null;
+  if (armed !== _armedMode) {
+    _armedMode = armed;
+    document.querySelectorAll('.mode-btn').forEach(b =>
+      b.classList.toggle('armed', b.dataset.key === _armedMode));
+  }
+
+  // Cooldown wipe: only the active mode button shows the palette-swap lockout.
+  const cd = Math.max(0, Math.min(1, s.cooldown_pct || 0));
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.style.setProperty('--cd', (b.dataset.key === _currentMode) ? cd : 0);
+  });
+
   // Active scene
   if (s.scene !== _currentScene) {
     _currentScene = s.scene;
@@ -726,6 +834,11 @@ function applyState(s) {
     syncFader('uplight', s.uplight_dimmer);
     syncFader('strobe',  s.strobe_master);
   }
+
+  // Master fader follows confirmed backend state unless the user is dragging it.
+  // This lets the absolute tap targets (0/50/100) move the slider only after the
+  // backend confirms the new value.
+  if (!_masterDragging) syncFader('master', s.master_dimmer);
 
   // Setup view live values
   document.getElementById('s-dmx').textContent = s.dmx_output || 'MOCK';

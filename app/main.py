@@ -83,7 +83,14 @@ PALETTES_DIR    = os.path.join(ROOT, "config", "palettes")
 SCENES_DIR      = os.path.join(ROOT, "config", "scenes")
 POSITIONS_FILE  = os.path.join(ROOT, "fixtures", "positions.json")
 STATES_FILE     = os.path.join(ROOT, "fixtures", "states.json")
-BLACKOUT_FADE_S = 0.8      # seconds to fade out when blackout is activated
+BLACKOUT_FADE_S    = 0.8   # seconds to fade out when blackout is activated
+BLACKOUT_RECOVER_S = 1.5   # seconds to smoothly ramp back up when blackout clears
+
+# Drop-sync arming ("third hand"): an armed mode fires when the audio energy
+# spikes past its recent baseline (a "drop"), then auto-disarms.
+DROP_ENERGY_RATIO = 1.8    # overall_energy must exceed this * the moving average
+DROP_ENERGY_FLOOR = 0.30   # ...and clear this absolute floor (ignore quiet noise)
+DROP_AVG_ALPHA    = 0.04   # EMA weight for the slow energy baseline
 
 # Fixed render params for each fixture test pattern (sent as-is to render_to_universe)
 _TEST_PATTERNS: dict = {
@@ -431,6 +438,57 @@ def main():
     _kill_strobe       = False   # kill switch: silence all strobe output
     _kill_derby        = False   # kill switch: stop derby rotation/color
     _kill_laser        = False   # kill switch: force laser off
+    _armed_mode        = None    # mode_key queued to fire on the next audio drop
+    _energy_avg        = 0.0     # EMA baseline of overall_energy for drop detection
+    _white_hold        = False   # momentary white-hold override (iPad press-and-hold)
+    _blackout_recovering = False # True while ramping brightness back after blackout
+    _recover_start     = 0.0     # monotonic time when blackout recovery began
+
+    # ------------------------------------------------------------------
+    # Mode + blackout helpers (used by the new drop-sync / recovery paths).
+    # The existing inline input handlers are left untouched.
+    # ------------------------------------------------------------------
+    def _apply_mode(new_key: str) -> None:
+        """Switch the engine to new_key (same steps as the inline handlers)."""
+        nonlocal current_mode, current_palette, mode_key, _wau_snapshot
+        new_mode    = get_mode(new_key)
+        new_palette = all_palettes.get(new_mode.palette_key, current_palette)
+        _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                         last_lanes.get("wau_amber", 0.0),
+                         last_lanes.get("wau_uv",    0.0))
+        transitioner.switch(new_mode)
+        current_mode    = new_mode
+        current_palette = new_palette
+        mode_key        = new_key
+        safety.update_from_mode(current_mode)
+        room_lane.set_mode(current_mode)
+        room_lane.set_palette(current_palette)
+        smoother.apply_mode_profile(mode_key)
+
+    def _toggle_blackout() -> None:
+        """Toggle blackout: fade out on enable, smooth recovery on disable."""
+        nonlocal _blackout_fading, _blackout_fade_start, _blackout_fade_alpha
+        nonlocal _fade_v_snap, _fade_brt_snap, _fade_w_snap, _fade_a_snap, _fade_uv_snap
+        nonlocal _blackout_recovering, _recover_start
+        was_bo = safety.state.blackout_active
+        safety.toggle_blackout()
+        if not was_bo:
+            # turning ON — fade out from the current clean frame
+            _blackout_fading     = True
+            _blackout_fade_start = time.monotonic()
+            _blackout_fade_alpha = 1.0
+            _fade_v_snap   = _last_render_v
+            _fade_brt_snap = _master_dimmer
+            _fade_w_snap   = _last_eff_white
+            _fade_a_snap   = _last_eff_amber
+            _fade_uv_snap  = _last_eff_uv
+            _blackout_recovering = False
+        else:
+            # turning OFF — smooth recovery instead of an instant snap
+            _blackout_fading     = False
+            _blackout_fade_alpha = 1.0
+            _blackout_recovering = True
+            _recover_start       = time.monotonic()
 
     try:
         while not quit_flag:
@@ -444,20 +502,7 @@ def main():
                     quit_flag = True
                     break
                 elif key == " ":
-                    _was_bo = safety.state.blackout_active
-                    safety.toggle_blackout()
-                    if not _was_bo:
-                        _blackout_fading   = True
-                        _blackout_fade_start = time.monotonic()
-                        _blackout_fade_alpha = 1.0
-                        _fade_v_snap   = _last_render_v
-                        _fade_brt_snap = _master_dimmer
-                        _fade_w_snap   = _last_eff_white
-                        _fade_a_snap   = _last_eff_amber
-                        _fade_uv_snap  = _last_eff_uv
-                    else:
-                        _blackout_fading   = False
-                        _blackout_fade_alpha = 1.0
+                    _toggle_blackout()
                 elif key in _SCENE_FKEYS:
                     idx = int(key[1:]) - 1  # F1→0 … F9→8
                     if idx < len(_all_scenes):
@@ -493,20 +538,7 @@ def main():
                         quit_flag = True
                         break
                     elif mode_key == "blackout":
-                        _was_bo = safety.state.blackout_active
-                        safety.toggle_blackout()
-                        if not _was_bo:
-                            _blackout_fading   = True
-                            _blackout_fade_start = time.monotonic()
-                            _blackout_fade_alpha = 1.0
-                            _fade_v_snap   = _last_render_v
-                            _fade_brt_snap = _master_dimmer
-                            _fade_w_snap   = _last_eff_white
-                            _fade_a_snap   = _last_eff_amber
-                            _fade_uv_snap  = _last_eff_uv
-                        else:
-                            _blackout_fading   = False
-                            _blackout_fade_alpha = 1.0
+                        _toggle_blackout()
                     else:
                         new_mode    = get_mode(mode_key)
                         new_palette = all_palettes.get(
@@ -567,20 +599,7 @@ def main():
                 elif _wtype == "release_scene":
                     scene_mgr.release_scene()
                 elif _wtype == "blackout":
-                    _was_bo = safety.state.blackout_active
-                    safety.toggle_blackout()
-                    if not _was_bo:
-                        _blackout_fading   = True
-                        _blackout_fade_start = time.monotonic()
-                        _blackout_fade_alpha = 1.0
-                        _fade_v_snap   = _last_render_v
-                        _fade_brt_snap = _master_dimmer
-                        _fade_w_snap   = _last_eff_white
-                        _fade_a_snap   = _last_eff_amber
-                        _fade_uv_snap  = _last_eff_uv
-                    else:
-                        _blackout_fading   = False
-                        _blackout_fade_alpha = 1.0
+                    _toggle_blackout()
                 elif _wtype == "strobe_master":
                     try:
                         _strobe_master = min(1.0, max(0.0, float(_wcmd.get("value", 1.0))))
@@ -604,6 +623,13 @@ def main():
                         room_lane.set_mode(current_mode)
                         room_lane.set_palette(current_palette)
                         smoother.apply_mode_profile(mode_key)
+                        _armed_mode = None   # explicit switch cancels any arm
+                elif _wtype == "arm_mode":
+                    # Queue a mode to fire on the next drop ("third hand").
+                    _wval = _wcmd.get("value", "")
+                    _armed_mode = _wval if _wval in MODES else _armed_mode
+                elif _wtype == "white_hold":
+                    _white_hold = bool(_wcmd.get("state", False))
                 elif _wtype == "activate_scene":
                     _sid = _wcmd.get("value", "")
                     if scene_mgr.activate_scene(_sid):
@@ -693,20 +719,10 @@ def main():
                     elif evt.type == "blackout":
                         if evt.value > 0.5:
                             if not safety.state.blackout_active:
-                                safety.toggle_blackout()
-                                _blackout_fading   = True
-                                _blackout_fade_start = time.monotonic()
-                                _blackout_fade_alpha = 1.0
-                                _fade_v_snap   = _last_render_v
-                                _fade_brt_snap = _master_dimmer
-                                _fade_w_snap   = _last_eff_white
-                                _fade_a_snap   = _last_eff_amber
-                                _fade_uv_snap  = _last_eff_uv
+                                _toggle_blackout()
                         else:
                             if safety.state.blackout_active:
-                                safety.toggle_blackout()
-                                _blackout_fading   = False
-                                _blackout_fade_alpha = 1.0
+                                _toggle_blackout()
 
             if quit_flag:
                 break
@@ -729,6 +745,23 @@ def main():
             last_lanes = smoother.update(bands_dict)
             last_lanes["bpm"]  = beat_detector.bpm
             last_lanes["beat"] = beat_detected
+
+            # --- drop-sync arming ("third hand") ---
+            # Fire an armed mode when overall energy spikes past its baseline.
+            # The baseline must have warmed up first, so an arm during a steady
+            # loud passage waits for a genuine drop rather than firing instantly.
+            _overall_now = bands_dict.get("overall_energy", 0.0)
+            if _armed_mode is not None and _armed_mode in MODES:
+                _is_drop = (
+                    _energy_avg > 0.05
+                    and _overall_now >= DROP_ENERGY_FLOOR
+                    and _overall_now >= _energy_avg * DROP_ENERGY_RATIO
+                )
+                if _is_drop:
+                    _apply_mode(_armed_mode)
+                    _armed_mode = None
+            # update the baseline AFTER the check so the spike doesn't mask itself
+            _energy_avg = _energy_avg * (1.0 - DROP_AVG_ALPHA) + _overall_now * DROP_AVG_ALPHA
 
             # --- lane render ---
             room_out = room_lane.render(
@@ -838,6 +871,20 @@ def main():
                 eff_uv      = _fade_uv_snap  * _blackout_fade_alpha
                 _eff_strobe = 0.0
 
+            # --- smart blackout recovery (timestamp-based fade-in, non-blocking) ---
+            elif _blackout_recovering:
+                _elapsed_rec = time.monotonic() - _recover_start
+                _rt = _elapsed_rec / BLACKOUT_RECOVER_S
+                if _rt >= 1.0:
+                    _rt = 1.0
+                    _blackout_recovering = False
+                _ease = 1.0 - (1.0 - _rt) ** 3   # ease-out cubic
+                _frame_v   *= _ease
+                _frame_brt *= _ease
+                _frame_w   *= _ease
+                eff_amber  *= _ease
+                eff_uv     *= _ease
+
             # --- fixture test override (bypasses audio engine) ---
             if _test_mode and not safety.state.blackout_active:
                 _tp         = _TEST_PATTERNS[_test_pattern]
@@ -849,6 +896,19 @@ def main():
                 eff_amber   = _tp["amber"]
                 eff_uv      = _tp["uv"]
                 _eff_strobe = _tp["strobe"]
+
+            # --- white hold (momentary manual override — bypasses palettes/EMA) ---
+            # Forced full white at 100% dimmer, right before the gamma/fixture
+            # boundary. Releases instantly back to the automated state on lift.
+            if _white_hold and not safety.state.blackout_active:
+                _frame_brt  = 1.0
+                _frame_h    = 0.0
+                _frame_s    = 0.0
+                _frame_v    = 1.0
+                _frame_w    = 1.0
+                eff_amber   = 0.0
+                eff_uv      = 0.0
+                _eff_strobe = 0.0
 
             # --- kill switch overrides (last word before fixture write) ---
             if _kill_strobe:
@@ -982,6 +1042,10 @@ def main():
                     kill_derby=      _kill_derby,
                     kill_laser=      _kill_laser,
                     flash_active=    _flash_frames > 0,
+                    armed_mode=      _armed_mode,
+                    cooldown_pct=    float(room_lane.beat_cooldown_fraction(_now)),
+                    cooldown_active= room_lane.beat_cooldown_fraction(_now) > 0.0,
+                    white_hold=      _white_hold,
                     dmx_channels=    _dmx_snapshot,
                 )
 

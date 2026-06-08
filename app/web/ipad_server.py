@@ -18,8 +18,8 @@ from app.web.server import _engine_state, _command_queue
 # Commands the iPad is allowed to send. Reject anything outside this set so
 # an attacker who can reach the port cannot inject arbitrary engine state.
 _ALLOWED_TYPES = frozenset({
-    "mode", "set_mode", "scene", "activate_scene", "release_scene",
-    "blackout", "strobe_master", "set_fader", "momentary",
+    "mode", "set_mode", "arm_mode", "scene", "activate_scene", "release_scene",
+    "blackout", "strobe_master", "set_fader", "momentary", "white_hold",
     "toggle_kill", "fixture_test", "release_fixture_test",
     "fixture_test_aim", "aim_fixture", "save_position",
 })

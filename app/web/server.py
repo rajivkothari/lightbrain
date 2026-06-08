@@ -66,6 +66,10 @@ _engine_state: Dict[str, Any] = {
     "kill_derby":     False,
     "kill_laser":     False,
     "flash_active":   False,
+    "armed_mode":     None,   # mode_key queued to fire on the next drop, or None
+    "cooldown_active":False,   # True while the palette beat-swap lockout is engaged
+    "cooldown_pct":   0.0,    # 0.0–1.0 fraction of the beat-swap lockout remaining
+    "white_hold":     False,   # True while the momentary white-hold override is held
     "rig_layout":     [],    # [{name, type, address, channels, end}] — static after load
     "dmx_channels":   [],    # 512-element int list — updated each frame
 }
