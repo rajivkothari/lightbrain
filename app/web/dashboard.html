@@ -58,14 +58,7 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
-      transition: width 0.2s ease;
     }
-    /* Collapse left panel when 3D tab is active — only show tab buttons */
-    .main-layout.viz-mode .left-panel {
-      width: auto;
-      flex-shrink: 1;
-    }
-    .main-layout.viz-mode .tab-pane { display: none !important; }
 
     /* ---- Right panel: canvas, always visible ---- */
     .right-panel {
@@ -101,6 +94,16 @@
       border: 1px solid var(--border);
       border-radius: 4px;
       background: #080810;
+    }
+
+    /* ---- 3D visualizer iframe (right panel, shown on the 3D tab) ---- */
+    #viz3d-frame {
+      width: 100%;
+      flex: 1;
+      min-height: calc(100vh - 70px);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #05070b;
     }
 
     /* ---- Section ---- */
@@ -193,10 +196,6 @@
     .btn-kill-dash:hover { background: #1a0000; border-color: #884444; }
     .btn-kill-dash.active { background: #330000; border-color: var(--red); color: var(--red); }
 
-    /* ---- 3D tab HUD ---- */
-    #viz-hud { display: none; }
-    .main-layout.viz-mode #viz-hud { display: flex !important; }
-
     /* ---- Canvas blackout / flash state ---- */
     #rig-canvas.blacked-out {
       border-color: #550000;
@@ -244,6 +243,9 @@
     .btn-sm.danger { border-color: #442222; color: #ff6666; }
     .btn-sm.danger:hover { background: #2a0000; }
     .btn-sm.primary { border-color: var(--accent); color: #8888ff; }
+    .btn-sm.active { background: #181838; border-color: var(--accent); color: #8888ff; }
+    .btn-sm.held { background: #383838; border-color: #fff; color: #fff; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 5px; }
 
     .form-group { margin-bottom: 10px; }
     label { display: block; font-size: 0.7rem; color: var(--dim);
@@ -343,7 +345,7 @@
       <button class="tab active" onclick="showTab('live')">Live</button>
       <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
       <button class="tab" onclick="showTab('rig')" id="tab-btn-rig">Rig</button>
-      <button class="tab" onclick="showTab('3d')" id="tab-btn-3d">3D</button>
+      <button class="tab" onclick="showTab('threed')" id="tab-btn-3d">3D</button>
     </div>
 
     <!-- LIVE TAB -->
@@ -482,19 +484,62 @@
         </div>
       </div>
     </div>
+
+    <!-- 3D TAB (left pane) — full rig control beside the 3D render -->
+    <div id="tab-3d" class="tab-pane" style="display:none">
+      <div class="section">
+        <div class="section-label">Mode</div>
+        <div class="grid" id="mode-grid-3d"></div>
+      </div>
+      <div class="section">
+        <div class="section-label">Scene</div>
+        <div class="grid" id="scene-grid-3d"></div>
+      </div>
+      <div class="section">
+        <div class="section-label">Strobe</div>
+        <div class="btn-row" id="strobe-3d">
+          <button class="btn btn-sm" id="strobe3d-off" onclick="strobe3dOff()">OFF</button>
+          <button class="btn btn-sm strobe3d-rate" data-m="0.2"  onclick="strobe3dRate(this)">SLOW</button>
+          <button class="btn btn-sm strobe3d-rate" data-m="0.45" onclick="strobe3dRate(this)">MED</button>
+          <button class="btn btn-sm strobe3d-rate" data-m="0.7"  onclick="strobe3dRate(this)">FAST</button>
+          <button class="btn btn-sm strobe3d-rate" data-m="1.0"  onclick="strobe3dRate(this)">MAX</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-label">Uplights (preview)</div>
+        <div class="btn-row" id="uplights-3d">
+          <button class="btn btn-sm upl3d" data-n="6"  onclick="uplights3d(6)">6</button>
+          <button class="btn btn-sm upl3d" data-n="12" onclick="uplights3d(12)">12</button>
+          <button class="btn btn-sm upl3d active" data-n="18" onclick="uplights3d(18)">18</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-label">Master</div>
+        <div class="btn-row">
+          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:0})">0%</button>
+          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:0.5})">50%</button>
+          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:1})">100%</button>
+          <button class="btn btn-sm" onclick="cmd({type:'momentary',effect:'flash',action:'start'})">BUMP</button>
+          <button class="btn btn-sm" id="white3d"
+                  onmousedown="white3d(true)" onmouseup="white3d(false)" onmouseleave="white3d(false)">WHITE</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-label">Kill Switches</div>
+        <div class="kill-row">
+          <button class="btn-kill-dash" id="dash3d-kill-strobe" onclick="toggleKill('strobe')">&#x26A1; STROBE</button>
+          <button class="btn-kill-dash" id="dash3d-kill-derby"  onclick="toggleKill('derby')">&#x2B55; DERBY</button>
+          <button class="btn-kill-dash" id="dash3d-kill-laser"  onclick="toggleKill('laser')">&#x25B6; LASER</button>
+        </div>
+      </div>
+      <button class="btn btn-full btn-blackout" id="blackout-btn-3d" onclick="cmd({type:'blackout'})">BLACKOUT</button>
+    </div>
   </div>
 
-  <!-- ===== RIGHT PANEL: canvas always visible ===== -->
-  <div class="right-panel" style="position:relative">
+  <!-- ===== RIGHT PANEL: 2D canvas (default) + 3D iframe ===== -->
+  <div class="right-panel">
     <canvas id="rig-canvas"></canvas>
-    <!-- 3D tab HUD overlay — only visible in viz-mode -->
-    <div id="viz-hud" style="display:none; position:absolute; bottom:12px; left:12px; right:12px;
-         background:rgba(8,8,16,0.7); border:1px solid rgba(80,80,120,0.4); border-radius:6px;
-         padding:8px 14px; display:flex; gap:24px; align-items:center; pointer-events:none;">
-      <span id="viz-mode-name"  style="font-size:1.1rem; font-weight:700; letter-spacing:0.1em; color:#aaaaff"></span>
-      <span id="viz-scene-name" style="font-size:0.85rem; color:#888899"></span>
-      <span id="viz-bpm"        style="font-size:1.1rem; font-weight:700; color:#66ff88; margin-left:auto"></span>
-    </div>
+    <iframe id="viz3d-frame" title="3D Visualizer" style="display:none"></iframe>
   </div>
 
 </div>
@@ -860,6 +905,7 @@ let currentMode         = null;
 let currentScene        = null;
 let modesReady          = false;
 let scenesReady         = false;
+let _strobeMasterSynced = false;
 function cmd(payload) {
   fetch('/api/command', {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
@@ -913,30 +959,71 @@ function toggleKill(target) {
 function buildModes(modes) {
   if (modesReady) return;
   const list = (modes && modes.length) ? modes : DEFAULT_MODES;
-  const grid = document.getElementById('mode-grid');
-  grid.innerHTML = '';
-  list.forEach(m => {
-    const b = document.createElement('button');
-    b.className = 'btn mode-btn'; b.dataset.key = m.key;
-    b.textContent = m.display_name;
-    b.onclick = () => cmd({type:'mode', value:m.key});
-    grid.appendChild(b);
+  ['mode-grid', 'mode-grid-3d'].forEach(gid => {
+    const grid = document.getElementById(gid);
+    if (!grid) return;
+    grid.innerHTML = '';
+    list.forEach(m => {
+      const b = document.createElement('button');
+      b.className = 'btn mode-btn'; b.dataset.key = m.key;
+      b.textContent = m.display_name;
+      b.onclick = () => cmd({type:'mode', value:m.key});
+      grid.appendChild(b);
+    });
   });
   modesReady = true;
 }
 
 function buildScenes(scenes) {
   if (scenesReady || !scenes || !scenes.length) return;
-  const grid = document.getElementById('scene-grid');
-  grid.innerHTML = '';
-  scenes.forEach((s, i) => {
-    const b = document.createElement('button');
-    b.className = 'btn scene-btn'; b.dataset.id = s.id;
-    b.innerHTML = `<span class="shortcut">F${i+1}</span>${s.name}`;
-    b.onclick = () => cmd({type:'scene', value:s.id});
-    grid.appendChild(b);
+  ['scene-grid', 'scene-grid-3d'].forEach(gid => {
+    const grid = document.getElementById(gid);
+    if (!grid) return;
+    grid.innerHTML = '';
+    scenes.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.className = 'btn scene-btn'; b.dataset.id = s.id;
+      b.innerHTML = `<span class="shortcut">F${i+1}</span>${s.name}`;
+      b.onclick = () => cmd({type:'scene', value:s.id});
+      grid.appendChild(b);
+    });
   });
   scenesReady = true;
+}
+
+// ---- 3D-tab control helpers (reuse cmd(); uplights drive the iframe) ----
+function _viz3dPost(msg) {
+  const f = document.getElementById('viz3d-frame');
+  if (f && f.contentWindow) { try { f.contentWindow.postMessage(msg, '*'); } catch(_){} }
+}
+let _upl3d = 18;
+function uplights3d(n) {
+  _upl3d = n;
+  document.querySelectorAll('#uplights-3d .upl3d').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
+  _viz3dPost({type:'lb-uplights', n});
+}
+let _strobe3dLatch = null;
+function strobe3dRate(btn) {
+  cmd({type:'strobe_master', value: parseFloat(btn.dataset.m)});
+  cmd({type:'momentary', effect:'strobe_hold', action:'start'});
+  _strobe3dLatch = btn.dataset.m;
+  reflectStrobe3d();
+}
+function strobe3dOff() {
+  cmd({type:'momentary', effect:'strobe_hold', action:'stop'});
+  _strobe3dLatch = null; reflectStrobe3d();
+}
+function reflectStrobe3d() {
+  document.querySelectorAll('#strobe-3d .strobe3d-rate').forEach(b =>
+    b.classList.toggle('active', b.dataset.m === _strobe3dLatch));
+}
+let _white3dHeld = false;
+function white3d(state) {
+  if (state === _white3dHeld) return;
+  _white3dHeld = state;
+  document.getElementById('white3d').classList.toggle('held', state);
+  cmd({type:'white_hold', state});
 }
 
 function applyState(s) {
@@ -964,16 +1051,11 @@ function applyState(s) {
   const strobeBar = document.getElementById('bar-strobe');
   strobeBar.style.width = clamp(s.strobe_rate);
   strobeBar.classList.toggle('firing', (s.strobe_rate || 0) > 0.01);
-  // Sync strobe speed buttons
-  if (s.strobe_master !== undefined) syncStrobeSpeed(s.strobe_master);
-
-  // 3D HUD
-  const vizMode = document.getElementById('viz-mode-name');
-  if (vizMode) vizMode.textContent = (s.mode_display || s.mode || '').toUpperCase();
-  const vizScene = document.getElementById('viz-scene-name');
-  if (vizScene) vizScene.textContent = s.scene_name ? `SCENE: ${s.scene_name.toUpperCase()}` : '';
-  const vizBpm = document.getElementById('viz-bpm');
-  if (vizBpm) vizBpm.textContent = s.bpm > 1 ? `${Math.round(s.bpm)} BPM` : '';
+  // Sync strobe speed buttons once on first message
+  if (!_strobeMasterSynced && s.strobe_master !== undefined) {
+    _strobeMasterSynced = true;
+    syncStrobeSpeed(s.strobe_master);
+  }
 
   // Grids
   buildModes(s.modes); buildScenes(s.scenes);
@@ -998,6 +1080,16 @@ function applyState(s) {
   bo.classList.toggle('active', _blackoutActive);
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
   document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
+  const bo3 = document.getElementById('blackout-btn-3d');
+  if (bo3) {
+    bo3.classList.toggle('active', _blackoutActive);
+    bo3.textContent = _blackoutActive ? '■  BLACKOUT ACTIVE' : 'BLACKOUT';
+  }
+  if (_blackoutActive && _strobe3dLatch) { _strobe3dLatch = null; reflectStrobe3d(); }
+
+  // White hold (3D tab) — reflect engine state
+  const w3 = document.getElementById('white3d');
+  if (w3) w3.classList.toggle('held', !!s.white_hold);
 
   // ARM button sync
   const armBtn = document.getElementById('strobe-arm-btn');
@@ -1007,11 +1099,13 @@ function applyState(s) {
   const killLabels = {strobe:'⚡ STROBE', derby:'⊕ DERBY', laser:'▶ LASER'};
   const killOffLabels = {strobe:'⚡ STROBE OFF', derby:'⊕ DERBY OFF', laser:'▶ LASER OFF'};
   ['strobe','derby','laser'].forEach(t => {
-    const el = document.getElementById('dash-kill-' + t);
-    if (!el) return;
     const killed = !!s['kill_' + t];
-    el.classList.toggle('active', killed);
-    el.textContent = killed ? killOffLabels[t] : killLabels[t];
+    ['dash-kill-', 'dash3d-kill-'].forEach(pfx => {
+      const el = document.getElementById(pfx + t);
+      if (!el) return;
+      el.classList.toggle('active', killed);
+      el.textContent = killed ? killOffLabels[t] : killLabels[t];
+    });
   });
 
   // Flash feedback — brief canvas pop
@@ -1261,18 +1355,39 @@ async function editorSave() {
 // ============================================================
 // TAB SWITCHING
 // ============================================================
+let _viz3dLoaded = false;
 function showTab(name) {
   document.getElementById('tab-live').style.display   = name==='live'   ? '' : 'none';
   document.getElementById('tab-scenes').style.display = name==='scenes' ? '' : 'none';
   document.getElementById('tab-rig').style.display    = name==='rig'    ? '' : 'none';
+  document.getElementById('tab-3d').style.display     = name==='threed' ? '' : 'none';
   document.querySelectorAll('.tab').forEach(t => {
     const key = t.getAttribute('onclick').replace("showTab('","").replace("')","");
     t.classList.toggle('active', key === name);
   });
-  // 3D tab collapses left panel and shows HUD overlay
-  document.querySelector('.main-layout').classList.toggle('viz-mode', name === '3d');
-  // Trigger canvas resize after layout shift
-  if (name === '3d') setTimeout(() => { const c = document.getElementById('rig-canvas'); if(c) { c.dispatchEvent(new Event('resize')); _initCanvas(); } }, 50);
+
+  // Right panel: canvas for all tabs except 3D, which shows the iframe.
+  // Lazy-load the iframe on first open; pause/resume via postMessage.
+  const frame  = document.getElementById('viz3d-frame');
+  const canvas = document.getElementById('rig-canvas');
+  if (name === 'threed') {
+    if (!_viz3dLoaded) { frame.src = '/visualizer3d?embed=1'; _viz3dLoaded = true; }
+    canvas.style.display = 'none';
+    frame.style.display  = '';
+    const resume = () => { try {
+      frame.contentWindow.postMessage({type:'lb-resume'}, '*');
+      frame.contentWindow.postMessage({type:'lb-uplights', n:_upl3d}, '*');
+    } catch(_){} };
+    if (frame.contentWindow) resume();
+    frame.addEventListener('load', resume, {once:true});
+  } else {
+    frame.style.display  = 'none';
+    canvas.style.display = '';
+    if (_viz3dLoaded && frame.contentWindow) {
+      try { frame.contentWindow.postMessage({type:'lb-pause'}, '*'); } catch(_){}
+    }
+  }
+
   if (name === 'scenes') _edLoad();
   if (name === 'rig')    _rigDraw(_lastDmxChannels);
 }

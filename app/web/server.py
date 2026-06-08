@@ -69,8 +69,11 @@ _engine_state: Dict[str, Any] = {
     "kill_laser":          False,
     "flash_active":        False,
     "white_hold_active":   False,
+    "white_hold":          False,
     "armed_mode":          "",
     "palette_cooldown":    0.0,
+    "cooldown_pct":        0.0,
+    "cooldown_active":     False,
     "rig_layout":          [],   # [{name, type, address, channels, end}] — static after load
     "dmx_channels":        [],   # 512-element int list — updated each frame
 }
@@ -265,6 +268,12 @@ def _build_app() -> "FastAPI":
     @fastapi_app.get("/", response_class=HTMLResponse)
     async def dashboard() -> str:
         html_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
+        with open(html_path, encoding="utf-8") as f:
+            return f.read()
+
+    @fastapi_app.get("/visualizer3d", response_class=HTMLResponse)
+    async def visualizer3d() -> str:
+        html_path = os.path.join(os.path.dirname(__file__), "visualizer3d.html")
         with open(html_path, encoding="utf-8") as f:
             return f.read()
 

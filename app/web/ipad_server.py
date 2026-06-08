@@ -21,7 +21,7 @@ _ALLOWED_TYPES = frozenset({
     "mode", "set_mode", "scene", "activate_scene", "release_scene",
     "blackout", "strobe_master", "set_fader", "momentary",
     "arm_strobe", "arm_mode", "toggle_kill", "fixture_test", "release_fixture_test",
-    "fixture_test_aim",
+    "fixture_test_aim", "white_hold",
     # "save_position" intentionally excluded — no engine handler implemented
 })
 _MAX_QUEUE = 64          # drop commands when the engine is behind

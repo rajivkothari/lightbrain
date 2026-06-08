@@ -10,3 +10,6 @@ env/
 dist/
 build/
 .DS_Store
+
+# dev screenshot scratch (tools/shot.cjs)
+tools/_shots/

@@ -987,8 +987,11 @@ def main():
                     kill_laser=      _kill_laser,
                     flash_active=    _flash_frames > 0,
                     white_hold_active= _white_hold,
+                    white_hold=      _white_hold,
                     armed_mode=      _armed_mode,
                     palette_cooldown= float(room_lane._blender.cooldown_progress),
+                    cooldown_pct=    float(room_lane.beat_cooldown_fraction(_now)),
+                    cooldown_active= room_lane.beat_cooldown_fraction(_now) > 0.0,
                     dmx_channels=    _dmx_snapshot,
                 )
 
