@@ -701,12 +701,8 @@ function momentaryEnd(effect) {
 }
 
 function savePosition() {
-  const name = document.getElementById('pos-name').value.trim();
-  if (!name) return;
-  const fixture = document.getElementById('aim-fixture').value;
-  send({type: 'save_position', name: name, fixture: fixture, pan: _joyPan, tilt: _joyTilt});
   const fb = document.getElementById('save-feedback');
-  fb.textContent = `Saved "${name}"`;
+  fb.textContent = 'Save position not yet implemented';
   setTimeout(() => fb.textContent = '', 3000);
 }
 
@@ -918,8 +914,7 @@ function initJoystick() {
     _joyTilt = Math.max(0, Math.min(270, _joyTilt));
     document.getElementById('joy-pan').textContent  = _joyPan;
     document.getElementById('joy-tilt').textContent = _joyTilt;
-    send({type: 'aim_fixture', fixture: document.getElementById('aim-fixture').value,
-          pan: _joyPan, tilt: _joyTilt});
+    send({type: 'fixture_test_aim', pan: _joyPan, tilt: _joyTilt});
   }
 
   function end() {

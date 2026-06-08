@@ -208,6 +208,8 @@ def main():
                         help="start web dashboard (requires fastapi + uvicorn)")
     parser.add_argument("--web-port",    type=int,  default=8765,
                         help="web dashboard port (default: 8765)")
+    parser.add_argument("--web-host",    type=str,  default="127.0.0.1",
+                        help="web dashboard bind address (default: 127.0.0.1 localhost-only)")
     parser.add_argument("--ipad-port",   type=int,  default=None,
                         help="iPad controller port (default: from app_config.json)")
     parser.add_argument("--headless",    action="store_true",
@@ -373,7 +375,7 @@ def main():
             scenes = [{"id": s.scene_id, "name": s.name, "index": i}
                       for i, s in enumerate(_all_scenes)],
         )
-        _web.start(port=args.web_port)
+        _web.start(host=args.web_host, port=args.web_port)
         _web.set_paths(SCENES_DIR, POSITIONS_FILE, STATES_FILE, scene_mgr)
 
     # ---- iPad controller ----
@@ -788,7 +790,7 @@ def main():
                 _eff_strobe = _strobe_master
 
             # --- strobe hold (iPad hold-to-strobe — software oscillator) ---
-            if (_strobe_hold or _strobe_armed) and not safety.state.blackout_active:
+            if (_strobe_hold or _strobe_armed) and not safety.state.blackout_active and not _kill_strobe:
                 _hold_freq = 2.0 + _strobe_master * 14.0
                 _strobe_hold_phase = (_strobe_hold_phase + _frame_time * _hold_freq) % 1.0
                 _eff_strobe = _strobe_master
@@ -809,15 +811,17 @@ def main():
             _last_eff_uv    = eff_uv
 
             # --- strobe hold flicker (software side — toggles brightness) ---
-            if (_strobe_hold or _strobe_armed) and not safety.state.blackout_active:
+            # kill_strobe disables software flicker as well as hardware channel;
+            # ON-phase scales by _strobe_master so master=0 produces no flash.
+            if (_strobe_hold or _strobe_armed) and not safety.state.blackout_active and not _kill_strobe:
                 if _strobe_hold_phase >= 0.25:
                     _frame_v   = 0.0
                     _frame_w   = 0.0
                     _frame_brt = 0.0
                 else:
-                    _frame_v   = 1.0
-                    _frame_w   = 1.0
-                    _frame_brt = 1.0
+                    _frame_v   = _strobe_master
+                    _frame_w   = _strobe_master
+                    _frame_brt = _strobe_master
 
             if _flash_frames > 0 and not safety.state.blackout_active:
                 _flash_frames -= 1
@@ -862,11 +866,16 @@ def main():
                 if hasattr(_fx, "enable_laser"):
                     _fx.enable_laser(not _kill_laser)
 
-            # --- fixture write (all fixtures get same lane output) ---
+            # --- fixture write ---
+            # Uplight-type fixtures (RockWedge, WashFX2) respect _uplight_dimmer on
+            # the DMX path, not only in the web visualisation.
             for fixture in fixtures:
+                _fx_brt = _frame_brt
+                if isinstance(fixture, (RockWedge, ChauvetWashFX2)):
+                    _fx_brt *= _uplight_dimmer
                 fixture.render_to_universe(
                     universe,
-                    brightness=_frame_brt,
+                    brightness=_fx_brt,
                     hue=_frame_h,
                     saturation=_frame_s,
                     value=_frame_v,

@@ -52,8 +52,8 @@ INPUT
                 1. blackout_active  — hard zero, all output
                 2. strobe_allowed   — gates auto strobe per mode
                 3. master_dimmer    — 0–1 overall scale
-                4. uplight_dimmer   — 0–1 uplight-only scale
-                5. scene overrides  — per-group brightness/color)
+                4. uplight_dimmer   — 0–1 uplight-only scale (RockWedge + WashFX2 DMX path)
+                5. scene overrides  — per-group brightness/color [visualisation only — DMX routing is a known TODO])
                          │
         ┌────────────────┼────────────────────────────┐
         │                │                            │

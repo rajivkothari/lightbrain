@@ -158,7 +158,7 @@ what was built in each sprint and what comes next.
 
 ## Sprint 13 — iPad Web Controller ✅
 
-**422 tests passing**
+**422 tests passing** *(580 as of current branch)*
 
 - iPad PWA (port 8080) — full-screen standalone, dark theme, large touch targets
 - Master / uplight / strobe fader sync from engine state
@@ -171,7 +171,7 @@ what was built in each sprint and what comes next.
 
 ## Codebase Audit ✅
 
-**437 tests passing (post-audit)**
+**437 tests passing (post-audit)** *(580 as of current branch)*
 
 - 9 bugs fixed (including blackout fade logic, EnvelopeFollower initialization)
 - 10 logic errors corrected
