@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RKADE LightBrain — 3D DMX Visualizer</title>
+<!--
+  RKADE LightBrain — Standalone 3D DMX Lighting Visualizer
+  ========================================================
+  A passive, frontend-only consumer of the LightBrain engine state stream.
+
+  This file is a STANDALONE CLIENT. It does not modify, call, or depend on the
+  Python backend, the DMX engine, or the FastAPI server configuration. It only
+  reads the JSON state the backend already broadcasts over the /ws WebSocket at
+  ~15 Hz (see app/web/server.py :: _engine_state).
+
+  Design contract (from app/render/fixture_state.py + app/web/server.py):
+    state.fixtures = {
+      uplights: [{id, x, y, rgb:[r,g,b], brt, active}],
+      washes:   [{id, x, y, rgb, brt, radius, pulse, active}],
+      beams:    [{id, x, y, rgb, brt, angle, length, spread, active}],
+      sparkles: [{id, x, y, rgb, brt, amount, active}],
+      impacts:  [{id, x, y, brt, flash, active}],
+      ambient_warm: float
+    }
+    Top-level: mode_display, scene_name, blackout, bpm, beat,
+               low_energy, mid_energy, high_energy, overall_energy,
+               master_dimmer, strobe_master, fps, dmx_output, ...
+
+  Fixture x/y arrive in the engine's 2D scene space (1200 x 800, y grows down,
+  origin top-left — see app/render/scene.py). We map that plane onto the 3D
+  floor and hang movers/washes from a virtual truss.
+
+  Engineering constraints honored:
+    1. Zero build tools — single HTML file, vanilla JS, Three.js via CDN.
+    2. Decoupled render loop — rAF @ 60Hz+, exponential lerp between 15Hz frames.
+    3. Primitive geometry — cylinder body + additive translucent cone per beam.
+    4. Lux-map overlap — faked floor hits: a flat additive circle is laid on
+       the floor where each beam lands, so red+blue -> magenta natively.
+    5. WebGL light limits — NO THREE.SpotLight / THREE.PointLight is ever
+       created. Forward rendering caps punctual lights at ~16 shader uniforms,
+       so all illumination is faked with unlit additive meshes (cones in the
+       air, circles on the floor). Only global Hemisphere/Ambient lights exist;
+       those don't consume the punctual-light arrays. The rig scales to
+       hundreds of fixtures without touching the light limit.
+-->
+<style>
+  :root {
+    --ink: #07090d;
+    --accent: #4ea3ff;
+    --ok: #46d27a;
+    --warn: #f0b429;
+    --err: #e9573f;
+    --panel: rgba(12, 16, 24, 0.78);
+    --hair: rgba(255, 255, 255, 0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #000; color: #e8edf4;
+    font-family: 'DM Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* ---- HUD panels ---- */
+  .panel {
+    position: fixed; z-index: 10;
+    background: var(--panel);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--hair);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 1.45;
+    user-select: none;
+  }
+  #hud { top: 14px; left: 14px; min-width: 230px; }
+  #stats { top: 14px; right: 14px; text-align: right; min-width: 150px; }
+  #help { bottom: 14px; left: 14px; max-width: 360px; opacity: 0.78; }
+  #layers { top: 14px; right: 178px; min-width: 132px; }
+  #layers label {
+    display: flex; align-items: center; gap: 7px;
+    padding: 3px 0; cursor: pointer; font-size: 12px;
+  }
+  #layers input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+
+  /* Embedded in the dashboard 3D tab: drop the standalone connect/help chrome
+     and the bottom control dock — the dashboard's left panel drives the rig.
+     The Layers + View panel stays (it's visualizer-only preview). */
+  body.embed #ctrl, body.embed #help, body.embed #controls { display: none; }
+
+  .view-row { display: flex; gap: 4px; margin-top: 4px; }
+  .view-btn {
+    flex: 1; background: rgba(255,255,255,0.06); color: #e8edf4;
+    border: 1px solid var(--hair); border-radius: 6px;
+    padding: 4px 0; font-size: 11px; cursor: pointer;
+  }
+  .view-btn.active { background: var(--accent); color: #051018; border-color: var(--accent); }
+
+  /* --- Control dock: full rig control from the 3D view --- */
+  #controls {
+    bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 6px; max-width: 94vw;
+  }
+  .ctl-line { display: flex; align-items: center; gap: 8px; }
+  .ctl-label {
+    width: 46px; flex-shrink: 0; text-transform: uppercase;
+    letter-spacing: 0.1em; font-size: 9px; color: rgba(232,237,244,0.5);
+  }
+  .ctl-row { display: flex; flex-wrap: wrap; gap: 5px; }
+  .ctl-btn {
+    background: rgba(255,255,255,0.06); color: #e8edf4;
+    border: 1px solid var(--hair); border-radius: 7px;
+    padding: 7px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    white-space: nowrap;
+  }
+  .ctl-btn.wide { letter-spacing: 0.04em; }
+  .ctl-btn:active { transform: scale(0.95); }
+  .ctl-btn.active { background: var(--accent); color: #051018; border-color: var(--accent); }
+  .ctl-btn.armed { border-color: #ff5a5a; color: #ffd0d0; animation: arm-pulse 0.7s ease-out infinite; }
+  .ctl-btn.held  { background: #fff; color: #101018; border-color: #fff; box-shadow: 0 0 18px rgba(255,255,255,0.7); }
+  .ctl-btn.kill-on { background: var(--err); color: #fff; border-color: var(--err); }
+  .ctl-gap { width: 10px; }
+  @keyframes arm-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255,80,80,0.75); }
+    70%  { box-shadow: 0 0 0 6px rgba(255,80,80,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,80,80,0); }
+  }
+
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.14em;
+    font-size: 10px; color: var(--accent); margin-bottom: 6px; font-weight: 600;
+  }
+  .row { display: flex; justify-content: space-between; gap: 14px; }
+  .row .k { color: rgba(232,237,244,0.55); }
+  .row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .big { font-size: 22px; font-weight: 700; line-height: 1.1; margin: 2px 0 8px; }
+
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+         background: var(--warn); margin-right: 6px; vertical-align: middle; }
+  .dot.ok  { background: var(--ok);  box-shadow: 0 0 8px var(--ok); }
+  .dot.err { background: var(--err); }
+  .dot.mock{ background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  /* ---- energy bars ---- */
+  .bars { margin-top: 8px; }
+  .bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.08);
+         margin: 4px 0; overflow: hidden; }
+  .bar > span { display: block; height: 100%; width: 0%;
+                border-radius: 3px; transition: width 0.05s linear; }
+  .bar.low  > span { background: #ff5a3c; }
+  .bar.mid  > span { background: #f0b429; }
+  .bar.high > span { background: #4ea3ff; }
+  .bar.ovr  > span { background: #46d27a; }
+
+  /* ---- controls ---- */
+  #ctrl { bottom: 14px; right: 14px; display: flex; gap: 8px; align-items: center; }
+  #ctrl input[type=text] {
+    background: rgba(0,0,0,0.4); border: 1px solid var(--hair);
+    color: #e8edf4; border-radius: 8px; padding: 7px 9px; font-size: 12px; width: 210px;
+  }
+  button {
+    background: rgba(255,255,255,0.06); color: #e8edf4;
+    border: 1px solid var(--hair); border-radius: 8px;
+    padding: 7px 12px; font-size: 12px; cursor: pointer;
+  }
+  button:hover { background: rgba(255,255,255,0.14); }
+  button.active { background: var(--accent); color: #051018; border-color: var(--accent); }
+
+  .beatpulse { animation: flash 0.12s ease-out; }
+  @keyframes flash { from { color: #fff; } to { color: inherit; } }
+
+  #boot {
+    position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+    background: #05070b; color: #aeb7c4; font-size: 14px;
+  }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="boot">Loading Three.js from CDN…</div>
+
+  <div id="hud" class="panel">
+    <div class="eyebrow">RKADE LightBrain</div>
+    <div class="big" id="modeName">—</div>
+    <div class="row"><span class="k">Scene</span><span class="v" id="sceneName">—</span></div>
+    <div class="row"><span class="k">BPM</span><span class="v" id="bpm">—</span></div>
+    <div class="row"><span class="k">Master</span><span class="v" id="master">—</span></div>
+    <div id="flags" style="display:none; margin-top:6px; color:var(--warn); font-weight:600; letter-spacing:0.04em;"></div>
+    <div class="bars">
+      <div class="bar low"><span id="bLow"></span></div>
+      <div class="bar mid"><span id="bMid"></span></div>
+      <div class="bar high"><span id="bHigh"></span></div>
+      <div class="bar ovr"><span id="bOvr"></span></div>
+    </div>
+  </div>
+
+  <div id="stats" class="panel">
+    <div><span class="dot" id="dot"></span><span id="connText">connecting…</span></div>
+    <div class="row"><span class="k">Source</span><span class="v" id="srcText">—</span></div>
+    <div class="row"><span class="k">Net Hz</span><span class="v" id="netHz">0</span></div>
+    <div class="row"><span class="k">Engine Hz</span><span class="v" id="engineHz">—</span></div>
+    <div class="row"><span class="k">Render</span><span class="v" id="renderFps">0</span></div>
+    <div class="row"><span class="k">Fixtures</span><span class="v" id="fxCount">0</span></div>
+  </div>
+
+  <div id="layers" class="panel">
+    <div class="eyebrow">Layers</div>
+    <label><input type="checkbox" data-layer="uplight"   checked> Uplights</label>
+    <label><input type="checkbox" data-layer="wash"      checked> Washes</label>
+    <label><input type="checkbox" data-layer="beam"      checked> Moving Beams</label>
+    <label><input type="checkbox" data-layer="sparkle"   checked> Derby</label>
+    <label><input type="checkbox" data-layer="impact"    checked> Strobe</label>
+    <label><input type="checkbox" data-layer="structure" checked> GigBAR Frame</label>
+    <div class="eyebrow" style="margin-top:9px">View</div>
+    <div class="view-row" id="view-row">
+      <button class="view-btn active" data-view="angle">Angle</button>
+      <button class="view-btn" data-view="front">Front</button>
+      <button class="view-btn" data-view="top">Top</button>
+    </div>
+  </div>
+
+  <div id="help" class="panel">
+    Drag to orbit · scroll to zoom · right-drag to pan.
+    Live beams interpolate at 60&nbsp;fps between 15&nbsp;Hz network frames.
+    Overlapping beams blend additively on the floor.
+  </div>
+
+  <div id="ctrl" class="panel">
+    <input id="wsUrl" type="text" spellcheck="false" />
+    <button id="connectBtn">Connect</button>
+    <button id="demoBtn">Demo</button>
+  </div>
+
+  <!-- Control dock: full control of the rig from the 3D view (commands POST to
+       /api/command on the same backend). Mode/scene rows are built from state. -->
+  <div id="controls" class="panel">
+    <div class="ctl-line"><span class="ctl-label">Mode</span><div class="ctl-row" id="ctl-modes"></div></div>
+    <div class="ctl-line" id="ctl-scenes-line"><span class="ctl-label">Scene</span><div class="ctl-row" id="ctl-scenes"></div></div>
+    <div class="ctl-line">
+      <span class="ctl-label">Strobe</span>
+      <div class="ctl-row" id="ctl-strobe">
+        <button class="ctl-btn" id="ctl-strobe-off" data-act>OFF</button>
+        <button class="ctl-btn strobe-rate" data-master="0.2">SLOW</button>
+        <button class="ctl-btn strobe-rate" data-master="0.45">MED</button>
+        <button class="ctl-btn strobe-rate" data-master="0.7">FAST</button>
+        <button class="ctl-btn strobe-rate" data-master="1.0">MAX</button>
+      </div>
+    </div>
+    <div class="ctl-line">
+      <span class="ctl-label">Uplights</span>
+      <div class="ctl-row" id="ctl-uplights">
+        <button class="ctl-btn upl-btn" data-n="6">6</button>
+        <button class="ctl-btn upl-btn" data-n="12">12</button>
+        <button class="ctl-btn upl-btn" data-n="18">18</button>
+      </div>
+    </div>
+    <div class="ctl-line">
+      <span class="ctl-label">Rig</span>
+      <div class="ctl-row">
+        <button class="ctl-btn wide" id="ctl-blackout" data-act>BLACKOUT</button>
+        <button class="ctl-btn" id="ctl-kill-strobe" data-act title="Kill strobe">&#x26A1;</button>
+        <button class="ctl-btn" id="ctl-kill-derby"  data-act title="Kill derby">&#x2B55;</button>
+        <button class="ctl-btn" id="ctl-kill-laser"  data-act title="Kill laser">&#x25B6;</button>
+        <span class="ctl-gap"></span>
+        <button class="ctl-btn" id="ctl-d0"   data-act>0%</button>
+        <button class="ctl-btn" id="ctl-d50"  data-act>50%</button>
+        <button class="ctl-btn" id="ctl-d100" data-act>100%</button>
+        <span class="ctl-gap"></span>
+        <button class="ctl-btn" id="ctl-bump"  data-act>BUMP</button>
+        <button class="ctl-btn wide" id="ctl-white" data-act>WHITE HOLD</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Three.js + addons via CDN. Zero build tooling. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+  import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+  // =========================================================================
+  // 1. CONSTANTS — coordinate mapping from the engine's 2D scene to 3D world
+  // =========================================================================
+  // The engine places fixtures in a 1200 x 800 pixel plane (app/render/scene.py),
+  // origin top-left, y growing downward. We map that onto a centered floor:
+  //   worldX =  (px / SRC_W - 0.5) * ROOM_W
+  //   worldZ =  (py / SRC_H - 0.5) * ROOM_D
+  const SRC_W = 1200, SRC_H = 800;
+  const ROOM_W = 28;   // floor width  (X)
+  const ROOM_D = 19;   // floor depth  (Z)
+  const ROOM_H = 12;   // ceiling height (Y)
+  const TRUSS_H = 9.5; // height of the overhead truss where movers/washes hang
+
+  // Exponential smoothing rate for lerping between 15Hz network frames.
+  // current += (target - current) * (1 - exp(-dt * SMOOTH))  → frame-rate independent.
+  const SMOOTH = 13.0;
+
+  // Intensity scaling tuned for the additive look.
+  const BEAM_LIGHT_K = 5.0;
+  const WASH_LIGHT_K = 3.5;
+
+  function mapX(px) { return (px / SRC_W - 0.5) * ROOM_W; }
+  function mapZ(py) { return (py / SRC_H - 0.5) * ROOM_D; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function col(rgb) { // [0-255,0-255,0-255] -> THREE.Color (linear-safe via convertSRGB)
+    return new THREE.Color(
+      (rgb && rgb[0] || 0) / 255,
+      (rgb && rgb[1] || 0) / 255,
+      (rgb && rgb[2] || 0) / 255
+    );
+  }
+
+  // =========================================================================
+  // 2. SCENE SETUP — dark room, floor, truss, camera
+  // =========================================================================
+  const appEl = document.getElementById('app');
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  appEl.appendChild(renderer.domElement);
+
+  // Soft vertical gradient used as the cone alphaMap so beams fade at both ends
+  // instead of reading as hard-edged "plastic". Fading both ends keeps it
+  // correct regardless of cone UV orientation.
+  function makeBeamGradientTex() {
+    const c = document.createElement('canvas');
+    c.width = 4; c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 0, 64);
+    grad.addColorStop(0.0, '#000');
+    grad.addColorStop(0.18, '#fff');
+    grad.addColorStop(0.7, '#aaa');
+    grad.addColorStop(1.0, '#000');
+    g.fillStyle = grad; g.fillRect(0, 0, 4, 64);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    return tex;
+  }
+  const BEAM_GRADIENT = makeBeamGradientTex();
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05070b);
+  scene.fog = new THREE.Fog(0x05070b, 28, 75);
+
+  const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 500);
+  camera.position.set(0, 12, 26);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(0, 2.5, 0);
+  controls.maxPolarAngle = Math.PI * 0.49; // don't dip below the floor
+  controls.minDistance = 8;
+  controls.maxDistance = 60;
+
+  // Camera presets — Angle (default 3/4), Front (audience POV), Top (coverage
+  // map, handy for judging uplight-bank spread). Eased tween, then hand control
+  // back to the orbit controls so the DJ can still drag from the new spot.
+  const VIEWS = {
+    angle: { pos: [0, 12, 26],     tgt: [0, 2.5, 0] },
+    front: { pos: [0, 9, 31],      tgt: [0, 3, 0] },
+    top:   { pos: [0, 44, 0.001],  tgt: [0, 0, 0] },
+  };
+  let _viewTween = null;
+  function setView(name) {
+    const v = VIEWS[name]; if (!v) return;
+    _viewTween = {
+      p0: camera.position.clone(), t0: controls.target.clone(),
+      p1: new THREE.Vector3(...v.pos), t1: new THREE.Vector3(...v.tgt),
+      start: performance.now(), dur: 520,
+    };
+    controls.enabled = false;
+    document.querySelectorAll('#view-row .view-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.view === name));
+  }
+
+  // --- post-processing: UnrealBloom so bright beams glow like real light ---
+  // RenderPass -> UnrealBloomPass -> OutputPass is the canonical order; OutputPass
+  // applies tone mapping + sRGB so colors stay correct through the bloom buffer.
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.9,   // strength
+    0.5,   // radius
+    0.55   // threshold — only the brighter-than-this pixels bloom
+  );
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+
+  // --- dark room (inside of a box) ---
+  const roomGeo = new THREE.BoxGeometry(ROOM_W + 6, ROOM_H, ROOM_D + 6);
+  const roomMat = new THREE.MeshStandardMaterial({
+    color: 0x0b0e14, roughness: 1.0, metalness: 0.0, side: THREE.BackSide
+  });
+  const room = new THREE.Mesh(roomGeo, roomMat);
+  room.position.y = ROOM_H / 2;
+  scene.add(room);
+
+  // --- floor plane: catches the faked light "puddles". This is the "lux map". ---
+  // Additive circle meshes are laid on this plane where beams land; a red and a
+  // blue puddle overlapping render magenta natively via additive blending,
+  // with no real lights and no shader-uniform cost. (Constraints 4 & 5.)
+  const floorGeo = new THREE.PlaneGeometry(ROOM_W + 6, ROOM_D + 6, 1, 1);
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x14171d, roughness: 0.62, metalness: 0.05
+  });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  // faint floor grid for spatial reference
+  const grid = new THREE.GridHelper(ROOM_W + 6, 24, 0x1c2230, 0x141821);
+  grid.position.y = 0.01;
+  scene.add(grid);
+
+  // --- overhead truss (purely cosmetic context for hung fixtures) ---
+  const trussMat = new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 0.8, metalness: 0.4 });
+  function addTrussBar(x1, z1, x2, z2) {
+    const dx = x2 - x1, dz = z2 - z1;
+    const len = Math.hypot(dx, dz);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, len), trussMat);
+    bar.position.set((x1 + x2) / 2, TRUSS_H + 0.6, (z1 + z2) / 2);
+    bar.rotation.y = -Math.atan2(dx, dz);
+    scene.add(bar);
+  }
+  addTrussBar(mapX(140), mapZ(660), mapX(1060), mapZ(660));   // front truss over booth
+  addTrussBar(mapX(600), mapZ(120), mapX(600), mapZ(700));    // spine
+
+  // --- baseline lighting so the room isn't pitch black ---
+  // Only Hemisphere + Ambient lights are used. These are global and do NOT
+  // consume the per-fragment punctual-light uniform arrays, so there is no
+  // WebGL light-limit risk. ALL fixture illumination is faked with additive
+  // meshes (see below) — no SpotLight or PointLight is ever instantiated.
+  scene.add(new THREE.HemisphereLight(0x202a3a, 0x05060a, 0.25));
+  // "ambient_warm" tint driven by the engine's warm W/A channels.
+  const warmAmbient = new THREE.AmbientLight(0xffb066, 0.0);
+  scene.add(warmAmbient);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.05));
+
+  // Shared additive "puddle" — a flat circle mesh laid on the floor at the
+  // point a beam/wash strikes it. Overlapping red + blue puddles sum to
+  // magenta via AdditiveBlending. This is the entire lux map. (Constraint 5.)
+  const PUDDLE_GEO = new THREE.CircleGeometry(1, 32);
+  function makePuddle() {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(PUDDLE_GEO, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = 0.05; // clear the floor (0) and grid (0.01) to avoid z-fighting
+    scene.add(mesh);
+    return { mesh, mat };
+  }
+
+  // =========================================================================
+  // 3. FIXTURE FACTORY — primitives only (cylinders + additive cones + puddles)
+  // =========================================================================
+  // Each fixture is registered with a `cur` (rendered) and `tgt` (latest network)
+  // state. The render loop lerps cur -> tgt every frame. (Constraint 2.)
+  const fixtures = new Map(); // id -> fixture record
+
+  const DOWN = new THREE.Vector3(0, -1, 0);
+  const UP   = new THREE.Vector3(0,  1, 0);
+
+  // Shared materials for fixture bodies
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x15181e, roughness: 0.7, metalness: 0.6 });
+
+  function makeConeMaterial() {
+    // Translucent, additive volumetric beam. Red + Blue cones overlapping in the
+    // air read as magenta because additive blending sums their contributions.
+    return new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.0,
+      alphaMap: BEAM_GRADIENT,   // soft fade along the beam length (less "plastic")
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+  }
+
+  // Layer visibility, toggled from the Layers panel. Keys are fixture types
+  // (plus "structure" for the GigBAR frame).
+  const show = { uplight: true, wash: true, beam: true, sparkle: true,
+                 impact: true, structure: true };
+
+  // -------------------------------------------------------------------------
+  // GigBAR: the engine emits it as 5 co-located elements near 2D (600,660):
+  //   gigbar_mover_l/r (beams), gigbar_wash, gigbar_derby (sparkle),
+  //   gigbar_impact (strobe). We mount each on a physical bar at its own slot
+  //   so the cluster reads as one fixture instead of a blob on a single point.
+  // -------------------------------------------------------------------------
+  const GIGBAR_SLOTS = {           // world-X offset of each element along the bar
+    gigbar_mover_l: -1.7,
+    gigbar_derby:   -0.6,
+    gigbar_wash:     0.0,
+    gigbar_impact:   0.6,
+    gigbar_mover_r:  1.7,
+  };
+  function gigbarCenter2d(f) {     // recover the bar centre from an element's 2D pos
+    if (f.id === 'gigbar_mover_l') return { x: f.x + 27.5, y: f.y };
+    if (f.id === 'gigbar_mover_r') return { x: f.x - 27.5, y: f.y };
+    return { x: f.x, y: f.y };
+  }
+
+  let _gigbarRig = null;
+  function ensureGigbarRig(ax, az) {
+    if (_gigbarRig) return _gigbarRig;
+    const g = new THREE.Group();
+    g.position.set(ax, TRUSS_H, az);
+    const barMat = new THREE.MeshStandardMaterial({ color: 0x1a1d24, roughness: 0.6, metalness: 0.6 });
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.22, 0.45), barMat);
+    g.add(bar);
+    // mover yokes at the ends
+    [-1.7, 1.7].forEach(xo => {
+      const yoke = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.32, 0.5), bodyMat);
+      yoke.position.set(xo, -0.18, 0);
+      g.add(yoke);
+    });
+    // T-bar stand down to the floor — gives the GigBAR a ground reference
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, TRUSS_H, 8), bodyMat);
+    pole.position.set(0, -TRUSS_H / 2, 0.35);
+    g.add(pole);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.08, 1.0), bodyMat);
+    foot.position.set(0, -TRUSS_H + 0.04, 0.35);
+    g.add(foot);
+    scene.add(g);
+    _gigbarRig = g;
+    return g;
+  }
+
+  // Resolve a fixture's 3D base position; GigBAR elements snap to bar slots.
+  function basePos(f, defaultY) {
+    const slot = GIGBAR_SLOTS[f.id];
+    if (slot !== undefined) {
+      const c  = gigbarCenter2d(f);
+      const ax = mapX(c.x), az = mapZ(c.y);
+      ensureGigbarRig(ax, az);
+      return { x: ax + slot, y: TRUSS_H, z: az };
+    }
+    return { x: mapX(f.x), y: defaultY, z: mapZ(f.y) };
+  }
+
+  // ---- moving-head beam: cylinder body + additive cone + faked floor puddle ----
+  function createBeam(f) {
+    const b = basePos(f, TRUSS_H);
+    const group = new THREE.Group();
+    group.position.set(b.x, b.y, b.z);
+    scene.add(group);
+
+    // fixture body (primitive cylinder)
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.7, 16), bodyMat);
+    group.add(body);
+
+    // unit cone: tip at group origin, extends down -Y to length 1, base radius 1.
+    const coneGeo = new THREE.ConeGeometry(1, 1, 28, 1, true);
+    coneGeo.translate(0, -0.5, 0); // tip -> origin, base -> y=-1
+    const coneMat = makeConeMaterial();
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    group.add(cone);
+
+    // glowing lens at the head
+    const lensMat = new THREE.MeshBasicMaterial({ color: 0x000000, blending: THREE.AdditiveBlending, depthWrite: false });
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), lensMat);
+    group.add(lens);
+
+    // faked floor hit — additive circle placed where the beam strikes the floor
+    const puddle = makePuddle();
+
+    return registerFixture(f.id, 'beam', { group, cone, coneMat, lens, lensMat, puddle,
+      cur: beamState(f), tgt: beamState(f), home: { x: b.x, z: b.z } });
+  }
+
+  function beamState(f) {
+    const c = col(f.rgb);
+    return {
+      r: c.r, g: c.g, b: c.b,
+      brt: (f.active === false) ? 0 : (f.brt || 0),
+      angle: f.angle || 0,        // degrees from vertical, +right
+      spread: f.spread || 8,      // cone half-width in degrees (engine: pixels-ish, treat as deg)
+      length: f.length || 400
+    };
+  }
+
+  // ---- wash: cylinder body + wide additive cone + wide faked floor puddle ----
+  function createWash(f) {
+    const b = basePos(f, TRUSS_H);
+    const x = b.x, z = b.z;
+    const group = new THREE.Group();
+    group.position.set(x, TRUSS_H, z);
+    scene.add(group);
+
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.5, 16), bodyMat);
+    group.add(body);
+
+    const coneGeo = new THREE.ConeGeometry(1, 1, 28, 1, true);
+    coneGeo.translate(0, -0.5, 0);
+    const coneMat = makeConeMaterial();
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    // wash points straight down
+    cone.quaternion.setFromUnitVectors(UP, DOWN);
+    group.add(cone);
+
+    // glowing lens at the fixture mouth — keeps the wash's colour and on/off
+    // state legible even when its soft cone blends into the beams.
+    const lensMat = new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false });
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), lensMat);
+    lens.position.y = -0.3;
+    group.add(lens);
+
+    const puddle = makePuddle();
+
+    return registerFixture(f.id, 'wash', { group, cone, coneMat, lens, lensMat, puddle,
+      cur: washState(f), tgt: washState(f), home: { x, z } });
+  }
+
+  function washState(f) {
+    const c = col(f.rgb);
+    return {
+      r: c.r, g: c.g, b: c.b,
+      brt: (f.active === false) ? 0 : (f.brt || 0),
+      radius: f.radius || 120,
+      pulse: f.pulse || 0
+    };
+  }
+
+  // ---- uplight: floor can + upward additive cone (washes the "wall") ----
+  function createUplight(f) {
+    const x = mapX(f.x), z = mapZ(f.y);
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    scene.add(group);
+
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.4, 12), bodyMat);
+    body.position.y = 0.2;
+    group.add(body);
+
+    // upward cone (tip at can, base near ceiling)
+    const coneGeo = new THREE.ConeGeometry(1, 1, 18, 1, true);
+    coneGeo.translate(0, 0.5, 0); // tip at origin, base at +y=1
+    const coneMat = makeConeMaterial();
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.y = 0.4;
+    group.add(cone);
+
+    // additive floor glow disc — contributes to the lux map at the can's foot
+    const discMat = new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    });
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), discMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.05; // clear floor/grid to avoid z-fighting
+    group.add(disc);
+
+    return registerFixture(f.id, 'uplight', { group, cone, coneMat, disc, discMat,
+      cur: upState(f), tgt: upState(f) });
+  }
+
+  function upState(f) {
+    const c = col(f.rgb);
+    return { r: c.r, g: c.g, b: c.b, brt: (f.active === false) ? 0 : (f.brt || 0) };
+  }
+
+  // ---- derby: housing + rotating fan of additive beams (the classic derby look) ----
+  function createSparkle(f) {
+    const b = basePos(f, TRUSS_H - 0.3);
+    const group = new THREE.Group();
+    group.position.set(b.x, b.y, b.z);
+    scene.add(group);
+
+    // derby housing
+    const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.3, 12), bodyMat);
+    group.add(housing);
+
+    // spinning rig of thin beams tilted outward, distributed around a circle
+    const spin = new THREE.Group();
+    group.add(spin);
+    const beams = [];
+    const N = 8;
+    const tilt = THREE.MathUtils.degToRad(58);   // angle from vertical
+    for (let i = 0; i < N; i++) {
+      const coneGeo = new THREE.ConeGeometry(1, 1, 8, 1, true);
+      coneGeo.translate(0, -0.5, 0);             // tip at origin, body down -Y
+      const m = makeConeMaterial();
+      const cone = new THREE.Mesh(coneGeo, m);
+      cone.scale.set(0.12, 6.0, 0.12);           // thin, long
+      const inner = new THREE.Group();           // tilt the down-axis outward
+      inner.rotation.z = tilt;
+      inner.add(cone);
+      const holder = new THREE.Group();          // revolve around the circle
+      holder.rotation.y = (i / N) * Math.PI * 2;
+      holder.add(inner);
+      spin.add(holder);
+      beams.push(m);
+    }
+    return registerFixture(f.id, 'sparkle', { group, spin, beams,
+      cur: sparkState(f), tgt: sparkState(f) });
+  }
+  function sparkState(f) {
+    const c = col(f.rgb);
+    return { r: c.r, g: c.g, b: c.b, brt: (f.active === false) ? 0 : (f.brt || 0),
+             amount: f.amount || 0 };
+  }
+
+  // ---- impact/strobe: additive flash sphere ----
+  function createImpact(f) {
+    const b = basePos(f, TRUSS_H - 0.2);
+    const group = new THREE.Group();
+    group.position.set(b.x, b.y, b.z);
+    scene.add(group);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true,
+      opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), mat);
+    group.add(ball);
+    // faked floor flash — large additive circle under the strobe
+    const puddle = makePuddle();
+    puddle.mesh.position.set(b.x, 0.05, b.z);
+    return registerFixture(f.id, 'impact', { group, ball, mat, puddle,
+      cur: { brt: 0, flash: 0 }, tgt: { brt: 0, flash: 0 } });
+  }
+
+  function registerFixture(id, type, rec) {
+    rec.type = type;
+    rec.id = id;
+    rec.seen = true;
+    fixtures.set(id, rec);
+    return rec;
+  }
+
+  // =========================================================================
+  // 4. APPLY STATE — feed the latest 15Hz network frame into fixture targets
+  // =========================================================================
+  // We never move geometry here; we only set target values. The render loop
+  // does the smoothing so motion stays smooth at display refresh rate.
+  let global = {
+    master: 1.0, uplight_dimmer: 1.0, strobe_master: 1.0, strobe_rate: 0,
+    blackout: false, beat: false, overall: 0, warm: 0,
+    kill_strobe: false, kill_derby: false, kill_laser: false,
+    test_mode: false, engineFps: 0
+  };
+
+  function applyState(s) {
+    if (!s) return;
+
+    // ---- global modifiers ----
+    global.master = (s.master_dimmer != null) ? s.master_dimmer : 1.0;
+    global.uplight_dimmer = (s.uplight_dimmer != null) ? s.uplight_dimmer : 1.0;
+    global.strobe_master = (s.strobe_master != null) ? s.strobe_master : 1.0;
+    global.strobe_rate = s.strobe_rate || 0;          // Hz — regenerated client-side
+    global.kill_strobe = !!s.kill_strobe;
+    global.kill_derby  = !!s.kill_derby;              // kills sparkle/derby fixtures
+    global.kill_laser  = !!s.kill_laser;              // kills moving-beam fixtures
+    global.test_mode   = !!s.test_mode;
+    global.engineFps   = s.fps || 0;
+    global.blackout = !!s.blackout;
+    global.beat = !!s.beat;
+    global.overall = s.overall_energy || 0;
+
+    const fx = s.fixtures || {};
+    global.warm = fx.ambient_warm || 0;
+
+    const present = new Set();
+
+    (fx.beams || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createBeam(f);
+      rec.tgt = beamState(f);
+      present.add(f.id);
+    });
+    (fx.washes || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createWash(f);
+      rec.tgt = washState(f);
+      present.add(f.id);
+    });
+    (fx.uplights || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createUplight(f);
+      rec.tgt = upState(f);
+      present.add(f.id);
+    });
+    if ((fx.uplights || []).length !== _uplightCount) {
+      _uplightCount = (fx.uplights || []).length;
+      assignUplightRanks();   // re-rank when the uplight set first arrives / changes
+    }
+    (fx.sparkles || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createSparkle(f);
+      rec.tgt = sparkState(f);
+      present.add(f.id);
+    });
+    (fx.impacts || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createImpact(f);
+      rec.tgt = { brt: (f.active === false) ? 0 : (f.brt || 0), flash: f.flash ? 1 : 0 };
+      present.add(f.id);
+    });
+
+    // any fixture not present this frame fades to dark (keeps geometry stable)
+    fixtures.forEach((rec, id) => {
+      if (!present.has(id) && rec.tgt) {
+        if ('brt' in rec.tgt) rec.tgt.brt = 0;
+      }
+    });
+
+    updateHud(s);
+    buildControls(s);
+    updateControls(s);
+  }
+
+  // =========================================================================
+  // 4b. CONTROL DOCK — full rig control from the 3D view
+  // =========================================================================
+  // The view is normally a passive consumer, but it can also drive the engine:
+  // commands POST to /api/command on the backend (same origin when embedded in
+  // the dashboard). In pure demo mode there's no backend, so these are inert.
+  const DEFAULT_MODES = [
+    { key: 'open_dance', display_name: 'Open Dance' },
+    { key: 'dinner', display_name: 'Dinner' },
+    { key: 'banger', display_name: 'Banger' },
+    { key: 'indian_latin', display_name: 'Indian / Latin' },
+    { key: 'slow_dance', display_name: 'Slow Dance' },
+    { key: 'speech', display_name: 'Speech' },
+  ];
+  let _modesBuilt = false;
+  let _scenesSig = '';
+  let _strobeLatch = null;   // master value of the currently latched strobe rate, or null
+  let uplightShow = 18;      // how many uplights to render (banks of 6); preview only
+  let _uplightCount = 0;     // last seen uplight count, to know when to re-rank
+  const _ctlTap = {};   // per-mode tap state for single/double (arm) detection
+
+  function cmdUrl() {
+    if (location.protocol !== 'file:') return '/api/command';
+    return 'http://localhost:8765/api/command';   // best-effort for file:// standalone
+  }
+  function cmd(payload) {
+    fetch(cmdUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload) }).catch(() => {});
+  }
+
+  // single tap = set_mode; double tap = arm_mode (drop-sync "third hand")
+  function modeTapCtl(key) {
+    const tp = _ctlTap[key] || { n: 0, timer: null };
+    tp.n++;
+    if (tp.timer) clearTimeout(tp.timer);
+    tp.timer = setTimeout(() => {
+      if (tp.n >= 2) cmd({ type: 'arm_mode', value: key });
+      else           cmd({ type: 'set_mode', value: key });
+      tp.n = 0; tp.timer = null;
+    }, 260);
+    _ctlTap[key] = tp;
+  }
+
+  function buildControls(s) {
+    // modes (once)
+    if (!_modesBuilt) {
+      const list = (s.modes && s.modes.length) ? s.modes : DEFAULT_MODES;
+      const row = document.getElementById('ctl-modes');
+      row.innerHTML = '';
+      list.forEach(m => {
+        const b = document.createElement('button');
+        b.className = 'ctl-btn mode'; b.dataset.key = m.key;
+        b.textContent = m.display_name || m.key;
+        b.addEventListener('touchstart', e => { e.preventDefault(); modeTapCtl(m.key); }, { passive: false });
+        b.addEventListener('mousedown', () => modeTapCtl(m.key));
+        row.appendChild(b);
+      });
+      _modesBuilt = true;
+    }
+    // scenes (rebuild when the list changes)
+    const scenes = s.scenes || [];
+    const sig = scenes.map(x => x.id).join(',');
+    if (sig !== _scenesSig) {
+      _scenesSig = sig;
+      const row = document.getElementById('ctl-scenes');
+      row.innerHTML = '';
+      scenes.forEach(sc => {
+        const b = document.createElement('button');
+        b.className = 'ctl-btn scene'; b.dataset.id = sc.id;
+        b.textContent = sc.name || sc.id;
+        b.addEventListener('mousedown', () => cmd({ type: 'activate_scene', value: sc.id }));
+        b.addEventListener('touchstart', e => { e.preventDefault(); cmd({ type: 'activate_scene', value: sc.id }); }, { passive: false });
+        row.appendChild(b);
+      });
+      const rel = document.createElement('button');
+      rel.className = 'ctl-btn'; rel.textContent = 'Release';
+      rel.addEventListener('mousedown', () => cmd({ type: 'release_scene' }));
+      row.appendChild(rel);
+      document.getElementById('ctl-scenes-line').style.display = scenes.length ? '' : 'none';
+    }
+  }
+
+  let _ctlWired = false;
+  function wireControls() {
+    if (_ctlWired) return; _ctlWired = true;
+    const on = (id, fn) => document.getElementById(id).addEventListener('mousedown', fn);
+    on('ctl-blackout',    () => { _strobeLatch = null; reflectStrobe(); cmd({ type: 'blackout' }); });
+    on('ctl-kill-strobe', () => cmd({ type: 'toggle_kill', target: 'strobe' }));
+    on('ctl-kill-derby',  () => cmd({ type: 'toggle_kill', target: 'derby' }));
+    on('ctl-kill-laser',  () => cmd({ type: 'toggle_kill', target: 'laser' }));
+    on('ctl-d0',   () => cmd({ type: 'set_fader', fader: 'master', value: 0 }));
+    on('ctl-d50',  () => cmd({ type: 'set_fader', fader: 'master', value: 0.5 }));
+    on('ctl-d100', () => cmd({ type: 'set_fader', fader: 'master', value: 1 }));
+    on('ctl-bump', () => cmd({ type: 'momentary', effect: 'flash', action: 'start' }));
+    // momentary white hold — press and release
+    const w = document.getElementById('ctl-white');
+    const wDown = e => { if (e.cancelable) e.preventDefault(); cmd({ type: 'white_hold', state: true }); };
+    const wUp   = () => cmd({ type: 'white_hold', state: false });
+    w.addEventListener('mousedown', wDown);
+    w.addEventListener('mouseup', wUp);
+    w.addEventListener('mouseleave', wUp);
+    w.addEventListener('touchstart', wDown, { passive: false });
+    w.addEventListener('touchend', wUp);
+    w.addEventListener('touchcancel', wUp);
+
+    // Strobe rate ladder — tap a speed to latch a manual strobe at that rate,
+    // tap OFF to release. Buttons (not a slider) so you can ride a build up the
+    // ladder by ear without hunting for a value. Sets strobe_master (the engine
+    // maps 0-1 to 2-16 Hz) and engages strobe_hold.
+    document.querySelectorAll('#ctl-strobe .strobe-rate').forEach(b => {
+      const fire = e => {
+        if (e.cancelable) e.preventDefault();
+        cmd({ type: 'strobe_master', value: parseFloat(b.dataset.master) });
+        cmd({ type: 'momentary', effect: 'strobe_hold', action: 'start' });
+        _strobeLatch = b.dataset.master;
+        reflectStrobe();
+      };
+      b.addEventListener('mousedown', fire);
+      b.addEventListener('touchstart', fire, { passive: false });
+    });
+    const strobeOff = () => {
+      cmd({ type: 'momentary', effect: 'strobe_hold', action: 'stop' });
+      _strobeLatch = null;
+      reflectStrobe();
+    };
+    document.getElementById('ctl-strobe-off').addEventListener('mousedown', strobeOff);
+
+    document.querySelectorAll('#ctl-uplights .upl-btn').forEach(b => {
+      const fire = e => { if (e.cancelable) e.preventDefault(); setUplights(parseInt(b.dataset.n, 10)); };
+      b.addEventListener('mousedown', fire);
+      b.addEventListener('touchstart', fire, { passive: false });
+    });
+    reflectUplights();
+
+    document.querySelectorAll('#view-row .view-btn').forEach(b =>
+      b.addEventListener('click', () => setView(b.dataset.view)));
+  }
+
+  function reflectStrobe() {
+    document.querySelectorAll('#ctl-strobe .strobe-rate').forEach(b =>
+      b.classList.toggle('active', b.dataset.master === _strobeLatch));
+  }
+
+  // ---- uplight banks ----------------------------------------------------
+  // The rig is uplit in banks of 6 (DJs deploy 6 / 12 / 18 depending on the
+  // room). Rank uplights so each count is an EVEN, NESTED spread around the
+  // floor: the 6-set is a subset of the 12-set is a subset of all 18. This is
+  // a preview only — it masks fixtures in the 3D view, it does not change DMX.
+  function assignUplightRanks() {
+    const ups = [];
+    fixtures.forEach(r => { if (r.type === 'uplight') ups.push(r); });
+    const n = ups.length;
+    if (!n) return;
+    let cx = 0, cz = 0;
+    ups.forEach(r => { cx += r.group.position.x; cz += r.group.position.z; });
+    cx /= n; cz /= n;
+    ups.forEach(r => { r._ang = Math.atan2(r.group.position.z - cz, r.group.position.x - cx); });
+    ups.sort((a, b) => a._ang - b._ang);                 // ring order around the floor
+    const banks = Math.max(1, Math.round(n / 6));
+    // interleave banks so any prefix of `rank` is spread evenly around the ring
+    ups.forEach((r, j) => { r._key = (j % banks) * 1000 + Math.floor(j / banks); });
+    ups.slice().sort((a, b) => a._key - b._key).forEach((r, idx) => { r.uprank = idx; });
+  }
+
+  function setUplights(n) {
+    uplightShow = n;
+    document.querySelectorAll('#ctl-uplights .upl-btn').forEach(b =>
+      b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
+  }
+  function reflectUplights() { setUplights(uplightShow); }
+
+  function updateControls(s) {
+    const cur = s.mode, armed = s.armed_mode || null;
+    document.querySelectorAll('#ctl-modes .mode').forEach(b => {
+      b.classList.toggle('active', b.dataset.key === cur);
+      b.classList.toggle('armed', b.dataset.key === armed);
+    });
+    document.querySelectorAll('#ctl-scenes .scene').forEach(b =>
+      b.classList.toggle('active', b.dataset.id === s.scene));
+    document.getElementById('ctl-blackout').classList.toggle('active', !!s.blackout);
+    document.getElementById('ctl-kill-strobe').classList.toggle('kill-on', !!s.kill_strobe);
+    document.getElementById('ctl-kill-derby').classList.toggle('kill-on', !!s.kill_derby);
+    document.getElementById('ctl-kill-laser').classList.toggle('kill-on', !!s.kill_laser);
+    document.getElementById('ctl-white').classList.toggle('held', !!s.white_hold);
+  }
+
+  // =========================================================================
+  // 5. RENDER LOOP — rAF @ 60Hz+, exponential lerp toward targets
+  // =========================================================================
+  const _q = new THREE.Quaternion();
+  const _dir = new THREE.Vector3();
+  const _aim = new THREE.Vector3();
+  const clock = new THREE.Clock();
+
+  // render-fps meter
+  let _fpsAccum = 0, _fpsFrames = 0, _renderFps = 0;
+
+  // Pausable loop — the dashboard postMessages lb-pause/lb-resume when the 3D
+  // tab is hidden/shown, so an embedded view burns no GPU while you're elsewhere.
+  let _running = false;
+  let _rafId = 0;
+  let _strobeActive = false;   // set each frame; drives the strobe fixture flash
+  function animate() {
+    _rafId = requestAnimationFrame(animate);
+    const dt = Math.min(clock.getDelta(), 0.1);
+    const t = clock.elapsedTime;
+    const k = 1 - Math.exp(-dt * SMOOTH); // frame-rate independent lerp factor
+
+    const masterGate = global.blackout ? 0 : global.master;
+
+    // Client-side strobe regeneration: a 2-16 Hz strobe cannot survive the 15 Hz
+    // network stream (Nyquist), so we rebuild it here at full refresh rate.
+    // NOTE: the backend's strobe_rate is a 0-1 SPEED proxy, not Hz (see
+    // engine/strobe.py: rate = t, freq = 2..16 Hz). Map it back to real Hz.
+    _strobeActive = (!global.kill_strobe && global.strobe_rate > 0.001);
+    let strobeGate = 1.0;
+    if (_strobeActive) {
+      const freq  = 2.0 + clamp(global.strobe_rate, 0, 1) * 14.0; // mirror StrobeEngine 2-16 Hz
+      const phase = (t * freq) % 1.0;
+      strobeGate  = (phase < 0.5) ? 1.0 : 0.0;   // hard black between flashes
+    }
+
+    // Per-type gates fold in kill switches and uplight_dimmer.
+    const beamGate    = masterGate * (global.kill_laser ? 0 : 1) * strobeGate;
+    const washGate    = masterGate * strobeGate;
+    const upGate      = masterGate * global.uplight_dimmer;
+    const sparkleGate = masterGate * (global.kill_derby ? 0 : 1);
+    const impactGate  = masterGate * (global.kill_strobe ? 0 : 1) * strobeGate;
+
+    fixtures.forEach(rec => {
+      switch (rec.type) {
+        case 'beam':    updateBeam(rec, k, beamGate, t); break;
+        case 'wash':    updateWash(rec, k, washGate, t); break;
+        case 'uplight': updateUplight(rec, k, upGate); break;
+        case 'sparkle': updateSparkle(rec, k, sparkleGate, t); break;
+        case 'impact':  updateImpact(rec, k, impactGate, t); break;
+      }
+    });
+
+    // ambient warm tint (global AmbientLight — not a punctual light)
+    warmAmbient.intensity = lerp(warmAmbient.intensity, global.warm * 0.5 * masterGate, k);
+
+    if (_gigbarRig) _gigbarRig.visible = show.structure;
+
+    if (_viewTween) {
+      const e = Math.min(1, (performance.now() - _viewTween.start) / _viewTween.dur);
+      const s = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2; // easeInOutQuad
+      camera.position.lerpVectors(_viewTween.p0, _viewTween.p1, s);
+      controls.target.lerpVectors(_viewTween.t0, _viewTween.t1, s);
+      if (e >= 1) { _viewTween = null; controls.enabled = true; }
+    }
+
+    controls.update();
+    composer.render(); // bloom pipeline (RenderPass -> Bloom -> OutputPass)
+
+    // fps meter
+    _fpsAccum += dt; _fpsFrames++;
+    if (_fpsAccum >= 0.5) {
+      _renderFps = Math.round(_fpsFrames / _fpsAccum);
+      document.getElementById('renderFps').textContent = _renderFps;
+      _fpsAccum = 0; _fpsFrames = 0;
+    }
+  }
+
+  function lerpColor(rec, k) {
+    const c = rec.cur, g = rec.tgt;
+    c.r = lerp(c.r, g.r, k); c.g = lerp(c.g, g.g, k); c.b = lerp(c.b, g.b, k);
+    c.brt = lerp(c.brt, g.brt, k);
+  }
+
+  // Apply layer visibility to a fixture's owned meshes; returns whether it shows.
+  function applyVis(rec) {
+    const v = show[rec.type] !== false;
+    rec.group.visible = v;
+    if (rec.puddle) rec.puddle.mesh.visible = v;
+    return v;
+  }
+
+  function updateBeam(rec, k, master, t) {
+    if (!applyVis(rec)) return;
+    const c = rec.cur, g = rec.tgt;
+    lerpColor(rec, k);
+    c.angle = lerp(c.angle, g.angle, k);
+    c.spread = lerp(c.spread, g.spread, k);
+
+    // aim: angle is degrees-from-vertical (+right). Lateral offset = H * tan(angle),
+    // plus a fixed forward throw so movers sweep across the floor.
+    const ang = THREE.MathUtils.degToRad(clamp(c.angle, -75, 75));
+    const aimX = rec.home.x + Math.tan(ang) * TRUSS_H;
+    const aimZ = rec.home.z + 5.5; // throw toward dance floor centre
+    _aim.set(clamp(aimX, -ROOM_W/2, ROOM_W/2), 0, clamp(aimZ, -ROOM_D/2, ROOM_D/2));
+
+    _dir.copy(_aim).sub(rec.group.position);
+    const dist = _dir.length();
+    _dir.normalize();
+
+    // orient + scale the unit cone
+    _q.setFromUnitVectors(DOWN, _dir);
+    rec.cone.quaternion.copy(_q);
+    const halfDeg = clamp(c.spread, 2, 30);
+    const baseR = Math.tan(THREE.MathUtils.degToRad(halfDeg)) * dist;
+    rec.cone.scale.set(baseR, dist, baseR);
+
+    const lit = c.brt * master;
+    rec.coneMat.color.setRGB(c.r, c.g, c.b);
+    rec.coneMat.opacity = clamp(lit * 0.5, 0, 0.85);
+
+    rec.lensMat.color.setRGB(c.r * lit, c.g * lit, c.b * lit);
+
+    // faked floor hit: a flat additive circle at the beam/floor intersection.
+    // Footprint radius == cone base radius. Additive blend handles overlaps.
+    const p = rec.puddle;
+    p.mesh.position.set(_aim.x, 0.05, _aim.z);
+    p.mesh.scale.setScalar(Math.max(baseR, 0.2) * 1.15);
+    p.mat.color.setRGB(c.r, c.g, c.b);
+    p.mat.opacity = clamp(lit * BEAM_LIGHT_K * 0.16, 0, 0.95);
+  }
+
+  function updateWash(rec, k, master, t) {
+    if (!applyVis(rec)) return;
+    const c = rec.cur, g = rec.tgt;
+    lerpColor(rec, k);
+    c.pulse = lerp(c.pulse, g.pulse, k);
+
+    const lit   = c.brt * master;
+    const flare = 1 + c.pulse * 1.1;            // beat pulse flares the wash brighter + wider
+
+    const dist = TRUSS_H;
+    const halfDeg = 30 + c.pulse * 14;          // wide, soft footprint (distinct from sharp beams)
+    const baseR = Math.tan(THREE.MathUtils.degToRad(halfDeg)) * dist;
+    rec.cone.scale.set(baseR, dist, baseR);
+
+    rec.coneMat.color.setRGB(c.r, c.g, c.b);
+    rec.coneMat.opacity = clamp(lit * 0.42 * flare, 0, 0.8);
+
+    // lens glow at the fixture — always-on colour cue, punches on the beat
+    rec.lensMat.color.setRGB(c.r, c.g, c.b);
+    rec.lensMat.opacity = clamp(0.15 + lit * 1.2 * flare, 0, 1);
+
+    // faked floor hit: wide additive pool straight below the wash, pulsing.
+    const p = rec.puddle;
+    p.mesh.position.set(rec.home.x, 0.05, rec.home.z);
+    p.mesh.scale.setScalar(Math.max(baseR * (1 + c.pulse * 0.25), 0.4));
+    p.mat.color.setRGB(c.r, c.g, c.b);
+    p.mat.opacity = clamp(lit * WASH_LIGHT_K * (0.10 + 0.16 * c.pulse), 0, 0.85);
+  }
+
+  function updateUplight(rec, k, master) {
+    if (!applyVis(rec)) return;
+    if (rec.uprank != null && rec.uprank >= uplightShow) { rec.group.visible = false; return; }
+    const c = rec.cur, g = rec.tgt;
+    lerpColor(rec, k);
+    const lit = c.brt * master;
+    // upward cone toward ceiling
+    rec.cone.scale.set(1.0, ROOM_H * 0.85, 1.0);
+    rec.coneMat.color.setRGB(c.r, c.g, c.b);
+    rec.coneMat.opacity = clamp(lit * 0.28, 0, 0.5);
+    // additive floor pool (part of the lux map)
+    rec.discMat.color.setRGB(c.r, c.g, c.b);
+    rec.discMat.opacity = clamp(lit * 0.5, 0, 0.8);
+  }
+
+  function updateSparkle(rec, k, master, t) {
+    if (!applyVis(rec)) return;
+    const c = rec.cur, g = rec.tgt;
+    lerpColor(rec, k);
+    c.amount = lerp(c.amount, g.amount || 0, k);
+    const lit = c.brt * master;
+    // rotating derby beams: brightness/length from amount, spin speed too
+    const v = clamp(lit * (0.25 + 0.75 * c.amount), 0, 1);
+    rec.beams.forEach(m => {
+      m.color.setRGB(c.r, c.g, c.b);
+      m.opacity = v * 0.55;
+    });
+    rec.spin.rotation.y += 0.012 + c.amount * 0.07;
+    rec.spin.visible = v > 0.01;
+  }
+
+  function updateImpact(rec, k, master, t) {
+    if (!applyVis(rec)) return;
+    const c = rec.cur, g = rec.tgt;
+    c.brt = lerp(c.brt, g.brt, k);
+    c.flash = g.flash; // flash is binary, don't smooth it away
+    // During a strobe, the strobe fixture is full white; the on/off comes from
+    // the strobe gate already folded into `master` (impactGate).
+    const base = _strobeActive ? 1.0 : (c.flash ? 1.0 : c.brt);
+    const v = base * master;
+    rec.mat.opacity = clamp(v, 0, 1);
+    // faked floor flash (white, additive)
+    rec.puddle.mat.color.setRGB(1, 1, 1);
+    rec.puddle.mesh.scale.setScalar(6);
+    rec.puddle.mat.opacity = clamp(v * 0.5, 0, 0.8);
+  }
+
+  // =========================================================================
+  // 6. HUD
+  // =========================================================================
+  let _netCount = 0, _netWindow = performance.now();
+  function bumpNet() {
+    _netCount++;
+    const now = performance.now();
+    if (now - _netWindow >= 1000) {
+      document.getElementById('netHz').textContent = _netCount;
+      _netCount = 0; _netWindow = now;
+    }
+  }
+
+  function updateHud(s) {
+    document.getElementById('modeName').textContent  = s.mode_display || s.mode || '—';
+    document.getElementById('sceneName').textContent = s.scene_name || '—';
+    document.getElementById('bpm').textContent       = s.bpm ? s.bpm.toFixed(0) : '—';
+    const m = (s.master_dimmer != null) ? Math.round(s.master_dimmer * 100) : 100;
+    document.getElementById('master').textContent    = m + '%' + (s.blackout ? ' (BLK)' : '');
+    document.getElementById('bLow').style.width  = clamp((s.low_energy||0)*100,0,100) + '%';
+    document.getElementById('bMid').style.width  = clamp((s.mid_energy||0)*100,0,100) + '%';
+    document.getElementById('bHigh').style.width = clamp((s.high_energy||0)*100,0,100) + '%';
+    document.getElementById('bOvr').style.width  = clamp((s.overall_energy||0)*100,0,100) + '%';
+    document.getElementById('fxCount').textContent = fixtures.size;
+    document.getElementById('engineHz').textContent = s.fps ? Math.round(s.fps) : '—';
+
+    // active-flag chips: strobe, kills, test mode
+    const flags = [];
+    if (s.strobe_rate > 0 && !s.kill_strobe) flags.push('STROBE ' + Math.round(s.strobe_rate) + 'Hz');
+    if (s.kill_strobe) flags.push('KILL STROBE');
+    if (s.kill_derby)  flags.push('KILL DERBY');
+    if (s.kill_laser)  flags.push('KILL LASER');
+    if (s.test_mode)   flags.push('TEST' + (s.test_pattern ? ' ' + s.test_pattern : ''));
+    const fl = document.getElementById('flags');
+    fl.textContent = flags.join(' · ');
+    fl.style.display = flags.length ? 'block' : 'none';
+
+    if (s.beat) {
+      const bn = document.getElementById('bpm');
+      bn.classList.remove('beatpulse'); void bn.offsetWidth; bn.classList.add('beatpulse');
+    }
+  }
+
+  function setConn(state, text, src) {
+    const dot = document.getElementById('dot');
+    dot.className = 'dot ' + state;
+    document.getElementById('connText').textContent = text;
+    if (src) document.getElementById('srcText').textContent = src;
+  }
+
+  // =========================================================================
+  // 7. CONNECTION — real /ws WebSocket with auto-reconnect, mock fallback
+  // =========================================================================
+  // The visualizer is a passive consumer. It tries the live engine stream first.
+  // If it can't reach the backend (e.g. opened via file://) it runs a built-in
+  // mock generator that emits frames matching the _engine_state schema at 15Hz.
+  let ws = null;
+  let mockTimer = null;
+  let wantMock = false;
+
+  function defaultWsUrl() {
+    if (location.protocol === 'file:') return 'ws://localhost:8765/ws';
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${location.host}/ws`;
+  }
+
+  function stopMock() {
+    if (mockTimer) { clearInterval(mockTimer); mockTimer = null; }
+  }
+
+  function startMock(reason) {
+    stopWs();
+    stopMock();
+    wantMock = true;
+    document.getElementById('demoBtn').classList.add('active');
+    setConn('mock', reason || 'demo mode', 'mock generator');
+    let mt = 0;
+    mockTimer = setInterval(() => {
+      mt += 1 / 15;
+      const frame = buildMockState(mt);
+      bumpNet();
+      applyState(frame);
+    }, 1000 / 15); // 15 Hz, matching the real broadcast cadence
+  }
+
+  function stopWs() {
+    if (ws) { try { ws.onclose = null; ws.close(); } catch (_) {} ws = null; }
+  }
+
+  function connectWs(url) {
+    wantMock = false;
+    document.getElementById('demoBtn').classList.remove('active');
+    stopMock();
+    stopWs();
+    setConn('', 'connecting…', url);
+    try {
+      ws = new WebSocket(url);
+    } catch (e) {
+      startMock('unreachable — demo'); return;
+    }
+    const failTimer = setTimeout(() => {
+      if (ws && ws.readyState !== WebSocket.OPEN) { try { ws.close(); } catch(_){} }
+    }, 3000);
+
+    ws.onopen = () => { clearTimeout(failTimer); setConn('ok', 'connected', url); };
+    ws.onmessage = e => {
+      bumpNet();
+      try { applyState(JSON.parse(e.data)); } catch (_) {}
+    };
+    ws.onerror = () => { try { ws.close(); } catch(_){} };
+    ws.onclose = () => {
+      clearTimeout(failTimer);
+      if (wantMock) return;
+      setConn('err', 'no engine — demo', url);
+      // fall back to mock so the file is never blank
+      startMock('no engine — demo');
+    };
+  }
+
+  // ---- mock state generator (mirrors app/render/scene.py fixture layout) ----
+  function uplightPositions() {
+    const FL = 130, FT = 65, FR = 1070, FB = 545, pos = [];
+    for (let i = 0; i < 6; i++) pos.push([FL + (FR - FL) * (i + 1) / 7, FT - 22]);     // top
+    for (let i = 0; i < 6; i++) pos.push([FL + (FR - FL) * (i + 1) / 7, FB + 22]);     // bottom
+    for (let i = 0; i < 3; i++) pos.push([FL - 22, FT + (FB - FT) * (i + 1) / 4]);     // left
+    for (let i = 0; i < 3; i++) pos.push([FR + 22, FT + (FB - FT) * (i + 1) / 4]);     // right
+    return pos;
+  }
+  const MOCK_UP = uplightPositions();
+  const MOCK_BEAMS = [[175, 670], [1025, 670], [600 - 27.5, 660], [600 + 27.5, 660]];
+  const MOCK_WASH  = [[340, 665], [860, 665]];
+
+  function hsv(h, s, v) { // h:0-360 -> [r,g,b] 0-255
+    h = ((h % 360) + 360) % 360; const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+    let r, g, b;
+    if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+
+  function buildMockState(t) {
+    const baseHue = (t * 30) % 360;
+    const overall = 0.45 + 0.45 * Math.sin(t * 1.7);
+    const beatPhase = (t * 128 / 60) % 1; // 128 BPM
+    const beat = beatPhase < 0.12;
+
+    // ids match the engine so demo mode exercises the GigBAR rig too:
+    // 0,1 = DJFLX flanks; 2,3 = GigBAR movers on the bar.
+    const BEAM_IDS = ['beam_l', 'beam_r', 'gigbar_mover_l', 'gigbar_mover_r'];
+    const beams = MOCK_BEAMS.map((p, i) => {
+      const sweep = Math.sin(t * 1.6 + i * Math.PI / 2) * 55;   // pan sweep
+      const hue = baseHue + i * 90;                              // distinct colors -> magenta overlaps
+      return {
+        id: BEAM_IDS[i], x: p[0], y: p[1], rgb: hsv(hue, 1, 1),
+        brt: 0.6 + 0.4 * Math.abs(Math.sin(t * 2 + i)),
+        angle: sweep, length: 400, spread: 7, active: true
+      };
+    });
+    const washes = MOCK_WASH.map((p, i) => ({
+      id: 'wash_' + i, x: p[0], y: p[1], rgb: hsv(baseHue + 180 + i * 40, 0.8, 1),
+      brt: 0.5 + 0.5 * overall, radius: 130, pulse: Math.max(0, Math.sin(t * 4)), active: true
+    }));
+    washes.push({ id: 'gigbar_wash', x: 600, y: 660, rgb: hsv(baseHue, 0.7, 1),
+                  brt: 0.45 + 0.4 * overall, radius: 120, pulse: Math.max(0, Math.sin(t * 4)), active: true });
+    const uplights = MOCK_UP.map((p, i) => {
+      const zone = i < 6 ? 0 : i < 12 ? 50 : i < 15 ? 100 : 150;
+      return { id: 'up_' + i, x: p[0], y: p[1], rgb: hsv(baseHue + zone, 0.9, 1),
+               brt: 0.55 + 0.35 * Math.sin(t * 2 + i * 0.5), active: true };
+    });
+    const sparkles = [{ id: 'gigbar_derby', x: 600, y: 660, rgb: hsv(baseHue + 60, 1, 1),
+                        brt: 1, amount: Math.max(0, Math.sin(t * 1.1)), active: true }];
+    const impacts  = [{ id: 'gigbar_impact', x: 600, y: 660, brt: 0.2, flash: beat, active: true }];
+
+    // demo a strobe burst on every other 8-second bar so the strobe path shows
+    const strobing = (Math.floor(t / 8) % 2) === 1;
+
+    return {
+      mode: 'open_dance', mode_display: 'Open Dance (Demo)', scene: null, scene_name: 'Mock Sweep',
+      blackout: false, bpm: 128, beat,
+      low_energy: Math.max(0, Math.sin(t * 4)), mid_energy: 0.4 + 0.3 * Math.sin(t * 2.3),
+      high_energy: Math.max(0, Math.sin(t * 7)) * 0.7, overall_energy: overall,
+      master_dimmer: 1.0, uplight_dimmer: 1.0,
+      strobe_master: 1.0, strobe_rate: strobing ? 0.85 : 0,   // 0-1 speed proxy, like the engine
+      kill_strobe: false, kill_derby: false, kill_laser: false, test_mode: false,
+      fps: 60, dmx_output: 'MOCK',
+      fixtures: { uplights, washes, beams, sparkles, impacts, ambient_warm: 0.12 }
+    };
+  }
+
+  // =========================================================================
+  // 8. UI wiring + resize + boot
+  // =========================================================================
+  const wsInput = document.getElementById('wsUrl');
+  wsInput.value = defaultWsUrl();
+
+  document.getElementById('connectBtn').addEventListener('click', () => connectWs(wsInput.value.trim()));
+  document.getElementById('demoBtn').addEventListener('click', () => {
+    if (wantMock) { connectWs(wsInput.value.trim()); } else { startMock('demo mode'); }
+  });
+  wsInput.addEventListener('keydown', e => { if (e.key === 'Enter') connectWs(wsInput.value.trim()); });
+
+  // Layer toggles — drive the `show` map; visibility is applied each frame.
+  document.querySelectorAll('#layers input[data-layer]').forEach(cb => {
+    cb.addEventListener('change', () => { show[cb.dataset.layer] = cb.checked; });
+  });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
+    bloomPass.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---- pausable render loop control ----
+  function startRender() {
+    if (_running) return;
+    _running = true;
+    clock.getDelta();   // drop the accumulated gap so dt doesn't spike on resume
+    animate();
+  }
+  function stopRender() {
+    if (!_running) return;
+    _running = false;
+    cancelAnimationFrame(_rafId);
+  }
+
+  // ---- embedded mode: hide the connect/help chrome, obey pause/resume ----
+  const EMBED = new URLSearchParams(location.search).has('embed');
+  if (EMBED) {
+    document.body.classList.add('embed');
+    window.addEventListener('message', e => {
+      const d = e.data;
+      if (!d || typeof d !== 'object') return;
+      if (d.type === 'lb-pause')  stopRender();
+      if (d.type === 'lb-resume') startRender();
+      if (d.type === 'lb-uplights') setUplights(d.n);   // dashboard drives the preview count
+    });
+  }
+
+  // Dev hook (only with ?dev) — lets tools/shot.cjs drive deterministic states
+  // for screenshot verification. Not active in normal use.
+  if (new URLSearchParams(location.search).has('dev')) {
+    window.__lb = { applyState, buildMockState, setUplights, setView,
+                    setStrobe: r => { global.strobe_rate = r; }, fixtures };
+  }
+
+  // start
+  document.getElementById('boot').remove();
+  wireControls();
+  connectWs(wsInput.value);          // tries live engine, auto-falls back to demo
+  // Embedded: stay paused until the dashboard shows the 3D tab. Standalone: run now.
+  if (!EMBED) startRender();
+  </script>
+</body>
+</html>

@@ -3188,6 +3188,23 @@ class TestWebServerState:
         assert "/ws" in content          # WebSocket endpoint referenced
         assert "/api/command" in content  # command endpoint referenced
 
+    def test_visualizer3d_route_served(self):
+        from app.web.server import _build_app
+        from starlette.testclient import TestClient
+        client = TestClient(_build_app())
+        r = client.get("/visualizer3d")
+        assert r.status_code == 200
+        assert "RKADE LightBrain" in r.text
+        assert "embed" in r.text          # embedded-mode handling present
+
+    def test_dashboard_has_3d_tab(self):
+        html_path = os.path.join(ROOT, "app", "web", "dashboard.html")
+        with open(html_path, encoding="utf-8") as f:
+            content = f.read()
+        assert "viz3d-frame" in content        # iframe present
+        assert "/visualizer3d?embed=1" in content  # lazy-loaded source
+        assert "lb-pause" in content           # pause-when-hidden wired
+
 
 # ===========================================================================
 # Sprint 9 — Web rig state serialization + scene API wiring
@@ -4056,3 +4073,62 @@ class TestChauvetGigBarMoveILS:
         from fixtures.chauvet_gigbar_move_ils import CH_PAR_AMBER, CH_PAR_WHITE
         assert uni.get_channel(1 + CH_PAR_AMBER) > 0
         assert uni.get_channel(1 + CH_PAR_WHITE) > 0
+
+
+# ===========================================================================
+# Drop-sync / cooldown / white-hold feature set
+# ===========================================================================
+class TestPaletteBeatCooldown:
+    """PaletteBlender.beat_cooldown_fraction telemetry (feature 2)."""
+
+    def _blender(self):
+        pal = Palette(
+            name="t",
+            colors=[HSVColor(h=0, s=1, v=1, name="a"),
+                    HSVColor(h=120, s=1, v=1, name="b")],
+            change_rule="energy_trigger",
+            transition_ms=2000,
+        )
+        return PaletteBlender(pal, hold_ms=1000)
+
+    def test_fresh_blender_reports_no_cooldown(self):
+        from engine.palettes import _BEAT_COOLDOWN_S  # noqa
+        b = self._blender()
+        assert b.beat_cooldown_fraction(now=1000.0) == 0.0
+
+    def test_full_then_decays_to_zero(self):
+        from engine.palettes import _BEAT_COOLDOWN_S
+        b = self._blender()
+        now = 1000.0
+        b._last_beat_swap = now
+        assert b.beat_cooldown_fraction(now) == pytest.approx(1.0)
+        assert b.beat_cooldown_fraction(now + _BEAT_COOLDOWN_S / 2) == pytest.approx(0.5)
+        assert b.beat_cooldown_fraction(now + _BEAT_COOLDOWN_S + 5) == 0.0
+
+    def test_room_lane_passthrough(self):
+        from engine.lanes import RoomLane
+        pal = Palette(name="t",
+                      colors=[HSVColor(h=0, s=1, v=1, name="a")],
+                      change_rule="energy_trigger", transition_ms=2000)
+        rl = RoomLane(pal)
+        # callable and bounded
+        v = rl.beat_cooldown_fraction(now=1000.0)
+        assert 0.0 <= v <= 1.0
+
+
+class TestNewEngineStateAndCommands:
+    """Drop-sync / white-hold plumbing through the web layer."""
+
+    def test_engine_state_has_new_keys(self):
+        from app.web import server as web
+        for k in ("armed_mode", "cooldown_active", "cooldown_pct", "white_hold"):
+            assert k in web._engine_state
+
+    def test_ipad_whitelist_accepts_new_commands(self):
+        from app.web import ipad_server
+        assert "arm_mode" in ipad_server._ALLOWED_TYPES
+        assert "white_hold" in ipad_server._ALLOWED_TYPES
+
+    def test_ipad_rejects_unknown_command(self):
+        from app.web import ipad_server
+        assert "definitely_not_a_command" not in ipad_server._ALLOWED_TYPES

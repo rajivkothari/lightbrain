@@ -164,3 +164,7 @@ class RoomLane:
     @property
     def transition_progress(self) -> float:
         return self._blender.transition_progress
+
+    def beat_cooldown_fraction(self, now=None) -> float:
+        """Remaining beat-swap lockout, 0.0–1.0 (see PaletteBlender)."""
+        return self._blender.beat_cooldown_fraction(now)
