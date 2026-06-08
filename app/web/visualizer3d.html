@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RKADE LightBrain — 3D DMX Visualizer</title>
+<!--
+  RKADE LightBrain — Standalone 3D DMX Lighting Visualizer
+  ========================================================
+  A passive, frontend-only consumer of the LightBrain engine state stream.
+
+  This file is a STANDALONE CLIENT. It does not modify, call, or depend on the
+  Python backend, the DMX engine, or the FastAPI server configuration. It only
+  reads the JSON state the backend already broadcasts over the /ws WebSocket at
+  ~15 Hz (see app/web/server.py :: _engine_state).
+
+  Design contract (from app/render/fixture_state.py + app/web/server.py):
+    state.fixtures = {
+      uplights: [{id, x, y, rgb:[r,g,b], brt, active}],
+      washes:   [{id, x, y, rgb, brt, radius, pulse, active}],
+      beams:    [{id, x, y, rgb, brt, angle, length, spread, active}],
+      sparkles: [{id, x, y, rgb, brt, amount, active}],
+      impacts:  [{id, x, y, brt, flash, active}],
+      ambient_warm: float
+    }
+    Top-level: mode_display, scene_name, blackout, bpm, beat,
+               low_energy, mid_energy, high_energy, overall_energy,
+               master_dimmer, strobe_master, fps, dmx_output, ...
+
+  Fixture x/y arrive in the engine's 2D scene space (1200 x 800, y grows down,
+  origin top-left — see app/render/scene.py). We map that plane onto the 3D
+  floor and hang movers/washes from a virtual truss.
+
+  Engineering constraints honored:
+    1. Zero build tools — single HTML file, vanilla JS, Three.js via CDN.
+    2. Decoupled render loop — rAF @ 60Hz+, exponential lerp between 15Hz frames.
+    3. Primitive geometry — cylinder body + additive cone + SpotLight per beam.
+    4. Lux-map overlap — real SpotLights sum on the floor (red+blue -> magenta);
+       additive cones blend in the air the same way.
+-->
+<style>
+  :root {
+    --ink: #07090d;
+    --accent: #4ea3ff;
+    --ok: #46d27a;
+    --warn: #f0b429;
+    --err: #e9573f;
+    --panel: rgba(12, 16, 24, 0.78);
+    --hair: rgba(255, 255, 255, 0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #000; color: #e8edf4;
+    font-family: 'DM Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* ---- HUD panels ---- */
+  .panel {
+    position: fixed; z-index: 10;
+    background: var(--panel);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--hair);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 1.45;
+    user-select: none;
+  }
+  #hud { top: 14px; left: 14px; min-width: 230px; }
+  #stats { top: 14px; right: 14px; text-align: right; min-width: 150px; }
+  #help { bottom: 14px; left: 14px; max-width: 360px; opacity: 0.78; }
+
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.14em;
+    font-size: 10px; color: var(--accent); margin-bottom: 6px; font-weight: 600;
+  }
+  .row { display: flex; justify-content: space-between; gap: 14px; }
+  .row .k { color: rgba(232,237,244,0.55); }
+  .row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .big { font-size: 22px; font-weight: 700; line-height: 1.1; margin: 2px 0 8px; }
+
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+         background: var(--warn); margin-right: 6px; vertical-align: middle; }
+  .dot.ok  { background: var(--ok);  box-shadow: 0 0 8px var(--ok); }
+  .dot.err { background: var(--err); }
+  .dot.mock{ background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  /* ---- energy bars ---- */
+  .bars { margin-top: 8px; }
+  .bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.08);
+         margin: 4px 0; overflow: hidden; }
+  .bar > span { display: block; height: 100%; width: 0%;
+                border-radius: 3px; transition: width 0.05s linear; }
+  .bar.low  > span { background: #ff5a3c; }
+  .bar.mid  > span { background: #f0b429; }
+  .bar.high > span { background: #4ea3ff; }
+  .bar.ovr  > span { background: #46d27a; }
+
+  /* ---- controls ---- */
+  #ctrl { bottom: 14px; right: 14px; display: flex; gap: 8px; align-items: center; }
+  #ctrl input[type=text] {
+    background: rgba(0,0,0,0.4); border: 1px solid var(--hair);
+    color: #e8edf4; border-radius: 8px; padding: 7px 9px; font-size: 12px; width: 210px;
+  }
+  button {
+    background: rgba(255,255,255,0.06); color: #e8edf4;
+    border: 1px solid var(--hair); border-radius: 8px;
+    padding: 7px 12px; font-size: 12px; cursor: pointer;
+  }
+  button:hover { background: rgba(255,255,255,0.14); }
+  button.active { background: var(--accent); color: #051018; border-color: var(--accent); }
+
+  .beatpulse { animation: flash 0.12s ease-out; }
+  @keyframes flash { from { color: #fff; } to { color: inherit; } }
+
+  #boot {
+    position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+    background: #05070b; color: #aeb7c4; font-size: 14px;
+  }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="boot">Loading Three.js from CDN…</div>
+
+  <div id="hud" class="panel">
+    <div class="eyebrow">RKADE LightBrain</div>
+    <div class="big" id="modeName">—</div>
+    <div class="row"><span class="k">Scene</span><span class="v" id="sceneName">—</span></div>
+    <div class="row"><span class="k">BPM</span><span class="v" id="bpm">—</span></div>
+    <div class="row"><span class="k">Master</span><span class="v" id="master">—</span></div>
+    <div class="bars">
+      <div class="bar low"><span id="bLow"></span></div>
+      <div class="bar mid"><span id="bMid"></span></div>
+      <div class="bar high"><span id="bHigh"></span></div>
+      <div class="bar ovr"><span id="bOvr"></span></div>
+    </div>
+  </div>
+
+  <div id="stats" class="panel">
+    <div><span class="dot" id="dot"></span><span id="connText">connecting…</span></div>
+    <div class="row"><span class="k">Source</span><span class="v" id="srcText">—</span></div>
+    <div class="row"><span class="k">Net Hz</span><span class="v" id="netHz">0</span></div>
+    <div class="row"><span class="k">Render</span><span class="v" id="renderFps">0</span></div>
+    <div class="row"><span class="k">Fixtures</span><span class="v" id="fxCount">0</span></div>
+  </div>
+
+  <div id="help" class="panel">
+    Drag to orbit · scroll to zoom · right-drag to pan.
+    Live beams interpolate at 60&nbsp;fps between 15&nbsp;Hz network frames.
+    Overlapping beams blend additively on the floor.
+  </div>
+
+  <div id="ctrl" class="panel">
+    <input id="wsUrl" type="text" spellcheck="false" />
+    <button id="connectBtn">Connect</button>
+    <button id="demoBtn">Demo</button>
+  </div>
+
+  <!-- Three.js + addons via CDN. Zero build tooling. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+  // =========================================================================
+  // 1. CONSTANTS — coordinate mapping from the engine's 2D scene to 3D world
+  // =========================================================================
+  // The engine places fixtures in a 1200 x 800 pixel plane (app/render/scene.py),
+  // origin top-left, y growing downward. We map that onto a centered floor:
+  //   worldX =  (px / SRC_W - 0.5) * ROOM_W
+  //   worldZ =  (py / SRC_H - 0.5) * ROOM_D
+  const SRC_W = 1200, SRC_H = 800;
+  const ROOM_W = 28;   // floor width  (X)
+  const ROOM_D = 19;   // floor depth  (Z)
+  const ROOM_H = 12;   // ceiling height (Y)
+  const TRUSS_H = 9.5; // height of the overhead truss where movers/washes hang
+
+  // Exponential smoothing rate for lerping between 15Hz network frames.
+  // current += (target - current) * (1 - exp(-dt * SMOOTH))  → frame-rate independent.
+  const SMOOTH = 13.0;
+
+  // Intensity scaling tuned for the additive look.
+  const BEAM_LIGHT_K = 5.0;
+  const WASH_LIGHT_K = 3.5;
+
+  function mapX(px) { return (px / SRC_W - 0.5) * ROOM_W; }
+  function mapZ(py) { return (py / SRC_H - 0.5) * ROOM_D; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function col(rgb) { // [0-255,0-255,0-255] -> THREE.Color (linear-safe via convertSRGB)
+    return new THREE.Color(
+      (rgb && rgb[0] || 0) / 255,
+      (rgb && rgb[1] || 0) / 255,
+      (rgb && rgb[2] || 0) / 255
+    );
+  }
+
+  // =========================================================================
+  // 2. SCENE SETUP — dark room, floor, truss, camera
+  // =========================================================================
+  const appEl = document.getElementById('app');
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  appEl.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05070b);
+  scene.fog = new THREE.Fog(0x05070b, 28, 75);
+
+  const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 500);
+  camera.position.set(0, 12, 26);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(0, 2.5, 0);
+  controls.maxPolarAngle = Math.PI * 0.49; // don't dip below the floor
+  controls.minDistance = 8;
+  controls.maxDistance = 60;
+
+  // --- dark room (inside of a box) ---
+  const roomGeo = new THREE.BoxGeometry(ROOM_W + 6, ROOM_H, ROOM_D + 6);
+  const roomMat = new THREE.MeshStandardMaterial({
+    color: 0x0b0e14, roughness: 1.0, metalness: 0.0, side: THREE.BackSide
+  });
+  const room = new THREE.Mesh(roomGeo, roomMat);
+  room.position.y = ROOM_H / 2;
+  scene.add(room);
+
+  // --- floor plane: receives the SpotLights. This is the "lux map". ---
+  // Real lights sum on a standard material, so a red beam + blue beam landing on
+  // the same patch render magenta with no special blending code. (Constraint 4.)
+  const floorGeo = new THREE.PlaneGeometry(ROOM_W + 6, ROOM_D + 6, 1, 1);
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x14171d, roughness: 0.62, metalness: 0.05
+  });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  // faint floor grid for spatial reference
+  const grid = new THREE.GridHelper(ROOM_W + 6, 24, 0x1c2230, 0x141821);
+  grid.position.y = 0.01;
+  scene.add(grid);
+
+  // --- overhead truss (purely cosmetic context for hung fixtures) ---
+  const trussMat = new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 0.8, metalness: 0.4 });
+  function addTrussBar(x1, z1, x2, z2) {
+    const dx = x2 - x1, dz = z2 - z1;
+    const len = Math.hypot(dx, dz);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, len), trussMat);
+    bar.position.set((x1 + x2) / 2, TRUSS_H + 0.6, (z1 + z2) / 2);
+    bar.rotation.y = -Math.atan2(dx, dz);
+    scene.add(bar);
+  }
+  addTrussBar(mapX(140), mapZ(660), mapX(1060), mapZ(660));   // front truss over booth
+  addTrussBar(mapX(600), mapZ(120), mapX(600), mapZ(700));    // spine
+
+  // --- baseline lighting so the room isn't pitch black ---
+  scene.add(new THREE.HemisphereLight(0x202a3a, 0x05060a, 0.25));
+  const fillAmbient = new THREE.AmbientLight(0xffffff, 0.06);
+  scene.add(fillAmbient);
+  // "ambient_warm" tint driven by the engine's warm W/A channels
+  const warmLight = new THREE.PointLight(0xffb066, 0.0, 60, 1.2);
+  warmLight.position.set(0, TRUSS_H, 0);
+  scene.add(warmLight);
+
+  // =========================================================================
+  // 3. FIXTURE FACTORY — primitives only (cylinders + cones + SpotLights)
+  // =========================================================================
+  // Each fixture is registered with a `cur` (rendered) and `tgt` (latest network)
+  // state. The render loop lerps cur -> tgt every frame. (Constraint 2.)
+  const fixtures = new Map(); // id -> fixture record
+
+  const DOWN = new THREE.Vector3(0, -1, 0);
+  const UP   = new THREE.Vector3(0,  1, 0);
+
+  // Shared materials for fixture bodies
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x15181e, roughness: 0.7, metalness: 0.6 });
+
+  function makeConeMaterial() {
+    // Translucent, additive volumetric beam. Red + Blue cones overlapping in the
+    // air read as magenta because additive blending sums their contributions.
+    return new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+  }
+
+  // ---- moving-head beam: cylinder body + additive cone + SpotLight ----
+  function createBeam(f) {
+    const x = mapX(f.x), z = mapZ(f.y);
+    const group = new THREE.Group();
+    group.position.set(x, TRUSS_H, z);
+    scene.add(group);
+
+    // fixture body (primitive cylinder)
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.7, 16), bodyMat);
+    group.add(body);
+
+    // unit cone: tip at group origin, extends down -Y to length 1, base radius 1.
+    const coneGeo = new THREE.ConeGeometry(1, 1, 28, 1, true);
+    coneGeo.translate(0, -0.5, 0); // tip -> origin, base -> y=-1
+    const coneMat = makeConeMaterial();
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    group.add(cone);
+
+    // glowing lens at the head
+    const lensMat = new THREE.MeshBasicMaterial({ color: 0x000000, blending: THREE.AdditiveBlending, depthWrite: false });
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), lensMat);
+    group.add(lens);
+
+    // real SpotLight — illuminates the floor; additive in light space.
+    // decay=0 keeps floor pools at predictable brightness so the additive
+    // red+blue -> magenta overlap reads clearly regardless of throw distance.
+    const light = new THREE.SpotLight(0xffffff, 0, 60, 0.4, 0.35, 0.0);
+    light.position.copy(group.position);
+    light.target.position.set(x, 0, z);
+    scene.add(light);
+    scene.add(light.target);
+
+    return registerFixture(f.id, 'beam', { group, cone, coneMat, lens, lensMat, light,
+      cur: beamState(f), tgt: beamState(f), home: { x, z } });
+  }
+
+  function beamState(f) {
+    const c = col(f.rgb);
+    return {
+      r: c.r, g: c.g, b: c.b,
+      brt: (f.active === false) ? 0 : (f.brt || 0),
+      angle: f.angle || 0,        // degrees from vertical, +right
+      spread: f.spread || 8,      // cone half-width in degrees (engine: pixels-ish, treat as deg)
+      length: f.length || 400
+    };
+  }
+
+  // ---- wash: cylinder body + wide additive cone + wide SpotLight ----
+  function createWash(f) {
+    const x = mapX(f.x), z = mapZ(f.y);
+    const group = new THREE.Group();
+    group.position.set(x, TRUSS_H, z);
+    scene.add(group);
+
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.5, 16), bodyMat);
+    group.add(body);
+
+    const coneGeo = new THREE.ConeGeometry(1, 1, 28, 1, true);
+    coneGeo.translate(0, -0.5, 0);
+    const coneMat = makeConeMaterial();
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    // wash points straight down
+    cone.quaternion.setFromUnitVectors(UP, DOWN);
+    group.add(cone);
+
+    const light = new THREE.SpotLight(0xffffff, 0, 55, 0.95, 0.6, 0.0);
+    light.position.copy(group.position);
+    light.target.position.set(x, 0, z);
+    scene.add(light);
+    scene.add(light.target);
+
+    return registerFixture(f.id, 'wash', { group, cone, coneMat, light,
+      cur: washState(f), tgt: washState(f), home: { x, z } });
+  }
+
+  function washState(f) {
+    const c = col(f.rgb);
+    return {
+      r: c.r, g: c.g, b: c.b,
+      brt: (f.active === false) ? 0 : (f.brt || 0),
+      radius: f.radius || 120,
+      pulse: f.pulse || 0
+    };
+  }
+
+  // ---- uplight: floor can + upward additive cone (washes the "wall") ----
+  function createUplight(f) {
+    const x = mapX(f.x), z = mapZ(f.y);
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    scene.add(group);
+
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.4, 12), bodyMat);
+    body.position.y = 0.2;
+    group.add(body);
+
+    // upward cone (tip at can, base near ceiling)
+    const coneGeo = new THREE.ConeGeometry(1, 1, 18, 1, true);
+    coneGeo.translate(0, 0.5, 0); // tip at origin, base at +y=1
+    const coneMat = makeConeMaterial();
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.y = 0.4;
+    group.add(cone);
+
+    // additive floor glow disc — contributes to the lux map at the can's foot
+    const discMat = new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    });
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), discMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.02;
+    group.add(disc);
+
+    return registerFixture(f.id, 'uplight', { group, cone, coneMat, disc, discMat,
+      cur: upState(f), tgt: upState(f) });
+  }
+
+  function upState(f) {
+    const c = col(f.rgb);
+    return { r: c.r, g: c.g, b: c.b, brt: (f.active === false) ? 0 : (f.brt || 0) };
+  }
+
+  // ---- sparkle/derby: additive twinkling cluster ----
+  function createSparkle(f) {
+    const group = new THREE.Group();
+    group.position.set(mapX(f.x), TRUSS_H - 0.4, mapZ(f.y));
+    scene.add(group);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true,
+      opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const star = new THREE.Mesh(new THREE.IcosahedronGeometry(0.35, 0), mat);
+    group.add(star);
+    return registerFixture(f.id, 'sparkle', { group, star, mat,
+      cur: sparkState(f), tgt: sparkState(f) });
+  }
+  function sparkState(f) {
+    const c = col(f.rgb);
+    return { r: c.r, g: c.g, b: c.b, brt: (f.active === false) ? 0 : (f.brt || 0),
+             amount: f.amount || 0 };
+  }
+
+  // ---- impact/strobe: additive flash sphere ----
+  function createImpact(f) {
+    const group = new THREE.Group();
+    group.position.set(mapX(f.x), TRUSS_H - 0.2, mapZ(f.y));
+    scene.add(group);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true,
+      opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), mat);
+    group.add(ball);
+    const light = new THREE.PointLight(0xffffff, 0, 40, 1.0);
+    light.position.copy(group.position);
+    scene.add(light);
+    return registerFixture(f.id, 'impact', { group, ball, mat, light,
+      cur: { brt: 0, flash: 0 }, tgt: { brt: 0, flash: 0 } });
+  }
+
+  function registerFixture(id, type, rec) {
+    rec.type = type;
+    rec.id = id;
+    rec.seen = true;
+    fixtures.set(id, rec);
+    return rec;
+  }
+
+  // =========================================================================
+  // 4. APPLY STATE — feed the latest 15Hz network frame into fixture targets
+  // =========================================================================
+  // We never move geometry here; we only set target values. The render loop
+  // does the smoothing so motion stays smooth at display refresh rate.
+  let global = {
+    master: 1.0, strobe_master: 1.0, blackout: false,
+    beat: false, overall: 0, warm: 0
+  };
+
+  function applyState(s) {
+    if (!s) return;
+
+    // ---- global modifiers ----
+    global.master = (s.master_dimmer != null) ? s.master_dimmer : 1.0;
+    global.strobe_master = (s.strobe_master != null) ? s.strobe_master : 1.0;
+    global.blackout = !!s.blackout;
+    global.beat = !!s.beat;
+    global.overall = s.overall_energy || 0;
+
+    const fx = s.fixtures || {};
+    global.warm = fx.ambient_warm || 0;
+
+    const present = new Set();
+
+    (fx.beams || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createBeam(f);
+      rec.tgt = beamState(f);
+      present.add(f.id);
+    });
+    (fx.washes || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createWash(f);
+      rec.tgt = washState(f);
+      present.add(f.id);
+    });
+    (fx.uplights || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createUplight(f);
+      rec.tgt = upState(f);
+      present.add(f.id);
+    });
+    (fx.sparkles || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createSparkle(f);
+      rec.tgt = sparkState(f);
+      present.add(f.id);
+    });
+    (fx.impacts || []).forEach(f => {
+      const rec = fixtures.get(f.id) || createImpact(f);
+      rec.tgt = { brt: (f.active === false) ? 0 : (f.brt || 0), flash: f.flash ? 1 : 0 };
+      present.add(f.id);
+    });
+
+    // any fixture not present this frame fades to dark (keeps geometry stable)
+    fixtures.forEach((rec, id) => {
+      if (!present.has(id) && rec.tgt) {
+        if ('brt' in rec.tgt) rec.tgt.brt = 0;
+      }
+    });
+
+    updateHud(s);
+  }
+
+  // =========================================================================
+  // 5. RENDER LOOP — rAF @ 60Hz+, exponential lerp toward targets
+  // =========================================================================
+  const _q = new THREE.Quaternion();
+  const _dir = new THREE.Vector3();
+  const _aim = new THREE.Vector3();
+  const clock = new THREE.Clock();
+
+  // render-fps meter
+  let _fpsAccum = 0, _fpsFrames = 0, _renderFps = 0;
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const dt = Math.min(clock.getDelta(), 0.1);
+    const t = clock.elapsedTime;
+    const k = 1 - Math.exp(-dt * SMOOTH); // frame-rate independent lerp factor
+
+    const masterGate = global.blackout ? 0 : global.master;
+
+    fixtures.forEach(rec => {
+      switch (rec.type) {
+        case 'beam':    updateBeam(rec, k, masterGate, t); break;
+        case 'wash':    updateWash(rec, k, masterGate, t); break;
+        case 'uplight': updateUplight(rec, k, masterGate); break;
+        case 'sparkle': updateSparkle(rec, k, masterGate, t); break;
+        case 'impact':  updateImpact(rec, k, masterGate, t); break;
+      }
+    });
+
+    // ambient warm tint
+    warmLight.intensity = lerp(warmLight.intensity, global.warm * 1.4 * masterGate, k);
+
+    controls.update();
+    renderer.render(scene, camera);
+
+    // fps meter
+    _fpsAccum += dt; _fpsFrames++;
+    if (_fpsAccum >= 0.5) {
+      _renderFps = Math.round(_fpsFrames / _fpsAccum);
+      document.getElementById('renderFps').textContent = _renderFps;
+      _fpsAccum = 0; _fpsFrames = 0;
+    }
+  }
+
+  function lerpColor(rec, k) {
+    const c = rec.cur, g = rec.tgt;
+    c.r = lerp(c.r, g.r, k); c.g = lerp(c.g, g.g, k); c.b = lerp(c.b, g.b, k);
+    c.brt = lerp(c.brt, g.brt, k);
+  }
+
+  function updateBeam(rec, k, master, t) {
+    const c = rec.cur, g = rec.tgt;
+    lerpColor(rec, k);
+    c.angle = lerp(c.angle, g.angle, k);
+    c.spread = lerp(c.spread, g.spread, k);
+
+    // aim: angle is degrees-from-vertical (+right). Lateral offset = H * tan(angle),
+    // plus a fixed forward throw so movers sweep across the floor.
+    const ang = THREE.MathUtils.degToRad(clamp(c.angle, -75, 75));
+    const aimX = rec.home.x + Math.tan(ang) * TRUSS_H;
+    const aimZ = rec.home.z + 5.5; // throw toward dance floor centre
+    _aim.set(clamp(aimX, -ROOM_W/2, ROOM_W/2), 0, clamp(aimZ, -ROOM_D/2, ROOM_D/2));
+
+    _dir.copy(_aim).sub(rec.group.position);
+    const dist = _dir.length();
+    _dir.normalize();
+
+    // orient + scale the unit cone
+    _q.setFromUnitVectors(DOWN, _dir);
+    rec.cone.quaternion.copy(_q);
+    const halfDeg = clamp(c.spread, 2, 30);
+    const baseR = Math.tan(THREE.MathUtils.degToRad(halfDeg)) * dist;
+    rec.cone.scale.set(baseR, dist, baseR);
+
+    const lit = c.brt * master;
+    rec.coneMat.color.setRGB(c.r, c.g, c.b);
+    rec.coneMat.opacity = clamp(lit * 0.5, 0, 0.85);
+
+    rec.lensMat.color.setRGB(c.r * lit, c.g * lit, c.b * lit);
+
+    // SpotLight
+    rec.light.color.setRGB(c.r, c.g, c.b);
+    rec.light.intensity = lit * BEAM_LIGHT_K;
+    rec.light.angle = THREE.MathUtils.degToRad(clamp(halfDeg + 2, 3, 40));
+    rec.light.target.position.copy(_aim);
+  }
+
+  function updateWash(rec, k, master, t) {
+    const c = rec.cur, g = rec.tgt;
+    lerpColor(rec, k);
+    c.pulse = lerp(c.pulse, g.pulse, k);
+
+    const dist = TRUSS_H;
+    const halfDeg = 34 + c.pulse * 8;
+    const baseR = Math.tan(THREE.MathUtils.degToRad(halfDeg)) * dist;
+    rec.cone.scale.set(baseR, dist, baseR);
+
+    const lit = c.brt * master;
+    rec.coneMat.color.setRGB(c.r, c.g, c.b);
+    rec.coneMat.opacity = clamp(lit * 0.32, 0, 0.6);
+
+    rec.light.color.setRGB(c.r, c.g, c.b);
+    rec.light.intensity = lit * WASH_LIGHT_K;
+    rec.light.angle = THREE.MathUtils.degToRad(clamp(halfDeg, 10, 60));
+  }
+
+  function updateUplight(rec, k, master) {
+    const c = rec.cur, g = rec.tgt;
+    lerpColor(rec, k);
+    const lit = c.brt * master;
+    // upward cone toward ceiling
+    rec.cone.scale.set(1.0, ROOM_H * 0.85, 1.0);
+    rec.coneMat.color.setRGB(c.r, c.g, c.b);
+    rec.coneMat.opacity = clamp(lit * 0.28, 0, 0.5);
+    // additive floor pool (part of the lux map)
+    rec.discMat.color.setRGB(c.r, c.g, c.b);
+    rec.discMat.opacity = clamp(lit * 0.5, 0, 0.8);
+  }
+
+  function updateSparkle(rec, k, master, t) {
+    const c = rec.cur, g = rec.tgt;
+    lerpColor(rec, k);
+    c.amount = lerp(c.amount, g.amount || 0, k);
+    const lit = c.brt * master;
+    // twinkle: high-frequency flicker scaled by sparkle amount
+    const flick = 0.5 + 0.5 * Math.sin(t * 22 + rec.group.position.x);
+    const v = lit * (0.3 + 0.7 * c.amount) * flick;
+    rec.mat.color.setRGB(c.r, c.g, c.b);
+    rec.mat.opacity = clamp(v, 0, 1);
+    rec.star.rotation.y += 0.08;
+    rec.star.rotation.x += 0.05;
+  }
+
+  function updateImpact(rec, k, master, t) {
+    const c = rec.cur, g = rec.tgt;
+    c.brt = lerp(c.brt, g.brt, k);
+    c.flash = g.flash; // flash is binary, don't smooth it away
+    const v = (c.flash ? 1.0 : c.brt) * master;
+    rec.mat.opacity = clamp(v, 0, 1);
+    rec.light.intensity = v * 10;
+  }
+
+  // =========================================================================
+  // 6. HUD
+  // =========================================================================
+  let _netCount = 0, _netWindow = performance.now();
+  function bumpNet() {
+    _netCount++;
+    const now = performance.now();
+    if (now - _netWindow >= 1000) {
+      document.getElementById('netHz').textContent = _netCount;
+      _netCount = 0; _netWindow = now;
+    }
+  }
+
+  function updateHud(s) {
+    document.getElementById('modeName').textContent  = s.mode_display || s.mode || '—';
+    document.getElementById('sceneName').textContent = s.scene_name || '—';
+    document.getElementById('bpm').textContent       = s.bpm ? s.bpm.toFixed(0) : '—';
+    const m = (s.master_dimmer != null) ? Math.round(s.master_dimmer * 100) : 100;
+    document.getElementById('master').textContent    = m + '%' + (s.blackout ? ' (BLK)' : '');
+    document.getElementById('bLow').style.width  = clamp((s.low_energy||0)*100,0,100) + '%';
+    document.getElementById('bMid').style.width  = clamp((s.mid_energy||0)*100,0,100) + '%';
+    document.getElementById('bHigh').style.width = clamp((s.high_energy||0)*100,0,100) + '%';
+    document.getElementById('bOvr').style.width  = clamp((s.overall_energy||0)*100,0,100) + '%';
+    document.getElementById('fxCount').textContent = fixtures.size;
+
+    if (s.beat) {
+      const bn = document.getElementById('bpm');
+      bn.classList.remove('beatpulse'); void bn.offsetWidth; bn.classList.add('beatpulse');
+    }
+  }
+
+  function setConn(state, text, src) {
+    const dot = document.getElementById('dot');
+    dot.className = 'dot ' + state;
+    document.getElementById('connText').textContent = text;
+    if (src) document.getElementById('srcText').textContent = src;
+  }
+
+  // =========================================================================
+  // 7. CONNECTION — real /ws WebSocket with auto-reconnect, mock fallback
+  // =========================================================================
+  // The visualizer is a passive consumer. It tries the live engine stream first.
+  // If it can't reach the backend (e.g. opened via file://) it runs a built-in
+  // mock generator that emits frames matching the _engine_state schema at 15Hz.
+  let ws = null;
+  let mockTimer = null;
+  let wantMock = false;
+
+  function defaultWsUrl() {
+    if (location.protocol === 'file:') return 'ws://localhost:8765/ws';
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${location.host}/ws`;
+  }
+
+  function stopMock() {
+    if (mockTimer) { clearInterval(mockTimer); mockTimer = null; }
+  }
+
+  function startMock(reason) {
+    stopWs();
+    stopMock();
+    wantMock = true;
+    document.getElementById('demoBtn').classList.add('active');
+    setConn('mock', reason || 'demo mode', 'mock generator');
+    let mt = 0;
+    mockTimer = setInterval(() => {
+      mt += 1 / 15;
+      const frame = buildMockState(mt);
+      bumpNet();
+      applyState(frame);
+    }, 1000 / 15); // 15 Hz, matching the real broadcast cadence
+  }
+
+  function stopWs() {
+    if (ws) { try { ws.onclose = null; ws.close(); } catch (_) {} ws = null; }
+  }
+
+  function connectWs(url) {
+    wantMock = false;
+    document.getElementById('demoBtn').classList.remove('active');
+    stopMock();
+    stopWs();
+    setConn('', 'connecting…', url);
+    try {
+      ws = new WebSocket(url);
+    } catch (e) {
+      startMock('unreachable — demo'); return;
+    }
+    const failTimer = setTimeout(() => {
+      if (ws && ws.readyState !== WebSocket.OPEN) { try { ws.close(); } catch(_){} }
+    }, 3000);
+
+    ws.onopen = () => { clearTimeout(failTimer); setConn('ok', 'connected', url); };
+    ws.onmessage = e => {
+      bumpNet();
+      try { applyState(JSON.parse(e.data)); } catch (_) {}
+    };
+    ws.onerror = () => { try { ws.close(); } catch(_){} };
+    ws.onclose = () => {
+      clearTimeout(failTimer);
+      if (wantMock) return;
+      setConn('err', 'no engine — demo', url);
+      // fall back to mock so the file is never blank
+      startMock('no engine — demo');
+    };
+  }
+
+  // ---- mock state generator (mirrors app/render/scene.py fixture layout) ----
+  function uplightPositions() {
+    const FL = 130, FT = 65, FR = 1070, FB = 545, pos = [];
+    for (let i = 0; i < 6; i++) pos.push([FL + (FR - FL) * (i + 1) / 7, FT - 22]);     // top
+    for (let i = 0; i < 6; i++) pos.push([FL + (FR - FL) * (i + 1) / 7, FB + 22]);     // bottom
+    for (let i = 0; i < 3; i++) pos.push([FL - 22, FT + (FB - FT) * (i + 1) / 4]);     // left
+    for (let i = 0; i < 3; i++) pos.push([FR + 22, FT + (FB - FT) * (i + 1) / 4]);     // right
+    return pos;
+  }
+  const MOCK_UP = uplightPositions();
+  const MOCK_BEAMS = [[175, 670], [1025, 670], [600 - 27.5, 660], [600 + 27.5, 660]];
+  const MOCK_WASH  = [[340, 665], [860, 665]];
+
+  function hsv(h, s, v) { // h:0-360 -> [r,g,b] 0-255
+    h = ((h % 360) + 360) % 360; const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+    let r, g, b;
+    if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+
+  function buildMockState(t) {
+    const baseHue = (t * 30) % 360;
+    const overall = 0.45 + 0.45 * Math.sin(t * 1.7);
+    const beatPhase = (t * 128 / 60) % 1; // 128 BPM
+    const beat = beatPhase < 0.12;
+
+    const beams = MOCK_BEAMS.map((p, i) => {
+      const sweep = Math.sin(t * 1.6 + i * Math.PI / 2) * 55;   // pan sweep
+      const hue = baseHue + i * 90;                              // distinct colors -> magenta overlaps
+      return {
+        id: 'beam_' + i, x: p[0], y: p[1], rgb: hsv(hue, 1, 1),
+        brt: 0.6 + 0.4 * Math.abs(Math.sin(t * 2 + i)),
+        angle: sweep, length: 400, spread: 7, active: true
+      };
+    });
+    const washes = MOCK_WASH.map((p, i) => ({
+      id: 'wash_' + i, x: p[0], y: p[1], rgb: hsv(baseHue + 180 + i * 40, 0.8, 1),
+      brt: 0.5 + 0.5 * overall, radius: 130, pulse: Math.max(0, Math.sin(t * 4)), active: true
+    }));
+    const uplights = MOCK_UP.map((p, i) => {
+      const zone = i < 6 ? 0 : i < 12 ? 50 : i < 15 ? 100 : 150;
+      return { id: 'up_' + i, x: p[0], y: p[1], rgb: hsv(baseHue + zone, 0.9, 1),
+               brt: 0.55 + 0.35 * Math.sin(t * 2 + i * 0.5), active: true };
+    });
+    const sparkles = [{ id: 'sparkle_0', x: 600, y: 660, rgb: hsv(baseHue + 60, 1, 1),
+                        brt: 1, amount: Math.max(0, Math.sin(t * 1.1)), active: true }];
+    const impacts  = [{ id: 'impact_0', x: 600, y: 660, brt: 0.2, flash: beat, active: true }];
+
+    return {
+      mode: 'open_dance', mode_display: 'Open Dance (Demo)', scene: null, scene_name: 'Mock Sweep',
+      blackout: false, bpm: 128, beat,
+      low_energy: Math.max(0, Math.sin(t * 4)), mid_energy: 0.4 + 0.3 * Math.sin(t * 2.3),
+      high_energy: Math.max(0, Math.sin(t * 7)) * 0.7, overall_energy: overall,
+      master_dimmer: 1.0, strobe_master: 1.0, fps: 60, dmx_output: 'MOCK',
+      fixtures: { uplights, washes, beams, sparkles, impacts, ambient_warm: 0.12 }
+    };
+  }
+
+  // =========================================================================
+  // 8. UI wiring + resize + boot
+  // =========================================================================
+  const wsInput = document.getElementById('wsUrl');
+  wsInput.value = defaultWsUrl();
+
+  document.getElementById('connectBtn').addEventListener('click', () => connectWs(wsInput.value.trim()));
+  document.getElementById('demoBtn').addEventListener('click', () => {
+    if (wantMock) { connectWs(wsInput.value.trim()); } else { startMock('demo mode'); }
+  });
+  wsInput.addEventListener('keydown', e => { if (e.key === 'Enter') connectWs(wsInput.value.trim()); });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // start
+  document.getElementById('boot').remove();
+  animate();
+  connectWs(wsInput.value); // tries live engine, auto-falls back to demo
+  </script>
+</body>
+</html>
