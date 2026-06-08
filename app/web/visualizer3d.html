@@ -88,6 +88,14 @@
   /* Embedded in the dashboard 3D tab: drop the standalone connect/help chrome. */
   body.embed #ctrl, body.embed #help { display: none; }
 
+  .view-row { display: flex; gap: 4px; margin-top: 4px; }
+  .view-btn {
+    flex: 1; background: rgba(255,255,255,0.06); color: #e8edf4;
+    border: 1px solid var(--hair); border-radius: 6px;
+    padding: 4px 0; font-size: 11px; cursor: pointer;
+  }
+  .view-btn.active { background: var(--accent); color: #051018; border-color: var(--accent); }
+
   /* --- Control dock: full rig control from the 3D view --- */
   #controls {
     bottom: 14px; left: 50%; transform: translateX(-50%);
@@ -205,6 +213,12 @@
     <label><input type="checkbox" data-layer="sparkle"   checked> Derby</label>
     <label><input type="checkbox" data-layer="impact"    checked> Strobe</label>
     <label><input type="checkbox" data-layer="structure" checked> GigBAR Frame</label>
+    <div class="eyebrow" style="margin-top:9px">View</div>
+    <div class="view-row" id="view-row">
+      <button class="view-btn active" data-view="angle">Angle</button>
+      <button class="view-btn" data-view="front">Front</button>
+      <button class="view-btn" data-view="top">Top</button>
+    </div>
   </div>
 
   <div id="help" class="panel">
@@ -232,6 +246,14 @@
         <button class="ctl-btn strobe-rate" data-master="0.45">MED</button>
         <button class="ctl-btn strobe-rate" data-master="0.7">FAST</button>
         <button class="ctl-btn strobe-rate" data-master="1.0">MAX</button>
+      </div>
+    </div>
+    <div class="ctl-line">
+      <span class="ctl-label">Uplights</span>
+      <div class="ctl-row" id="ctl-uplights">
+        <button class="ctl-btn upl-btn" data-n="6">6</button>
+        <button class="ctl-btn upl-btn" data-n="12">12</button>
+        <button class="ctl-btn upl-btn" data-n="18">18</button>
       </div>
     </div>
     <div class="ctl-line">
@@ -349,6 +371,27 @@
   controls.maxPolarAngle = Math.PI * 0.49; // don't dip below the floor
   controls.minDistance = 8;
   controls.maxDistance = 60;
+
+  // Camera presets — Angle (default 3/4), Front (audience POV), Top (coverage
+  // map, handy for judging uplight-bank spread). Eased tween, then hand control
+  // back to the orbit controls so the DJ can still drag from the new spot.
+  const VIEWS = {
+    angle: { pos: [0, 12, 26],     tgt: [0, 2.5, 0] },
+    front: { pos: [0, 9, 31],      tgt: [0, 3, 0] },
+    top:   { pos: [0, 44, 0.001],  tgt: [0, 0, 0] },
+  };
+  let _viewTween = null;
+  function setView(name) {
+    const v = VIEWS[name]; if (!v) return;
+    _viewTween = {
+      p0: camera.position.clone(), t0: controls.target.clone(),
+      p1: new THREE.Vector3(...v.pos), t1: new THREE.Vector3(...v.tgt),
+      start: performance.now(), dur: 520,
+    };
+    controls.enabled = false;
+    document.querySelectorAll('#view-row .view-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.view === name));
+  }
 
   // --- post-processing: UnrealBloom so bright beams glow like real light ---
   // RenderPass -> UnrealBloomPass -> OutputPass is the canonical order; OutputPass
@@ -579,9 +622,18 @@
     cone.quaternion.setFromUnitVectors(UP, DOWN);
     group.add(cone);
 
+    // glowing lens at the fixture mouth — keeps the wash's colour and on/off
+    // state legible even when its soft cone blends into the beams.
+    const lensMat = new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false });
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), lensMat);
+    lens.position.y = -0.3;
+    group.add(lens);
+
     const puddle = makePuddle();
 
-    return registerFixture(f.id, 'wash', { group, cone, coneMat, puddle,
+    return registerFixture(f.id, 'wash', { group, cone, coneMat, lens, lensMat, puddle,
       cur: washState(f), tgt: washState(f), home: { x, z } });
   }
 
@@ -748,6 +800,10 @@
       rec.tgt = upState(f);
       present.add(f.id);
     });
+    if ((fx.uplights || []).length !== _uplightCount) {
+      _uplightCount = (fx.uplights || []).length;
+      assignUplightRanks();   // re-rank when the uplight set first arrives / changes
+    }
     (fx.sparkles || []).forEach(f => {
       const rec = fixtures.get(f.id) || createSparkle(f);
       rec.tgt = sparkState(f);
@@ -788,6 +844,8 @@
   let _modesBuilt = false;
   let _scenesSig = '';
   let _strobeLatch = null;   // master value of the currently latched strobe rate, or null
+  let uplightShow = 18;      // how many uplights to render (banks of 6); preview only
+  let _uplightCount = 0;     // last seen uplight count, to know when to re-rank
   const _ctlTap = {};   // per-mode tap state for single/double (arm) detection
 
   function cmdUrl() {
@@ -895,12 +953,50 @@
       reflectStrobe();
     };
     document.getElementById('ctl-strobe-off').addEventListener('mousedown', strobeOff);
+
+    document.querySelectorAll('#ctl-uplights .upl-btn').forEach(b => {
+      const fire = e => { if (e.cancelable) e.preventDefault(); setUplights(parseInt(b.dataset.n, 10)); };
+      b.addEventListener('mousedown', fire);
+      b.addEventListener('touchstart', fire, { passive: false });
+    });
+    reflectUplights();
+
+    document.querySelectorAll('#view-row .view-btn').forEach(b =>
+      b.addEventListener('click', () => setView(b.dataset.view)));
   }
 
   function reflectStrobe() {
     document.querySelectorAll('#ctl-strobe .strobe-rate').forEach(b =>
       b.classList.toggle('active', b.dataset.master === _strobeLatch));
   }
+
+  // ---- uplight banks ----------------------------------------------------
+  // The rig is uplit in banks of 6 (DJs deploy 6 / 12 / 18 depending on the
+  // room). Rank uplights so each count is an EVEN, NESTED spread around the
+  // floor: the 6-set is a subset of the 12-set is a subset of all 18. This is
+  // a preview only — it masks fixtures in the 3D view, it does not change DMX.
+  function assignUplightRanks() {
+    const ups = [];
+    fixtures.forEach(r => { if (r.type === 'uplight') ups.push(r); });
+    const n = ups.length;
+    if (!n) return;
+    let cx = 0, cz = 0;
+    ups.forEach(r => { cx += r.group.position.x; cz += r.group.position.z; });
+    cx /= n; cz /= n;
+    ups.forEach(r => { r._ang = Math.atan2(r.group.position.z - cz, r.group.position.x - cx); });
+    ups.sort((a, b) => a._ang - b._ang);                 // ring order around the floor
+    const banks = Math.max(1, Math.round(n / 6));
+    // interleave banks so any prefix of `rank` is spread evenly around the ring
+    ups.forEach((r, j) => { r._key = (j % banks) * 1000 + Math.floor(j / banks); });
+    ups.slice().sort((a, b) => a._key - b._key).forEach((r, idx) => { r.uprank = idx; });
+  }
+
+  function setUplights(n) {
+    uplightShow = n;
+    document.querySelectorAll('#ctl-uplights .upl-btn').forEach(b =>
+      b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
+  }
+  function reflectUplights() { setUplights(uplightShow); }
 
   function updateControls(s) {
     const cur = s.mode, armed = s.armed_mode || null;
@@ -975,6 +1071,14 @@
 
     if (_gigbarRig) _gigbarRig.visible = show.structure;
 
+    if (_viewTween) {
+      const e = Math.min(1, (performance.now() - _viewTween.start) / _viewTween.dur);
+      const s = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2; // easeInOutQuad
+      camera.position.lerpVectors(_viewTween.p0, _viewTween.p1, s);
+      controls.target.lerpVectors(_viewTween.t0, _viewTween.t1, s);
+      if (e >= 1) { _viewTween = null; controls.enabled = true; }
+    }
+
     controls.update();
     composer.render(); // bloom pipeline (RenderPass -> Bloom -> OutputPass)
 
@@ -1047,25 +1151,32 @@
     lerpColor(rec, k);
     c.pulse = lerp(c.pulse, g.pulse, k);
 
+    const lit   = c.brt * master;
+    const flare = 1 + c.pulse * 1.1;            // beat pulse flares the wash brighter + wider
+
     const dist = TRUSS_H;
-    const halfDeg = 34 + c.pulse * 8;
+    const halfDeg = 30 + c.pulse * 14;          // wide, soft footprint (distinct from sharp beams)
     const baseR = Math.tan(THREE.MathUtils.degToRad(halfDeg)) * dist;
     rec.cone.scale.set(baseR, dist, baseR);
 
-    const lit = c.brt * master;
     rec.coneMat.color.setRGB(c.r, c.g, c.b);
-    rec.coneMat.opacity = clamp(lit * 0.32, 0, 0.6);
+    rec.coneMat.opacity = clamp(lit * 0.42 * flare, 0, 0.8);
 
-    // faked floor hit: wide additive circle straight below the wash.
+    // lens glow at the fixture — always-on colour cue, punches on the beat
+    rec.lensMat.color.setRGB(c.r, c.g, c.b);
+    rec.lensMat.opacity = clamp(0.15 + lit * 1.2 * flare, 0, 1);
+
+    // faked floor hit: wide additive pool straight below the wash, pulsing.
     const p = rec.puddle;
     p.mesh.position.set(rec.home.x, 0.05, rec.home.z);
-    p.mesh.scale.setScalar(Math.max(baseR, 0.4));
+    p.mesh.scale.setScalar(Math.max(baseR * (1 + c.pulse * 0.25), 0.4));
     p.mat.color.setRGB(c.r, c.g, c.b);
-    p.mat.opacity = clamp(lit * WASH_LIGHT_K * 0.12, 0, 0.7);
+    p.mat.opacity = clamp(lit * WASH_LIGHT_K * (0.10 + 0.16 * c.pulse), 0, 0.85);
   }
 
   function updateUplight(rec, k, master) {
     if (!applyVis(rec)) return;
+    if (rec.uprank != null && rec.uprank >= uplightShow) { rec.group.visible = false; return; }
     const c = rec.cur, g = rec.tgt;
     lerpColor(rec, k);
     const lit = c.brt * master;
@@ -1348,6 +1459,13 @@
       if (d.type === 'lb-pause')  stopRender();
       if (d.type === 'lb-resume') startRender();
     });
+  }
+
+  // Dev hook (only with ?dev) — lets tools/shot.cjs drive deterministic states
+  // for screenshot verification. Not active in normal use.
+  if (new URLSearchParams(location.search).has('dev')) {
+    window.__lb = { applyState, buildMockState, setUplights, setView,
+                    setStrobe: r => { global.strobe_rate = r; }, fixtures };
   }
 
   // start
