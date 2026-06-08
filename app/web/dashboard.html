@@ -144,7 +144,16 @@
     .btn-release { border-color: var(--amber); color: var(--amber); }
     .btn-release:hover { background: #1a1400; border-color: var(--amber); color: var(--amber); }
 
-    /* ---- Strobe / Kill controls ---- */
+    /* ---- Strobe speed + kill controls ---- */
+    .strobe-speed-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; }
+    .btn-speed-dash {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 2px; padding: 7px 4px;
+      border-color: #334; color: var(--dim);
+    }
+    .btn-speed-dash .spd-hz { font-size: 0.58rem; color: var(--dim); }
+    .btn-speed-dash.active  { border-color: #aaaaff; color: #ddddff; background: #181838; }
+    .btn-speed-dash.active .spd-hz { color: #8888cc; }
     .momentary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 5px; }
     .btn-strobe-hold {
       background: #2a2000; border-color: #665500; color: #ffcc44;
@@ -343,13 +352,14 @@
           </div>
         </div>
         <div style="margin-top:7px">
-          <div class="section-label" style="margin-bottom:4px">Strobe Master</div>
-          <div class="slider-row">
-            <input type="range" id="strobe-master" min="0" max="100" value="100"
-                   oninput="onStrobeMaster(this.value)">
-            <span class="slider-val" id="strobe-master-val">100%</span>
+          <div class="section-label" style="margin-bottom:4px">Strobe Speed</div>
+          <div class="strobe-speed-row" id="dash-speed-row">
+            <button class="btn btn-speed-dash" id="dash-spd-slow" onclick="setStrobeSpeed(0.14)">SLOW<span class="spd-hz">4 Hz</span></button>
+            <button class="btn btn-speed-dash" id="dash-spd-med"  onclick="setStrobeSpeed(0.43)">MED<span class="spd-hz">8 Hz</span></button>
+            <button class="btn btn-speed-dash" id="dash-spd-fast" onclick="setStrobeSpeed(0.71)">FAST<span class="spd-hz">12 Hz</span></button>
+            <button class="btn btn-speed-dash" id="dash-spd-max"  onclick="setStrobeSpeed(1.0)">MAX<span class="spd-hz">16 Hz</span></button>
           </div>
-          <div class="momentary-row">
+          <div class="momentary-row" style="margin-top:5px">
             <button class="btn btn-full btn-strobe-hold" id="strobe-hold-btn"
                     onmousedown="strobeHoldStart()" onmouseup="strobeHoldEnd()"
                     onmouseleave="strobeHoldEnd()">
@@ -812,17 +822,32 @@ let currentMode         = null;
 let currentScene        = null;
 let modesReady          = false;
 let scenesReady         = false;
-let _strobeMasterSynced = false;
-
 function cmd(payload) {
   fetch('/api/command', {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
   }).catch(()=>{});
 }
 
-function onStrobeMaster(v) {
-  document.getElementById('strobe-master-val').textContent = v + '%';
-  cmd({type:'strobe_master', value: parseFloat(v) / 100});
+const _DASH_STROBE_PRESETS = [
+  {id: 'dash-spd-slow', val: 0.14},
+  {id: 'dash-spd-med',  val: 0.43},
+  {id: 'dash-spd-fast', val: 0.71},
+  {id: 'dash-spd-max',  val: 1.0 },
+];
+function setStrobeSpeed(v) {
+  cmd({type:'set_fader', fader:'strobe', value: v});
+  syncStrobeSpeed(v);
+}
+function syncStrobeSpeed(v) {
+  let bestId = null, bestDist = Infinity;
+  _DASH_STROBE_PRESETS.forEach(p => {
+    const d = Math.abs(p.val - v);
+    if (d < bestDist) { bestDist = d; bestId = p.id; }
+  });
+  _DASH_STROBE_PRESETS.forEach(p => {
+    const el = document.getElementById(p.id);
+    if (el) el.classList.toggle('active', p.id === bestId);
+  });
 }
 
 let _strobeHeld = false;
@@ -897,16 +922,8 @@ function applyState(s) {
   const strobeBar = document.getElementById('bar-strobe');
   strobeBar.style.width = clamp(s.strobe_rate);
   strobeBar.classList.toggle('firing', (s.strobe_rate || 0) > 0.01);
-  // Sync strobe master slider once on first message
-  if (!_strobeMasterSynced && s.strobe_master !== undefined) {
-    _strobeMasterSynced = true;
-    const sm = document.getElementById('strobe-master');
-    if (sm) {
-      const pct = Math.round((s.strobe_master || 1) * 100);
-      sm.value = pct;
-      document.getElementById('strobe-master-val').textContent = pct + '%';
-    }
-  }
+  // Sync strobe speed buttons
+  if (s.strobe_master !== undefined) syncStrobeSpeed(s.strobe_master);
 
   // Grids
   buildModes(s.modes); buildScenes(s.scenes);
