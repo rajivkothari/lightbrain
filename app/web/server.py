@@ -66,6 +66,8 @@ _engine_state: Dict[str, Any] = {
     "kill_derby":     False,
     "kill_laser":     False,
     "flash_active":   False,
+    "rig_layout":     [],    # [{name, type, address, channels, end}] — static after load
+    "dmx_channels":   [],    # 512-element int list — updated each frame
 }
 
 _command_queue: _queue.Queue = _queue.Queue()
@@ -91,6 +93,25 @@ def set_catalog(
     """Populate the static mode and scene lists (call once before loop starts)."""
     _engine_state["modes"]  = modes
     _engine_state["scenes"] = scenes
+
+
+def set_rig_layout(fixtures: List[Any]) -> None:
+    """
+    Publish the static fixture address map (call once after fixture load).
+
+    Each entry: {name, type, address, channels, end}
+    Used by the dashboard Rig tab to draw the fixture table and channel grid.
+    """
+    _engine_state["rig_layout"] = [
+        {
+            "name":     fx.name,
+            "type":     type(fx).__name__,
+            "address":  fx.dmx_address,
+            "channels": fx.channel_count,
+            "end":      fx.dmx_address + fx.channel_count - 1,
+        }
+        for fx in fixtures
+    ]
 
 
 def set_paths(

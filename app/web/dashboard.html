@@ -240,6 +240,55 @@
     .form-actions { display: flex; gap: 8px; margin-top: 14px; }
     .editor-empty { color: var(--dim); font-size: 0.8rem; padding: 20px;
                     border: 1px dashed var(--border); border-radius: 4px; text-align: center; }
+
+    /* ---- Rig tab ---- */
+    .rig-section { margin-bottom: 14px; }
+    .rig-status-grid {
+      display: grid; grid-template-columns: auto 1fr; gap: 4px 12px;
+      font-size: 0.72rem;
+    }
+    .rig-key   { color: var(--dim); white-space: nowrap; }
+    .rig-val   { color: var(--text); font-weight: 600; }
+    .rig-val.ok  { color: var(--green); }
+    .rig-val.err { color: var(--red); }
+
+    .fixture-table { width: 100%; border-collapse: collapse; font-size: 0.68rem; }
+    .fixture-table th {
+      text-align: left; font-size: 0.6rem; text-transform: uppercase;
+      letter-spacing: 0.12em; color: var(--dim); border-bottom: 1px solid var(--border);
+      padding: 3px 6px 4px;
+    }
+    .fixture-table td { padding: 4px 6px; border-bottom: 1px solid #1a1a2e; }
+    .fixture-table tr:last-child td { border-bottom: none; }
+    .fx-swatch {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 2px; margin-right: 5px; vertical-align: middle;
+    }
+    .fx-activity {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--surface); border: 1px solid var(--border);
+      vertical-align: middle; transition: background 0.12s;
+    }
+    .fx-activity.live { background: var(--green); box-shadow: 0 0 4px var(--green); }
+
+    /* DMX channel grid */
+    .dmx-grid-wrap { position: relative; }
+    .dmx-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; font-size: 0.62rem; }
+    .dmx-legend-item { display: flex; align-items: center; gap: 4px; color: var(--dim); }
+    .dmx-legend-swatch {
+      width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0;
+    }
+    #dmx-grid-canvas {
+      width: 100%; display: block;
+      border: 1px solid var(--border); border-radius: 3px;
+      cursor: crosshair; image-rendering: pixelated;
+    }
+    .dmx-tooltip {
+      position: fixed; background: #1c1c34; border: 1px solid var(--border);
+      border-radius: 4px; padding: 4px 8px; font-size: 0.68rem;
+      color: var(--text); pointer-events: none; z-index: 100;
+      display: none; white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -259,6 +308,7 @@
     <div class="tabs">
       <button class="tab active" onclick="showTab('live')">Live</button>
       <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
+      <button class="tab" onclick="showTab('rig')" id="tab-btn-rig">Rig</button>
     </div>
 
     <!-- LIVE TAB -->
@@ -333,6 +383,51 @@
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- RIG TAB -->
+    <div id="tab-rig" class="tab-pane" style="display:none">
+
+      <div class="rig-section">
+        <div class="section-label">System</div>
+        <div class="rig-status-grid">
+          <span class="rig-key">DMX Output</span>  <span class="rig-val" id="rig-dmx-output">--</span>
+          <span class="rig-key">Engine FPS</span>  <span class="rig-val" id="rig-fps">--</span>
+          <span class="rig-key">Address Check</span> <span class="rig-val" id="rig-check">--</span>
+        </div>
+      </div>
+
+      <div class="rig-section">
+        <div class="section-label">Fixture Address Map</div>
+        <table class="fixture-table" id="fixture-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Fixture</th>
+              <th>Type</th>
+              <th>Start</th>
+              <th>Ch</th>
+              <th>End</th>
+              <th>Live</th>
+            </tr>
+          </thead>
+          <tbody id="fixture-table-body">
+            <tr><td colspan="7" style="color:var(--dim);text-align:center;padding:12px">
+              Loading…
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rig-section">
+        <div class="section-label">DMX Universe  <span style="color:var(--dim);font-weight:400;font-size:0.6rem;margin-left:6px">512 channels · hover for value</span></div>
+        <div class="dmx-legend" id="dmx-legend"></div>
+        <div class="dmx-grid-wrap">
+          <canvas id="dmx-grid-canvas" height="80"></canvas>
+        </div>
+        <div class="dmx-tooltip" id="dmx-tooltip"></div>
+      </div>
+
     </div>
 
     <!-- SCENE EDITOR TAB -->
@@ -865,6 +960,28 @@ function applyState(s) {
     _ambientWarm  = s.fixtures.ambient_warm || 0;
     _drawRig(_lastFixtures, _blackoutActive);
   }
+
+  // Rig tab — system status (always update, cheap)
+  if (s.dmx_output !== undefined) {
+    const el = document.getElementById('rig-dmx-output');
+    if (el) { el.textContent = s.dmx_output || 'MOCK'; el.className = 'rig-val' + (s.dmx_output && s.dmx_output !== 'MOCK' ? ' ok' : ''); }
+  }
+  if (s.fps !== undefined) {
+    const el = document.getElementById('rig-fps');
+    if (el) el.textContent = s.fps + ' fps';
+  }
+  // Build fixture table once on first non-empty rig_layout
+  if (s.rig_layout && s.rig_layout.length && !_rigBuilt) {
+    _buildRigTable(s.rig_layout);
+    _channelMap = _buildChannelMap();
+  }
+  // Live DMX channel grid — only redraw when Rig tab is visible
+  if (s.dmx_channels && s.dmx_channels.length === 512) {
+    _lastDmxChannels = s.dmx_channels;
+    if (document.getElementById('tab-rig').style.display !== 'none') {
+      _rigDraw(s.dmx_channels);
+    }
+  }
 }
 
 function connect() {
@@ -1076,10 +1193,179 @@ async function editorSave() {
 function showTab(name) {
   document.getElementById('tab-live').style.display   = name==='live'   ? '' : 'none';
   document.getElementById('tab-scenes').style.display = name==='scenes' ? '' : 'none';
-  document.querySelectorAll('.tab').forEach((t,i) =>
-    t.classList.toggle('active', [,'live','scenes'][i+1]===name || t.textContent.toLowerCase().includes(name)));
+  document.getElementById('tab-rig').style.display    = name==='rig'    ? '' : 'none';
+  document.querySelectorAll('.tab').forEach(t => {
+    const key = t.getAttribute('onclick').replace("showTab('","").replace("')","");
+    t.classList.toggle('active', key === name);
+  });
   if (name === 'scenes') _edLoad();
+  if (name === 'rig')    _rigDraw(_lastDmxChannels);
 }
+
+// ============================================================
+// RIG TAB
+// ============================================================
+
+// Per-fixture colour palette (consistent across table + grid)
+const _RIG_COLORS = [
+  '#5588ff', '#44ddaa', '#ee8833', '#cc55ee',
+  '#ff5566', '#44bbff', '#aadd44', '#ffaa33',
+];
+let _rigLayout    = [];    // [{name, type, address, channels, end}]
+let _lastDmxChannels = new Array(512).fill(0);
+let _rigBuilt     = false;
+
+// Called once when rig_layout arrives (static after startup)
+function _buildRigTable(layout) {
+  if (_rigBuilt && layout.length === _rigLayout.length) return;
+  _rigLayout = layout;
+  _rigBuilt  = true;
+
+  // Fixture table
+  const tbody = document.getElementById('fixture-table-body');
+  if (!layout.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--dim);text-align:center;padding:12px">No fixtures configured</td></tr>';
+  } else {
+    tbody.innerHTML = layout.map((fx, i) => {
+      const color = _RIG_COLORS[i % _RIG_COLORS.length];
+      return `<tr>
+        <td><span class="fx-swatch" style="background:${color}"></span></td>
+        <td>${fx.name}</td>
+        <td style="color:var(--dim)">${fx.type}</td>
+        <td>${fx.address}</td>
+        <td style="color:var(--dim)">${fx.channels}</td>
+        <td>${fx.end}</td>
+        <td><span class="fx-activity" id="fx-activity-${i}"></span></td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Legend
+  const legend = document.getElementById('dmx-legend');
+  legend.innerHTML = layout.map((fx, i) => {
+    const color = _RIG_COLORS[i % _RIG_COLORS.length];
+    return `<span class="dmx-legend-item">
+      <span class="dmx-legend-swatch" style="background:${color}"></span>${fx.name}
+    </span>`;
+  }).join('') + `<span class="dmx-legend-item">
+    <span class="dmx-legend-swatch" style="background:#252540"></span>Unassigned
+  </span>`;
+
+  // Address check
+  const checkEl = document.getElementById('rig-check');
+  checkEl.textContent = layout.length ? '✓ PASS' : '— no fixtures';
+  checkEl.className   = 'rig-val ' + (layout.length ? 'ok' : '');
+
+  _rigDraw(_lastDmxChannels);
+}
+
+// Build a channel→fixture-index lookup once when layout changes
+function _buildChannelMap() {
+  const map = new Int8Array(512).fill(-1);  // -1 = unassigned
+  _rigLayout.forEach((fx, i) => {
+    for (let c = fx.address - 1; c < fx.end; c++) map[c] = i;
+  });
+  return map;
+}
+
+let _channelMap = null;
+
+function _rigDraw(channels) {
+  _lastDmxChannels = channels;
+  const canvas = document.getElementById('dmx-grid-canvas');
+  if (!canvas) return;
+  if (!_channelMap || _channelMap.length !== 512) _channelMap = _buildChannelMap();
+
+  const COLS = 32;
+  const ROWS = 16;   // 32×16 = 512
+  const CW   = Math.max(1, Math.floor(canvas.clientWidth / COLS));
+  const CH   = 16;
+  canvas.width  = COLS * CW;
+  canvas.height = ROWS * CH;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Parse _RIG_COLORS into r/g/b for blending
+  function hexToRgb(h) {
+    const n = parseInt(h.slice(1), 16);
+    return [(n>>16)&0xff, (n>>8)&0xff, n&0xff];
+  }
+  const rgbs = _RIG_COLORS.map(hexToRgb);
+
+  for (let i = 0; i < 512; i++) {
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
+    const x   = col * CW;
+    const y   = row * CH;
+    const val = channels[i] || 0;
+    const fi  = _channelMap[i];
+
+    let r, g, b;
+    if (fi >= 0) {
+      const base = rgbs[fi % rgbs.length];
+      const t    = val / 255;
+      // Active: full fixture colour; inactive: very dim tinted
+      r = Math.round(base[0] * t + 0x18 * (1 - t));
+      g = Math.round(base[1] * t + 0x18 * (1 - t));
+      b = Math.round(base[2] * t + 0x28 * (1 - t));
+    } else {
+      // Unassigned channel
+      const t = val / 255;
+      r = g = Math.round(0x30 * t + 0x14 * (1 - t));
+      b = Math.round(0x44 * t + 0x20 * (1 - t));
+    }
+
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(x, y, CW - 1, CH - 1);
+  }
+
+  // Update per-fixture activity dots
+  _rigLayout.forEach((fx, i) => {
+    const dot = document.getElementById('fx-activity-' + i);
+    if (!dot) return;
+    let anyActive = false;
+    for (let c = fx.address - 1; c < fx.end; c++) {
+      if ((channels[c] || 0) > 0) { anyActive = true; break; }
+    }
+    dot.classList.toggle('live', anyActive);
+  });
+}
+
+// Tooltip on hover
+(function() {
+  function _onMove(e) {
+    const canvas = document.getElementById('dmx-grid-canvas');
+    const tip    = document.getElementById('dmx-tooltip');
+    if (!canvas || !tip) return;
+    const rect = canvas.getBoundingClientRect();
+    const px   = e.clientX - rect.left;
+    const py   = e.clientY - rect.top;
+    const COLS = 32;
+    const CW   = rect.width / COLS;
+    const CH   = rect.height / 16;
+    const col  = Math.floor(px / CW);
+    const row  = Math.floor(py / CH);
+    const idx  = row * COLS + col;
+    if (idx < 0 || idx >= 512) { tip.style.display = 'none'; return; }
+    const ch  = idx + 1;
+    const val = _lastDmxChannels[idx] || 0;
+    const fi  = _channelMap ? _channelMap[idx] : -1;
+    const fxName = fi >= 0 ? _rigLayout[fi].name : 'Unassigned';
+    tip.textContent  = `Ch ${ch}  ·  ${val}  ·  ${fxName}`;
+    tip.style.display = 'block';
+    tip.style.left    = (e.clientX + 12) + 'px';
+    tip.style.top     = (e.clientY - 24) + 'px';
+  }
+  function _onLeave() {
+    const tip = document.getElementById('dmx-tooltip');
+    if (tip) tip.style.display = 'none';
+  }
+  window.addEventListener('DOMContentLoaded', () => {
+    const c = document.getElementById('dmx-grid-canvas');
+    if (c) { c.addEventListener('mousemove', _onMove); c.addEventListener('mouseleave', _onLeave); }
+  });
+})();
 
 // ============================================================
 // INIT

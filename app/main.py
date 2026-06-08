@@ -307,6 +307,8 @@ def main():
         print(f"[ERROR] DMX address conflict in rig_config.json:\n{e}")
         sys.exit(1)
 
+    _web.set_rig_layout(fixtures)
+
     # ---- DMX output backend ----
     # Priority: --serial CLI > --artnet CLI > config dmx.output > mock
     _dmx_cfg    = config.get("dmx", {})
@@ -411,6 +413,7 @@ def main():
     _strobe_burst_end  = 0.0    # monotonic time when strobe burst expires
     _strobe_hold       = False   # iPad hold-to-strobe button state
     _strobe_hold_phase = 0.0    # software oscillator phase for strobe hold
+    _dmx_snapshot      = [0] * 512  # last rendered universe for Rig tab
     _test_mode         = False   # fixture test mode — overrides audio engine
     _test_pattern      = ""      # active test pattern name
     _blackout_fading   = False   # True while blackout fade-out is in progress
@@ -876,6 +879,7 @@ def main():
 
             # --- post to DMX thread (non-blocking ~1µs copy into single-slot buffer) ---
             dmx_thread.post(universe)
+            _dmx_snapshot = universe._channels.tolist()
 
             # --- overlay prep (skip in headless) ---
             if overlay:
@@ -978,6 +982,7 @@ def main():
                     kill_derby=      _kill_derby,
                     kill_laser=      _kill_laser,
                     flash_active=    _flash_frames > 0,
+                    dmx_channels=    _dmx_snapshot,
                 )
 
             # --- frame rate cap (hybrid sleep/spin-lock, ~50µs jitter) ---
