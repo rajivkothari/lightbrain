@@ -7,7 +7,7 @@ interprets them through mode profiles, palettes, and scene presets tuned for
 wedding moments.
 
 **Current status:** Hardware arrives in ~2 weeks. System runs fully in mock
-mode today. 422+ automated tests passing.
+mode today. 580 automated tests passing (2 skipped on Windows).
 
 ---
 
@@ -118,7 +118,7 @@ lightbrain/
     test_dmxking_rockwedge.py  Hardware DMX test
     test_song_preview.py    Offline analysis + deterministic replay
   tests/
-    test_lightbrain.py      422+ automated tests
+    test_lightbrain.py      580 automated tests (2 skipped on Windows)
   docs/
     ARCHITECTURE.md         System design + module guide
     ROADMAP.md              Sprint history + completed features
@@ -420,7 +420,7 @@ before DMX write. Red label ("STROBE OFF") = element is silenced.
 python -m pytest tests/ -v
 ```
 
-422+ tests covering: audio analysis, beat detection, gamma, DMX universe,
+580 tests covering: audio analysis, beat detection, gamma, DMX universe,
 smoothing, palettes, modes, safety, room lane, all fixture mappers, scene
 system, strobe engine, hue crossfade, Art-Net, hybrid blend, program
 save/load, setlist, web API, iPad commands, and the full codebase audit.

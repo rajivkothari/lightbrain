@@ -603,9 +603,19 @@ const DEFAULT_MODES = [
 // ============================================================
 // WEBSOCKET
 // ============================================================
+function _getToken() {
+  // Read ?token=xxx from the page URL — the DJ navigates to
+  // http://<ip>:8080/?token=<configured_token>
+  return new URLSearchParams(window.location.search).get('token') || '';
+}
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  _ws = new WebSocket(`${proto}//${location.host}/ws`);
+  const tok   = _getToken();
+  const url   = tok
+    ? `${proto}//${location.host}/ws?token=${encodeURIComponent(tok)}`
+    : `${proto}//${location.host}/ws`;
+  _ws = new WebSocket(url);
 
   _ws.onopen = () => {
     _connected = true;
