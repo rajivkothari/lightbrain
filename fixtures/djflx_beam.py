@@ -61,6 +61,10 @@ class DJFLXBeam(FixtureBase):
     Converts BeamState (from SceneLayout) to DMX channel values.
     """
 
+    @property
+    def channel_count(self) -> int:
+        return NUM_CHANNELS
+
     def render_to_universe(
         self,
         universe:  DMXUniverse,

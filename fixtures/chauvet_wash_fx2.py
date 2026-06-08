@@ -59,6 +59,10 @@ class ChauvetWashFX2(FixtureBase):
     fixture has no W/A channels).
     """
 
+    @property
+    def channel_count(self) -> int:
+        return NUM_CHANNELS
+
     def render_to_universe(
         self,
         universe:   DMXUniverse,

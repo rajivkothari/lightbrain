@@ -199,6 +199,10 @@ class ChauvetGigBarMoveILS(FixtureBase):
 
     # ── Core render ──────────────────────────────────────────────────────
 
+    @property
+    def channel_count(self) -> int:
+        return NUM_CHANNELS
+
     def render_to_universe(
         self,
         universe:   DMXUniverse,

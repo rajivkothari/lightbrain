@@ -195,6 +195,10 @@ These were added after the formal audit in direct development:
 - **Mode button cleanup** — removed redundant key sub-label from buttons (iPad + dashboard)
 - **Flash/strobe canvas feedback** — canvas border glows yellow on strobe, pops blue-white on flash
 - **Derby kill on GigBAR** — `set_derby_enabled()` blanks all derby DMX channels when killed
+- **Strobe hold software oscillator** — hold button now flickers at 2–16 Hz (controlled by strobe master fader); previously only drove hardware strobe channel
+- **Kill switch per-frame enforcement** — derby/laser kills re-applied every render frame; previously fire-and-forget on toggle
+- **FLASH renamed to BUMP** — clarifies it is a 75ms full-white accent hit, not a continuous strobe
+- **DMX address collision checker** — `check_dmx_address_map()` validates layout at startup; raises with full address table on overlap or out-of-bounds; `channel_count` property added to all fixture types
 
 ---
 
@@ -210,12 +214,36 @@ These were added after the formal audit in direct development:
 - [ ] Reload udev: `sudo udevadm control --reload-rules && sudo udevadm trigger`
 - [ ] Verify latency: `cat /sys/class/tty/ttyUSB0/device/latency_timer` → should read `1`
 
-### 1. DMX configuration
+### 1. DMX configuration — address programming workflow
 
-- [ ] Swap `config/rig_config.json` `fixtures` array from RockWedge placeholder to `_hardware_fixtures` block
-- [ ] Set `dmx.output` to `"enttec"` and `dmx.serial_port` to the USB adapter port
-- [ ] Set fixture personalities on hardware: Wash FX2 → 8Ch, GigBAR → 29Ch
-- [ ] Verify DMX addresses match config (Wash FX2 L=1, Wash FX2 R=9, GigBAR=17)
+DMX addresses must be consistent across three places:
+
+```
+Physical fixture menu  →  rig_config.json dmx_address  →  LightBrain startup check
+```
+
+Wireless DMX is a transparent relay — no addressing changes needed on the radio link.
+
+**Step-by-step:**
+
+- [ ] On each physical fixture, set start address and personality:
+  - Wash FX2 Left → address **1**, personality **8Ch**
+  - Wash FX2 Right → address **9**, personality **8Ch**
+  - GigBAR Move+ILS → address **17**, personality **29Ch**
+- [ ] In `config/rig_config.json`:
+  - Replace `fixtures` array with the `_hardware_fixtures` block
+  - Set `dmx.output` to `"enttec_pro"` and `dmx.serial_port` to the USB port
+  - Confirm `dmx_address` values match the addresses set above
+- [ ] Run `python -m app.main` — the startup collision check validates the layout
+  before the first DMX frame. Any mismatch prints a clear error and exits cleanly.
+
+**Address map reference:**
+
+| Fixture | Start | Channels | End |
+|---------|------:|:--------:|----:|
+| Wash FX2 Left | 1 | 8 | 8 |
+| Wash FX2 Right | 9 | 8 | 16 |
+| GigBAR Move+ILS | 17 | 29 | 45 |
 
 ### 2. Smoke tests
 

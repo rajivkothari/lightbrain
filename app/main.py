@@ -60,6 +60,7 @@ from engine.pacer          import precise_sleep_until
 from fixtures.rockwedge import RockWedge
 from fixtures.chauvet_wash_fx2 import ChauvetWashFX2
 from fixtures.chauvet_gigbar_move_ils import ChauvetGigBarMoveILS
+from fixtures.fixture import check_dmx_address_map
 
 from ui.terminal_debug import TerminalDebugOverlay
 from engine.scenes        import SceneManager
@@ -298,6 +299,12 @@ def main():
             ))
     if not fixtures:
         print("[ERROR] No fixtures found in rig_config.json")
+        sys.exit(1)
+
+    try:
+        check_dmx_address_map(fixtures)
+    except ValueError as e:
+        print(f"[ERROR] DMX address conflict in rig_config.json:\n{e}")
         sys.exit(1)
 
     # ---- DMX output backend ----
