@@ -225,6 +225,16 @@
     <div class="ctl-line"><span class="ctl-label">Mode</span><div class="ctl-row" id="ctl-modes"></div></div>
     <div class="ctl-line" id="ctl-scenes-line"><span class="ctl-label">Scene</span><div class="ctl-row" id="ctl-scenes"></div></div>
     <div class="ctl-line">
+      <span class="ctl-label">Strobe</span>
+      <div class="ctl-row" id="ctl-strobe">
+        <button class="ctl-btn" id="ctl-strobe-off" data-act>OFF</button>
+        <button class="ctl-btn strobe-rate" data-master="0.2">SLOW</button>
+        <button class="ctl-btn strobe-rate" data-master="0.45">MED</button>
+        <button class="ctl-btn strobe-rate" data-master="0.7">FAST</button>
+        <button class="ctl-btn strobe-rate" data-master="1.0">MAX</button>
+      </div>
+    </div>
+    <div class="ctl-line">
       <span class="ctl-label">Rig</span>
       <div class="ctl-row">
         <button class="ctl-btn wide" id="ctl-blackout" data-act>BLACKOUT</button>
@@ -777,6 +787,7 @@
   ];
   let _modesBuilt = false;
   let _scenesSig = '';
+  let _strobeLatch = null;   // master value of the currently latched strobe rate, or null
   const _ctlTap = {};   // per-mode tap state for single/double (arm) detection
 
   function cmdUrl() {
@@ -844,7 +855,7 @@
   function wireControls() {
     if (_ctlWired) return; _ctlWired = true;
     const on = (id, fn) => document.getElementById(id).addEventListener('mousedown', fn);
-    on('ctl-blackout',    () => cmd({ type: 'blackout' }));
+    on('ctl-blackout',    () => { _strobeLatch = null; reflectStrobe(); cmd({ type: 'blackout' }); });
     on('ctl-kill-strobe', () => cmd({ type: 'toggle_kill', target: 'strobe' }));
     on('ctl-kill-derby',  () => cmd({ type: 'toggle_kill', target: 'derby' }));
     on('ctl-kill-laser',  () => cmd({ type: 'toggle_kill', target: 'laser' }));
@@ -862,6 +873,33 @@
     w.addEventListener('touchstart', wDown, { passive: false });
     w.addEventListener('touchend', wUp);
     w.addEventListener('touchcancel', wUp);
+
+    // Strobe rate ladder — tap a speed to latch a manual strobe at that rate,
+    // tap OFF to release. Buttons (not a slider) so you can ride a build up the
+    // ladder by ear without hunting for a value. Sets strobe_master (the engine
+    // maps 0-1 to 2-16 Hz) and engages strobe_hold.
+    document.querySelectorAll('#ctl-strobe .strobe-rate').forEach(b => {
+      const fire = e => {
+        if (e.cancelable) e.preventDefault();
+        cmd({ type: 'strobe_master', value: parseFloat(b.dataset.master) });
+        cmd({ type: 'momentary', effect: 'strobe_hold', action: 'start' });
+        _strobeLatch = b.dataset.master;
+        reflectStrobe();
+      };
+      b.addEventListener('mousedown', fire);
+      b.addEventListener('touchstart', fire, { passive: false });
+    });
+    const strobeOff = () => {
+      cmd({ type: 'momentary', effect: 'strobe_hold', action: 'stop' });
+      _strobeLatch = null;
+      reflectStrobe();
+    };
+    document.getElementById('ctl-strobe-off').addEventListener('mousedown', strobeOff);
+  }
+
+  function reflectStrobe() {
+    document.querySelectorAll('#ctl-strobe .strobe-rate').forEach(b =>
+      b.classList.toggle('active', b.dataset.master === _strobeLatch));
   }
 
   function updateControls(s) {
