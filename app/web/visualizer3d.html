@@ -303,7 +303,7 @@
     });
     const mesh = new THREE.Mesh(PUDDLE_GEO, mat);
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = 0.02;
+    mesh.position.y = 0.05; // clear the floor (0) and grid (0.01) to avoid z-fighting
     scene.add(mesh);
     return { mesh, mat };
   }
@@ -435,7 +435,7 @@
     });
     const disc = new THREE.Mesh(new THREE.CircleGeometry(1.4, 24), discMat);
     disc.rotation.x = -Math.PI / 2;
-    disc.position.y = 0.02;
+    disc.position.y = 0.05; // clear floor/grid to avoid z-fighting
     group.add(disc);
 
     return registerFixture(f.id, 'uplight', { group, cone, coneMat, disc, discMat,
@@ -476,7 +476,7 @@
     group.add(ball);
     // faked floor flash — large additive circle under the strobe
     const puddle = makePuddle();
-    puddle.mesh.position.set(mapX(f.x), 0.03, mapZ(f.y));
+    puddle.mesh.position.set(mapX(f.x), 0.05, mapZ(f.y));
     return registerFixture(f.id, 'impact', { group, ball, mat, puddle,
       cur: { brt: 0, flash: 0 }, tgt: { brt: 0, flash: 0 } });
   }
@@ -633,7 +633,7 @@
     // faked floor hit: a flat additive circle at the beam/floor intersection.
     // Footprint radius == cone base radius. Additive blend handles overlaps.
     const p = rec.puddle;
-    p.mesh.position.set(_aim.x, 0.02, _aim.z);
+    p.mesh.position.set(_aim.x, 0.05, _aim.z);
     p.mesh.scale.setScalar(Math.max(baseR, 0.2) * 1.15);
     p.mat.color.setRGB(c.r, c.g, c.b);
     p.mat.opacity = clamp(lit * BEAM_LIGHT_K * 0.16, 0, 0.95);
@@ -655,7 +655,7 @@
 
     // faked floor hit: wide additive circle straight below the wash.
     const p = rec.puddle;
-    p.mesh.position.set(rec.home.x, 0.02, rec.home.z);
+    p.mesh.position.set(rec.home.x, 0.05, rec.home.z);
     p.mesh.scale.setScalar(Math.max(baseR, 0.4));
     p.mat.color.setRGB(c.r, c.g, c.b);
     p.mat.opacity = clamp(lit * WASH_LIGHT_K * 0.12, 0, 0.7);
