@@ -4132,3 +4132,41 @@ class TestNewEngineStateAndCommands:
     def test_ipad_rejects_unknown_command(self):
         from app.web import ipad_server
         assert "definitely_not_a_command" not in ipad_server._ALLOWED_TYPES
+
+
+class TestSerialPortResolution:
+    """Regression: dmx.output "enttec_pro" must select the serial backend.
+
+    Before the fix, only "enttec" was recognised — a config following the
+    ROADMAP's "enttec_pro" wording silently fell through to mock output.
+    """
+
+    def test_enttec_key_resolves_port(self):
+        from app.main import resolve_serial_port
+        cfg = {"output": "enttec", "serial_port": "/dev/ttyUSB0"}
+        assert resolve_serial_port(None, cfg) == "/dev/ttyUSB0"
+
+    def test_enttec_pro_key_resolves_port(self):
+        from app.main import resolve_serial_port
+        cfg = {"output": "enttec_pro", "serial_port": "/dev/ttyUSB0"}
+        assert resolve_serial_port(None, cfg) == "/dev/ttyUSB0"
+
+    def test_mock_output_yields_no_port(self):
+        from app.main import resolve_serial_port
+        cfg = {"output": "mock", "serial_port": "/dev/ttyUSB0"}
+        assert resolve_serial_port(None, cfg) is None
+
+    def test_artnet_output_yields_no_port(self):
+        from app.main import resolve_serial_port
+        cfg = {"output": "artnet", "serial_port": "/dev/ttyUSB0"}
+        assert resolve_serial_port(None, cfg) is None
+
+    def test_cli_serial_overrides_config(self):
+        from app.main import resolve_serial_port
+        cfg = {"output": "mock"}
+        assert resolve_serial_port("COM3", cfg) == "COM3"
+
+    def test_missing_serial_port_yields_none(self):
+        from app.main import resolve_serial_port
+        assert resolve_serial_port(None, {"output": "enttec"}) is None
+        assert resolve_serial_port(None, {}) is None
