@@ -133,7 +133,10 @@ clients at ~15 fps. Key fields:
 | `mode` | str | Active mode key |
 | `mode_display` | str | Human-readable mode name |
 | `scene` | str\|null | Active scene ID |
+| `scene_name` | str | Human-readable scene name (empty if none) |
 | `bpm` | float | Estimated BPM (0 if unknown) |
+| `fps` | int | Engine render loop frames per second |
+| `dmx_output` | str | Active DMX backend ("MOCK", "ENTTEC", "ARTNET") |
 | `beat` | bool | True on beat frame (one frame only) |
 | `blackout` | bool | Blackout active |
 | `strobe_rate` | float | Effective strobe 0–1 (post all overrides) |

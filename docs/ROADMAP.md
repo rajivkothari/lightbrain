@@ -255,7 +255,7 @@ Wireless DMX is a transparent relay — no addressing changes needed on the radi
   - GigBAR Move+ILS → address **17**, personality **29Ch**
 - [ ] In `config/rig_config.json`:
   - Replace `fixtures` array with the `_hardware_fixtures` block
-  - Set `dmx.output` to `"enttec_pro"` and `dmx.serial_port` to the USB port
+  - Set `dmx.output` to `"enttec"` (or `"enttec_pro"` — both accepted) and `dmx.serial_port` to the USB port
   - Confirm `dmx_address` values match the addresses set above
 - [ ] Run `python -m app.main` — the startup collision check validates the layout
   before the first DMX frame. Any mismatch prints a clear error and exits cleanly.

@@ -85,6 +85,21 @@ POSITIONS_FILE  = os.path.join(ROOT, "fixtures", "positions.json")
 STATES_FILE     = os.path.join(ROOT, "fixtures", "states.json")
 BLACKOUT_RECOVERY_S = 1.5  # seconds to fade up when blackout is released
 
+# Config spellings that select the Enttec USB Pro serial backend.
+# Both have appeared in docs/configs; accepting both prevents a silent
+# fall-through to mock output on hardware day.
+_ENTTEC_OUTPUT_KEYS = ("enttec", "enttec_pro")
+
+
+def resolve_serial_port(cli_serial, dmx_cfg: dict):
+    """Resolve the DMX serial port: --serial CLI flag wins, else config.
+
+    Returns the port string, or None if neither source selects Enttec.
+    """
+    cfg_output = dmx_cfg.get("output", "mock")
+    cfg_port   = dmx_cfg.get("serial_port") or None
+    return cli_serial or (cfg_port if cfg_output in _ENTTEC_OUTPUT_KEYS else None)
+
 # Fixed render params for each fixture test pattern (sent as-is to render_to_universe)
 _TEST_PATTERNS: dict = {
     "blackout": dict(brightness=0.0, hue=0.0,   saturation=0.0, value=0.0, strobe=0.0, white=0.0, amber=0.0, uv=0.0),
@@ -315,9 +330,8 @@ def main():
     # Priority: --serial CLI > --artnet CLI > config dmx.output > mock
     _dmx_cfg    = config.get("dmx", {})
     _cfg_output = _dmx_cfg.get("output", "mock")
-    _cfg_port   = _dmx_cfg.get("serial_port") or None
 
-    _serial_port = args.serial or (_cfg_port if _cfg_output == "enttec" else None)
+    _serial_port = resolve_serial_port(args.serial, _dmx_cfg)
     _artnet_ip   = args.artnet or (_dmx_cfg.get("artnet_ip") if _cfg_output == "artnet" else None)
 
     if _serial_port:
