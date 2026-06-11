@@ -983,7 +983,11 @@ function buildScenes(scenes) {
     scenes.forEach((s, i) => {
       const b = document.createElement('button');
       b.className = 'btn scene-btn'; b.dataset.id = s.id;
-      b.innerHTML = `<span class="shortcut">F${i+1}</span>${s.name}`;
+      const shortcut = document.createElement('span');
+      shortcut.className = 'shortcut';
+      shortcut.textContent = `F${i+1}`;
+      b.appendChild(shortcut);
+      b.appendChild(document.createTextNode(s.name));
       b.onclick = () => cmd({type:'scene', value:s.id});
       grid.appendChild(b);
     });
@@ -1194,14 +1198,28 @@ function _renderSceneList() {
   _edScenes.forEach(scene => {
     const card = document.createElement('div');
     card.className = 'scene-card' + (_edSelected?.scene_id === scene.scene_id ? ' selected' : '');
-    card.innerHTML = `
-      <div class="scene-card-name">${scene.name || scene.scene_id}</div>
-      <div class="scene-card-meta">${scene.base_mode || ''}  ·  ${(scene.groups||[]).length} group(s)</div>
-      <div class="scene-card-actions">
-        <button class="btn-sm primary" onclick="editorEditScene('${scene.scene_id}')">Edit</button>
-        <button class="btn-sm" onclick="cmd({type:'scene',value:'${scene.scene_id}'})">Activate</button>
-        <button class="btn-sm danger" onclick="editorDeleteScene('${scene.scene_id}')">Delete</button>
-      </div>`;
+    const nameEl = document.createElement('div');
+    nameEl.className = 'scene-card-name';
+    nameEl.textContent = scene.name || scene.scene_id;
+    const metaEl = document.createElement('div');
+    metaEl.className = 'scene-card-meta';
+    metaEl.textContent = `${scene.base_mode || ''}  ·  ${(scene.groups||[]).length} group(s)`;
+    const actEl = document.createElement('div');
+    actEl.className = 'scene-card-actions';
+    const btnEdit = document.createElement('button');
+    btnEdit.className = 'btn-sm primary';
+    btnEdit.textContent = 'Edit';
+    btnEdit.onclick = () => editorEditScene(scene.scene_id);
+    const btnAct = document.createElement('button');
+    btnAct.className = 'btn-sm';
+    btnAct.textContent = 'Activate';
+    btnAct.onclick = () => cmd({type:'scene', value:scene.scene_id});
+    const btnDel = document.createElement('button');
+    btnDel.className = 'btn-sm danger';
+    btnDel.textContent = 'Delete';
+    btnDel.onclick = () => editorDeleteScene(scene.scene_id);
+    actEl.append(btnEdit, btnAct, btnDel);
+    card.append(nameEl, metaEl, actEl);
     el.appendChild(card);
   });
 }
