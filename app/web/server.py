@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
     from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
     import uvicorn
     _FASTAPI_AVAILABLE = True
 except ImportError:
@@ -262,8 +263,21 @@ async def _lifespan(app: "FastAPI"):  # type: ignore[override]
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+_ALLOWED_COMMAND_TYPES = frozenset({
+    "mode", "set_mode", "scene", "activate_scene", "release_scene",
+    "blackout", "strobe_master", "set_fader", "momentary",
+    "arm_strobe", "arm_mode", "toggle_kill", "fixture_test", "release_fixture_test",
+    "fixture_test_aim", "white_hold",
+})
+
+
 def _build_app() -> "FastAPI":
     fastapi_app = FastAPI(title="LightBrain Dashboard", lifespan=_lifespan)
+
+    # Serve vendored static assets (Three.js etc.) at /vendor/
+    vendor_path = os.path.join(os.path.dirname(__file__), "vendor")
+    if os.path.isdir(vendor_path):
+        fastapi_app.mount("/vendor", StaticFiles(directory=vendor_path), name="vendor")
 
     @fastapi_app.get("/", response_class=HTMLResponse)
     async def dashboard() -> str:
@@ -288,6 +302,8 @@ def _build_app() -> "FastAPI":
         if _command_queue.qsize() >= _MAX_QUEUE:
             return JSONResponse({"error": "queue full"}, status_code=429)
         cmd = await request.json()
+        if cmd.get("type") not in _ALLOWED_COMMAND_TYPES:
+            return JSONResponse({"error": "unknown command type"}, status_code=400)
         _command_queue.put_nowait(cmd)
         return {"ok": True}
 
