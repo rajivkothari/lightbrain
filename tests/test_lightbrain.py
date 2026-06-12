@@ -4434,7 +4434,7 @@ class TestAutoFade:
     def test_server_state_defaults_values(self):
         from app.web.server import _engine_state
         assert _engine_state["auto_fade_enabled"] is True
-        assert _engine_state["auto_fade_delay_s"] == 15.0
+        assert _engine_state["auto_fade_delay_s"] == 8.0
         assert _engine_state["auto_fade_countdown"] is None
 
     def test_set_auto_fade_in_allowlist(self):
@@ -4819,3 +4819,141 @@ class TestDmxHealth:
         from app.web.server import _engine_state
         assert _engine_state["dmx_ok"] is True
         assert _engine_state["dmx_errors"] == 0
+
+
+class TestDropDetection:
+    """Drop detection state machine: loud → quiet (drop) → rise → FIRE."""
+
+    # Thresholds mirror app/main.py
+    LOUD  = 0.20
+    QUIET = 0.07
+    RISE  = 0.22
+    LOCK  = 0.12
+
+    def _make_state(self):
+        return {
+            "armed_mode":    "banger",
+            "strobe_armed":  False,
+            "drop_was_loud": False,
+            "drop_start":    None,
+            "drop_ready":    False,
+            "fired":         False,
+            "mode_key":      "open_dance",
+        }
+
+    def _tick(self, st, energy, now):
+        """Replicate one frame of the drop-detection block from main.py."""
+        armed = st["armed_mode"] or st["strobe_armed"]
+        if armed:
+            if energy > self.LOUD:
+                st["drop_was_loud"] = True
+                st["drop_start"]    = None
+                if st["drop_ready"]:
+                    st["drop_ready"]    = False
+                    st["drop_was_loud"] = False
+                    if st["armed_mode"]:
+                        st["mode_key"]   = st["armed_mode"]
+                        st["armed_mode"] = ""
+                        st["fired"]      = True
+                    if st["strobe_armed"]:
+                        st["strobe_armed"] = False
+                        st["fired"]        = True
+            elif energy < self.QUIET and st["drop_was_loud"]:
+                if st["drop_start"] is None:
+                    st["drop_start"] = now
+                elif not st["drop_ready"] and (now - st["drop_start"] >= self.LOCK):
+                    st["drop_ready"] = True
+            elif energy >= self.QUIET:
+                st["drop_start"] = None
+        else:
+            st["drop_was_loud"] = False
+            st["drop_start"]    = None
+            st["drop_ready"]    = False
+
+    def test_loud_sets_was_loud(self):
+        st = self._make_state()
+        self._tick(st, 0.5, 0.0)
+        assert st["drop_was_loud"]
+
+    def test_quiet_without_loud_does_not_arm(self):
+        st = self._make_state()
+        self._tick(st, 0.02, 0.0)   # quiet but never loud
+        assert not st["drop_was_loud"]
+        assert st["drop_start"] is None
+
+    def test_quiet_after_loud_starts_timer(self):
+        st = self._make_state()
+        self._tick(st, 0.5, 0.0)   # get loud
+        self._tick(st, 0.02, 0.5)  # drop
+        assert st["drop_start"] == 0.5
+
+    def test_drop_not_ready_before_lock_time(self):
+        st = self._make_state()
+        self._tick(st, 0.5, 0.0)
+        self._tick(st, 0.02, 0.5)
+        self._tick(st, 0.02, 0.55)   # only 50ms — need 120ms
+        assert not st["drop_ready"]
+
+    def test_drop_ready_after_lock_time(self):
+        st = self._make_state()
+        self._tick(st, 0.5, 0.0)
+        self._tick(st, 0.02, 0.0)
+        self._tick(st, 0.02, 0.15)  # 150ms of quiet → lock confirmed
+        assert st["drop_ready"]
+
+    def test_rise_after_drop_fires_mode(self):
+        st = self._make_state()
+        self._tick(st, 0.5, 0.0)    # loud
+        self._tick(st, 0.02, 0.0)   # drop start
+        self._tick(st, 0.02, 0.15)  # drop locked
+        assert st["drop_ready"]
+        self._tick(st, 0.4, 0.2)    # rise → FIRE
+        assert st["fired"]
+        assert st["mode_key"] == "banger"
+        assert st["armed_mode"] == ""
+
+    def test_drop_ready_clears_after_fire(self):
+        st = self._make_state()
+        self._tick(st, 0.5, 0.0)
+        self._tick(st, 0.02, 0.0)
+        self._tick(st, 0.02, 0.15)
+        self._tick(st, 0.4, 0.2)    # fire
+        assert not st["drop_ready"]
+        assert not st["drop_was_loud"]
+
+    def test_mid_energy_resets_quiet_timer(self):
+        st = self._make_state()
+        self._tick(st, 0.5, 0.0)    # loud
+        self._tick(st, 0.02, 1.0)   # drop — timer starts at 1.0
+        self._tick(st, 0.15, 1.1)   # mid-range — should reset timer
+        assert st["drop_start"] is None
+        assert not st["drop_ready"]
+
+    def test_not_armed_resets_all_state(self):
+        st = self._make_state()
+        st["armed_mode"] = ""
+        st["drop_was_loud"] = True
+        st["drop_ready"] = True
+        st["drop_start"] = 1.0
+        self._tick(st, 0.5, 2.0)
+        assert not st["drop_was_loud"]
+        assert not st["drop_ready"]
+        assert st["drop_start"] is None
+
+    def test_strobe_armed_fires_on_rise(self):
+        st = self._make_state()
+        st["armed_mode"] = ""
+        st["strobe_armed"] = True
+        self._tick(st, 0.5, 0.0)
+        self._tick(st, 0.02, 0.0)
+        self._tick(st, 0.02, 0.15)
+        self._tick(st, 0.4, 0.2)    # rise
+        assert st["fired"]
+        assert not st["strobe_armed"]
+
+    def test_server_drop_state_defaults(self):
+        from app.web.server import _engine_state
+        assert "drop_ready"    in _engine_state
+        assert "drop_was_loud" in _engine_state
+        assert _engine_state["drop_ready"]    is False
+        assert _engine_state["drop_was_loud"] is False

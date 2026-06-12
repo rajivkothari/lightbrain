@@ -448,6 +448,16 @@ def main():
     _armed_mode        = ""      # mode key pre-armed for drop-sync trigger
     _white_hold        = False   # momentary full-white override
 
+    # --- Drop detection state machine ---
+    # loud → drop (quiet ≥ _DROP_LOCK_S) → rise → FIRE armed action
+    _DROP_LOUD_THRESH  = 0.20   # overall_energy above this counts as "loud"
+    _DROP_QUIET_THRESH = 0.07   # overall_energy below this while loud = "dropped"
+    _DROP_RISE_THRESH  = 0.22   # energy after drop that fires the arm
+    _DROP_LOCK_S       = 0.12   # quiet must hold this long to confirm the drop
+    _drop_was_loud:    bool        = False  # we've seen loud audio since last arm
+    _drop_start:       float|None  = None   # monotonic time when energy dropped
+    _drop_ready:       bool        = False  # drop confirmed; listening for rise
+
     # --- Run of Show ---
     try:
         _ros_raw = json.load(open(ROS_CONFIG_PATH))
@@ -458,7 +468,7 @@ def main():
 
     # --- Auto-fade to dinner on silence ---
     _auto_fade_enabled = True   # operator can toggle
-    _auto_fade_delay_s = 15.0   # seconds of sustained silence before fade
+    _auto_fade_delay_s = 8.0    # seconds of sustained silence before fade
     _silence_threshold = 0.04   # overall_energy below this counts as silent
     _silence_start: float | None = None  # monotonic timestamp when silence began
     _auto_faded        = False  # prevent repeat triggers until audio returns
@@ -694,6 +704,10 @@ def main():
                                 _fx.set_spot_aim(_aim_pan, _aim_tilt)
                     except (ValueError, TypeError):
                         pass
+                elif _wtype == "stop_ros":
+                    _ros_index = -1
+                    scene_mgr.release_scene()
+                    _active_scene = None
                 elif _wtype == "next_ros_scene":
                     if _ros_scenes:
                         _ros_index = min(_ros_index + 1, len(_ros_scenes) - 1)
@@ -839,25 +853,53 @@ def main():
                     smoother.apply_mode_profile(mode_key)
                     _auto_faded = True
 
-            # --- drop-sync mode ARM trigger ---
-            if _armed_mode and (
-                bands_dict.get("high_energy", 0.0) > 0.8 or beat_detected
-            ):
-                if _armed_mode in MODES:
-                    new_mode    = get_mode(_armed_mode)
-                    new_palette = all_palettes.get(new_mode.palette_key, current_palette)
-                    _wau_snapshot = (last_lanes.get("wau_white", 0.0),
-                                     last_lanes.get("wau_amber", 0.0),
-                                     last_lanes.get("wau_uv",    0.0))
-                    transitioner.switch(new_mode)
-                    current_mode    = new_mode
-                    current_palette = new_palette
-                    mode_key        = _armed_mode
-                    safety.update_from_mode(current_mode)
-                    room_lane.set_mode(current_mode)
-                    room_lane.set_palette(current_palette)
-                    smoother.apply_mode_profile(mode_key)
-                _armed_mode = ""
+            # --- drop detection + ARM trigger ---
+            # State machine: loud → drop confirmed → rise → FIRE
+            _drop_e = float(bands_dict.get("overall_energy", 0.0))
+            if _armed_mode or _strobe_armed:
+                if _drop_e > _DROP_LOUD_THRESH:
+                    _drop_was_loud = True
+                    _drop_start    = None  # cancel quiet timer while loud
+                    if _drop_ready:
+                        # Rise after confirmed drop → FIRE
+                        _drop_ready    = False
+                        _drop_was_loud = False
+                        if _armed_mode and _armed_mode in MODES:
+                            new_mode    = get_mode(_armed_mode)
+                            new_palette = all_palettes.get(
+                                new_mode.palette_key, current_palette
+                            )
+                            _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                             last_lanes.get("wau_amber", 0.0),
+                                             last_lanes.get("wau_uv",    0.0))
+                            transitioner.switch(new_mode)
+                            current_mode    = new_mode
+                            current_palette = new_palette
+                            mode_key        = _armed_mode
+                            safety.update_from_mode(current_mode)
+                            room_lane.set_mode(current_mode)
+                            room_lane.set_palette(current_palette)
+                            smoother.apply_mode_profile(mode_key)
+                            _armed_mode = ""
+                        if _strobe_armed:
+                            _strobe_hold  = True
+                            _strobe_armed = False
+                elif _drop_e < _DROP_QUIET_THRESH and _drop_was_loud:
+                    # Energy dropped below quiet threshold
+                    if _drop_start is None:
+                        _drop_start = time.monotonic()
+                    elif not _drop_ready and (
+                        time.monotonic() - _drop_start >= _DROP_LOCK_S
+                    ):
+                        _drop_ready = True
+                elif not _drop_e < _DROP_QUIET_THRESH:
+                    # Mid-range energy resets the quiet timer
+                    _drop_start = None
+            else:
+                # Not armed — reset state machine
+                _drop_was_loud = False
+                _drop_start    = None
+                _drop_ready    = False
 
             # --- lane render ---
             room_out = room_lane.render(
@@ -1138,6 +1180,8 @@ def main():
                     white_hold_active= _white_hold,
                     white_hold=      _white_hold,
                     armed_mode=      _armed_mode,
+                    drop_ready=      _drop_ready,
+                    drop_was_loud=   _drop_was_loud,
                     palette_cooldown= float(room_lane._blender.cooldown_progress),
                     cooldown_pct=    float(room_lane.beat_cooldown_fraction(_now)),
                     cooldown_active= room_lane.beat_cooldown_fraction(_now) > 0.0,

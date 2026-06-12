@@ -73,6 +73,8 @@ _engine_state: Dict[str, Any] = {
     "white_hold_active":   False,
     "white_hold":          False,
     "armed_mode":          "",
+    "drop_ready":          False,
+    "drop_was_loud":       False,
     "palette_cooldown":    0.0,
     "cooldown_pct":        0.0,
     "cooldown_active":     False,
@@ -85,7 +87,7 @@ _engine_state: Dict[str, Any] = {
     "ros_index":           -1,
     "ros_scenes":          [],   # [{id, name}] ordered list
     "auto_fade_enabled":   True,
-    "auto_fade_delay_s":   15.0,
+    "auto_fade_delay_s":   8.0,
     "auto_fade_countdown": None, # seconds remaining until fade, or null if not silent
 }
 
@@ -278,7 +280,7 @@ _ALLOWED_COMMAND_TYPES = frozenset({
     "blackout", "strobe_master", "set_fader", "momentary",
     "arm_strobe", "arm_mode", "toggle_kill", "fixture_test", "release_fixture_test",
     "fixture_test_aim", "white_hold", "next_ros_scene", "prev_ros_scene",
-    "set_auto_fade", "panic",
+    "set_auto_fade", "panic", "stop_ros",
 })
 
 
