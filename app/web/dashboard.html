@@ -505,6 +505,33 @@
     <!-- LIVE TAB -->
     <div id="tab-live" class="tab-pane">
       <div class="section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="section-label" style="margin-bottom:0">Audio Input</div>
+          <span id="input-clip-badge" style="display:none;font-size:0.58rem;font-weight:700;letter-spacing:0.1em;color:#fff;background:#e03c3c;border-radius:5px;padding:2px 7px">CLIP</span>
+        </div>
+        <div class="bar-row" style="margin-bottom:8px">
+          <span class="bar-label">Level</span>
+          <div class="bar-bg"><div class="bar-fill" id="bar-input-level" style="background:#3ddc97"></div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="bar-label" style="width:60px">Sens.</span>
+          <input type="range" id="input-gain-slider" min="10" max="200" step="5" value="100"
+                 style="flex:1;accent-color:var(--accent)"
+                 oninput="setInputGain(this.value/100,false)"
+                 onchange="setInputGain(this.value/100,true)">
+          <span id="input-gain-label" style="font-size:0.68rem;color:var(--text);min-width:38px;text-align:right">100%</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:7px">
+          <button class="btn" onclick="cmd({type:'reset_audio_gain'})"
+                  style="font-size:0.6rem;padding:4px 10px" title="Re-learn levels after a loud burst pins the auto-gain">
+            RESET AUTO-GAIN
+          </button>
+          <span style="font-size:0.58rem;color:var(--dim);line-height:1.4">
+            Lower Sens. if lanes all fire at once. If CLIP lights, turn the mixer send down.
+          </span>
+        </div>
+      </div>
+      <div class="section">
         <div class="section-label">Audio Bands</div>
         <div class="bars">
           <div class="bar-row"><span class="bar-label">Low</span>
@@ -1216,6 +1243,13 @@ function _toggleAutoFade() {
   cmd({type:'set_auto_fade', enabled: _autoFadeEnabled});
 }
 
+// ---- Audio input sensitivity ----
+function setInputGain(v, save) {
+  const label = document.getElementById('input-gain-label');
+  if (label) label.textContent = Math.round(v * 100) + '%';
+  cmd({type:'set_input_gain', value: v, save: !!save});
+}
+
 // ---- Wedding colors ----
 let _weddingColors  = ['#E8B4A0', '#D4AF37', '#FFFFFF'];
 let _weddingModeOn  = false;
@@ -1347,8 +1381,6 @@ function _viz3dPost(msg) {
   const f = document.getElementById('viz3d-frame');
   if (f && f.contentWindow) { try { f.contentWindow.postMessage(msg, '*'); } catch(_){} }
 }
-let _strobe3dLatch = null;
-function reflectStrobe3d() {}
 
 function applyState(s) {
   // BPM + beat flash
@@ -1405,7 +1437,6 @@ function applyState(s) {
   bo.classList.toggle('active', _blackoutActive);
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
   document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
-  if (_blackoutActive && _strobe3dLatch) { _strobe3dLatch = null; reflectStrobe3d(); }
 
   // ARM button sync + kick client-side strobe animation + drop state
   const armBtn = document.getElementById('strobe-arm-btn');
@@ -1507,6 +1538,29 @@ function applyState(s) {
 
   // Brightness buttons
   if (s.master_dimmer !== undefined) _reflectBrightness(s.master_dimmer);
+
+  // Audio input level meter + sensitivity + clip badge
+  if (s.input_level !== undefined) {
+    const fill = document.getElementById('bar-input-level');
+    if (fill) {
+      const lvl = Math.min(1, s.input_level);
+      fill.style.width = (lvl * 100).toFixed(1) + '%';
+      fill.style.background = lvl > 0.92 ? '#e03c3c' : lvl > 0.75 ? '#ffb547' : '#3ddc97';
+    }
+  }
+  if (s.input_clip !== undefined) {
+    const badge = document.getElementById('input-clip-badge');
+    if (badge) badge.style.display = s.input_clip ? '' : 'none';
+  }
+  if (s.input_gain !== undefined) {
+    const slider = document.getElementById('input-gain-slider');
+    // Don't fight the user mid-drag
+    if (slider && document.activeElement !== slider) {
+      slider.value = Math.round(s.input_gain * 100);
+      const label = document.getElementById('input-gain-label');
+      if (label) label.textContent = Math.round(s.input_gain * 100) + '%';
+    }
+  }
 
   // Auto-fade section
   if (s.auto_fade_enabled !== undefined) {
@@ -1814,9 +1868,6 @@ function toggle3dView() {
 function setUplightLayer(n) {
   _upl3d = n;
   document.querySelectorAll('.upl-layer').forEach(b =>
-    b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
-  // Also sync to uplights-3d buttons if the old 3D tab selector is still somewhere
-  document.querySelectorAll('#uplights-3d .upl3d').forEach(b =>
     b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
   if (_viz3dActive) _viz3dPost({type:'lb-uplights', n});
 }

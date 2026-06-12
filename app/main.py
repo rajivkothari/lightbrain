@@ -34,6 +34,8 @@ import sys
 import threading
 import time
 
+import numpy as np
+
 # ---- path setup (run from repo root) ----
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -44,7 +46,7 @@ from audio.synthetic   import SyntheticAudioSource
 from audio.beat_detector import BeatDetector
 
 from engine.smoothing  import LaneSmoother
-from engine.palettes   import load_all_palettes, PaletteBlender
+from engine.palettes   import load_all_palettes
 from engine.lanes      import RoomLane
 from engine.modes      import get_mode, MODES, KEYBOARD_MAP
 from engine.safety     import SafetyEngine
@@ -496,6 +498,20 @@ def main():
     _silence_start: float | None = None  # monotonic timestamp when silence began
     _auto_faded        = False  # prevent repeat triggers until audio returns
 
+    # --- Audio input sensitivity / level metering ---
+    # The analyzer normalizes per-band, so the sensitivity trim is applied to
+    # the *normalized* band energies — pre-FFT gain would cancel out in the
+    # normalizer. Trim < 1.0 pulls saturated lanes back into usable range
+    # when the source is loud; > 1.0 drives lanes harder on quiet sources.
+    try:
+        _input_gain = min(2.0, max(0.1, float(app_cfg.get("input_gain", 1.0))))
+    except (ValueError, TypeError):
+        _input_gain = 1.0
+    _input_level      = 0.0   # raw pre-normalization peak, smoothed for the meter
+    _input_clip_until = 0.0   # CLIP indicator latch (monotonic deadline)
+    _INPUT_CLIP_PEAK  = 0.985 # raw sample peak that counts as ADC clipping
+    _INPUT_CLIP_HOLD  = 1.5   # seconds the CLIP indicator stays lit
+
     try:
         while not quit_flag:
             frame_start = time.monotonic()
@@ -768,6 +784,20 @@ def main():
                             _auto_fade_delay_s = float(_wcmd["delay_s"])
                         except (ValueError, TypeError):
                             pass
+                elif _wtype == "set_input_gain":
+                    try:
+                        _input_gain = min(2.0, max(0.1, float(_wcmd.get("value", _input_gain))))
+                    except (ValueError, TypeError):
+                        pass
+                    if _wcmd.get("save"):
+                        try:
+                            app_cfg["input_gain"] = round(_input_gain, 2)
+                            with open(APP_CONFIG_PATH, "w") as _af:
+                                json.dump(app_cfg, _af, indent=2)
+                        except OSError:
+                            pass
+                elif _wtype == "reset_audio_gain":
+                    analyzer.reset_gain()
                 elif _wtype == "set_wedding_mode":
                     _wedding_mode = bool(_wcmd.get("enabled", _wedding_mode))
                     try:
@@ -844,7 +874,7 @@ def main():
                         room_lane.set_palette(current_palette)
                         smoother.apply_mode_profile(mode_key)
                     elif evt.type == "dimmer":
-                        pass  # TODO: route to master_dimmer
+                        _master_dimmer = min(1.0, max(0.0, float(evt.value)))
                     elif evt.type == "blackout":
                         if evt.value > 0.5:
                             if not safety.state.blackout_active:
@@ -862,9 +892,27 @@ def main():
             # --- audio ---
             block = capture.get_latest_block()
             if block is not None:
+                # Raw peak BEFORE any processing — detects ADC/interface clipping,
+                # which smears bass harmonics across all bands and wrecks lane
+                # separation. The dashboard meter + CLIP badge surface this.
+                _raw_peak = float(np.max(np.abs(block)))
+                if _raw_peak >= _INPUT_CLIP_PEAK:
+                    _input_clip_until = time.monotonic() + _INPUT_CLIP_HOLD
+                # Meter: fast attack, slow release
+                _input_level = max(min(1.0, _raw_peak), _input_level * 0.92)
                 last_bands = analyzer.analyze(block)
             else:
                 last_bands = AudioBands()
+                _input_level *= 0.92
+
+            # Sensitivity trim on normalized band energies (see init comment)
+            if _input_gain != 1.0:
+                last_bands = AudioBands(
+                    low_energy=     min(1.0, last_bands.low_energy     * _input_gain),
+                    mid_energy=     min(1.0, last_bands.mid_energy     * _input_gain),
+                    high_energy=    min(1.0, last_bands.high_energy    * _input_gain),
+                    overall_energy= min(1.0, last_bands.overall_energy * _input_gain),
+                )
 
             bands_dict = last_bands.as_dict()
 
@@ -918,7 +966,7 @@ def main():
                 if _drop_e > _DROP_LOUD_THRESH:
                     _drop_was_loud = True
                     _drop_start    = None  # cancel quiet timer while loud
-                    if _drop_ready:
+                    if _drop_ready and _drop_e >= _DROP_RISE_THRESH:
                         # Rise after confirmed drop → FIRE
                         _drop_ready    = False
                         _drop_was_loud = False
@@ -1270,6 +1318,9 @@ def main():
                     ],
                     wedding_mode=    _wedding_mode,
                     wedding_colors=  _wedding_hex,
+                    input_gain=      round(_input_gain, 2),
+                    input_level=     round(_input_level, 3),
+                    input_clip=      time.monotonic() < _input_clip_until,
                     auto_fade_enabled=  _auto_fade_enabled,
                     auto_fade_delay_s=  _auto_fade_delay_s,
                     auto_fade_countdown=(

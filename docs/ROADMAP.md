@@ -213,15 +213,35 @@ Five UX improvements targeting the DJ–lighting relationship plus a Three.js 3D
 
 - **Blackout instant-black** (safety fix carried from Phase A): activation is now frame-0 black; release is 1.5 s linear fade-up (`BLACKOUT_RECOVERY_S = 1.5`). `_blackout_recovering` flag alpha-multiplies all render values during recovery.
 
-- **Drop-sync ARM** — double-tap a mode button (within 300 ms) to pre-arm it. Fires automatically when `high_energy > 0.8` OR `beat_detected`. Armed state broadcast as `armed_mode` field; mode button pulses blue animation. Resets after fire or manual mode change.
+- **Drop-sync ARM** — double-tap a mode button (within 300 ms) to pre-arm it. Originally fired on `high_energy > 0.8` OR `beat_detected`; replaced in the Live Ops sprint by the full drop-detection state machine (see below). Armed state broadcast as `armed_mode` field; mode button pulses blue animation. Resets after fire or manual mode change.
 
 - **Cooldown telemetry** — `PaletteBlender.beat_cooldown_fraction(now)` and `RoomLane.beat_cooldown_fraction(now)` expose the 10 s beat-swap lockout as a 0.0–1.0 fraction. Dashboard and iPad mode button opacity scales from 100 % → 40 % during lockout. Broadcast as `cooldown_pct` and `cooldown_active` aliases.
 
 - **Fader shortcuts** — 0% / 50% / 100% quick-set buttons above the master dimmer fader on dashboard and iPad. Eliminates imprecise drag targeting at critical moments.
 
-- **Momentary White Hold** — fourth button in the 2×2 momentary grid (iPad) and in the 3D tab panel (dashboard). Sends `{type: "white_hold", state: true/false}`. Engine overrides `_frame_brt=1.0, _frame_v=1.0, _frame_s=0.0, _frame_w=1.0` for the entire frame while held; released instantly on finger-up.
+- **Momentary White Hold** — fourth button in the 2×2 momentary grid (iPad). Sends `{type: "white_hold", state: true/false}`. Engine overrides `_frame_brt=1.0, _frame_v=1.0, _frame_s=0.0, _frame_w=1.0` for the entire frame while held; released instantly on finger-up. (The dashboard copy lived in the 3D tab, which was later removed.)
 
-- **Three.js 3D rig visualizer** — `app/web/visualizer3d.html` (1 482 lines). Served at `/visualizer3d`; embedded in the dashboard 3D tab as a lazy-loaded iframe. Left panel mirrors all Live tab controls (Mode, Scene, Strobe rate presets, Uplight count selector, Master shortcuts, WHITE hold, Kill switches, Blackout). Paused via `postMessage({type:'lb-pause'})` when tab is hidden; resumed with `lb-resume`; uplight count driven by `lb-uplights`.
+- **Three.js 3D rig visualizer** — `app/web/visualizer3d.html`. Served at `/visualizer3d`; originally embedded as a dashboard "3D tab", later converted to a right-panel 3D VIEW toggle (see Live Ops sprint). Paused via `postMessage({type:'lb-pause'})` when hidden; resumed with `lb-resume`; uplight count driven by `lb-uplights`.
+
+---
+
+## Live Ops Sprint — Wedding Reception Features ✅
+
+**715 tests passing (2 skipped on Windows)**
+
+Nine operator-facing features for running an actual reception, built in order:
+
+1. **Run of Show** — ordered scene list in `config/run_of_show.json`; NEXT / PREV / STOP controls; tap a row to jump; ▲/▼ reorder buttons persist the new order while keeping the active scene's position. Broadcast as `ros_index` / `ros_scenes`.
+2. **Silence auto-fade** — after 8 s (configurable) of `overall_energy` and room lane both < 0.04, crossfades to Dinner. Toggleable; live countdown in the dashboard. Suppressed during blackout or when already in Dinner.
+3. **Spotlight preset** — one button: GigBAR spot color wheel → CTO warm white (Ch 26 = 45), movers-only render path, uplights dimmed to 25 % amber. For toasts and cake cutting.
+4. **Panic / safe state** — resets kills, faders, arms, holds, test mode, scene override, and blackout, then crossfades to Dinner. One button to recover from any bad state.
+5. **DMX health + auto-reconnect** — `DmxOutputThread` tracks consecutive write failures; after 5 it calls `backend.reopen()` with exponential backoff (1 s → 30 s). Header health dot + Rig tab detail. Broadcast as `dmx_ok` / `dmx_errors` / `dmx_reconnects` / `dmx_last_error`.
+6. **Drop detection ARM** — replaces the naive peak/beat trigger: loud (> 0.20) → quiet (< 0.07 held ≥ 120 ms) → rise (≥ 0.22) → FIRE. Applies to armed modes and armed strobe. ARM button live-tracks: ◎ ARMED → ◉ LISTENING → ▼ DROP!
+7. **Wedding colors** — up to 3 hex colors in `config/wedding.json`, assigned round-robin to uplight fixtures (DMX and 2D canvas); brightness stays music-reactive; amber overlay suppressed while active.
+8. **Live brightness + ROS reorder + 3D as toggle** — 0/25/50/75/100 % master brightness buttons on the Live tab; the 3D tab was removed and replaced by a right-panel 3D VIEW toggle with uplight layer buttons (6/12/18), so Live controls are always visible.
+9. **Audio input sensitivity** — input level meter with CLIP detection (raw peak ≥ 0.985, 1.5 s latch), sensitivity trim (0.1–2.0×) applied to the *normalized* band energies (pre-FFT gain would cancel in the auto-normalizer), and a RESET AUTO-GAIN button to re-learn levels after a loud burst. Gain persisted in `app_config.json`.
+
+Cleanups in the same sprint: removed all dead 3D-tab JS/selectors, removed the unused `PaletteBlender` import, completed the MIDI CC-7 → master dimmer routing, and wired the previously unused `_DROP_RISE_THRESH` into the drop state machine.
 
 ---
 

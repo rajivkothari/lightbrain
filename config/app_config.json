@@ -2,5 +2,6 @@
   "web_server_enabled": true,
   "web_server_port": 8080,
   "headless_mode": false,
-  "web_server_token": ""
+  "web_server_token": "",
+  "input_gain": 1.0
 }

@@ -112,13 +112,23 @@ Supported command types (all arrive as JSON):
 | `strobe_master` | both | Set 0–1 strobe master level |
 | `set_fader` | both | Set master / uplight / strobe fader |
 | `momentary` | both | flash / strobe_burst / strobe_hold |
-| `toggle_kill` | both | Toggle strobe / derby / laser kill |
-| `arm_strobe` | both | Toggle strobe ARM (fires on next beat) |
-| `arm_mode` | both | Pre-arm a mode key; fires on `high_energy > 0.8` or beat |
+| `toggle_kill` | both | Toggle strobe / derby / laser / mover_solo / spotlight |
+| `arm_strobe` | both | Arm strobe; fires via drop detection (loud → quiet → rise) |
+| `arm_mode` | both | Pre-arm a mode key; fires via drop detection (loud → quiet ≥120 ms → rise ≥0.22) |
 | `white_hold` | both | Momentary full-white override while `state: true` |
 | `fixture_test` | iPad | Lock all fixtures to test pattern |
 | `release_fixture_test` | iPad | Return to live engine |
 | `fixture_test_aim` | iPad | Set moving head pan/tilt |
+| `next_ros_scene` | dashboard | Advance Run of Show to next scene |
+| `prev_ros_scene` | dashboard | Step Run of Show back one scene |
+| `stop_ros` | dashboard | Stop Run of Show, release active scene |
+| `reorder_ros` | dashboard | Reorder Run of Show scene list; persists to run_of_show.json |
+| `set_auto_fade` | dashboard | Enable/disable silence auto-fade; optional `delay_s` |
+| `panic` | both | Reset all overrides → safe ambient (Dinner) state |
+| `set_wedding_mode` | dashboard | Toggle wedding color palette on uplights |
+| `set_wedding_colors` | dashboard | Set up to 3 hex colors; `save: true` persists to wedding.json |
+| `set_input_gain` | dashboard | Audio sensitivity trim 0.1–2.0; `save: true` persists to app_config.json |
+| `reset_audio_gain` | dashboard | Reset the analyzer's per-band auto-gain peaks |
 
 ---
 
@@ -154,15 +164,33 @@ clients at ~15 fps. Key fields:
 | `kill_laser` | bool | Laser kill switch active |
 | `flash_active` | bool | True while flash frames are draining |
 | `white_hold_active` | bool | White hold override active |
-| `white_hold` | bool | Alias for `white_hold_active` (3D tab compat) |
+| `white_hold` | bool | Alias for `white_hold_active` |
 | `strobe_armed` | bool | Strobe ARM engaged |
 | `armed_mode` | str | Mode key pre-armed for drop-sync (empty = none) |
+| `mover_solo` | bool | Movers-only mode (uplights/washes blanked) |
+| `spotlight` | bool | Spotlight preset (CTO spot + dim amber uplights) |
+| `drop_was_loud` | bool | Drop detector has seen loud audio while armed |
+| `drop_ready` | bool | Drop confirmed; listening for the rise to fire |
 | `blackout_recovering` | bool | True during 1.5 s fade-up after blackout release |
 | `palette_cooldown` | float | Beat-swap lockout 0.0–1.0 (PaletteBlender) |
 | `cooldown_pct` | float | Alias for `palette_cooldown` |
 | `cooldown_active` | bool | True when `cooldown_pct > 0` |
 | `test_mode` | bool | Fixture test override active |
 | `test_pattern` | str | Active test pattern name |
+| `dmx_ok` | bool | DMX hardware healthy (no consecutive write failures) |
+| `dmx_errors` | int | Total DMX write errors since start |
+| `dmx_reconnects` | int | Auto-reconnect attempts (backend reopen) |
+| `dmx_last_error` | str | Last DMX error message (empty if none) |
+| `ros_index` | int | Run of Show position (-1 = not started) |
+| `ros_scenes` | list | [{id, name}] ordered Run of Show scene list |
+| `wedding_mode` | bool | Wedding color palette active on uplights |
+| `wedding_colors` | list | Up to 3 hex color strings |
+| `input_gain` | float | Audio sensitivity trim 0.1–2.0 |
+| `input_level` | float | Raw input peak (pre-normalization), smoothed for meter |
+| `input_clip` | bool | True while ADC clipping detected (≥0.985 peak, 1.5 s latch) |
+| `auto_fade_enabled` | bool | Silence auto-fade armed |
+| `auto_fade_delay_s` | float | Seconds of silence before fade to Dinner |
+| `auto_fade_countdown` | float\|null | Seconds remaining until fade (null = not silent) |
 | `rig_layout` | list | [{name, type, address, channels, end}] — static after startup |
 | `dmx_channels` | list | 512-element int array — updated each frame |
 
@@ -354,8 +382,9 @@ Determinism requires:
 | Module | Output type |
 |--------|-------------|
 | `output_mock.py` | Mock (logs changes, no hardware) |
-| `output_enttec_pro.py` | Enttec USB Pro serial protocol |
-| `output_artnet.py` | Art-Net 4 UDP unicast/broadcast |
+| `output_enttec_pro.py` | Enttec USB Pro serial protocol (`reopen()` for auto-reconnect) |
+| `output_artnet.py` | Art-Net 4 UDP unicast/broadcast (`reopen()` for auto-reconnect) |
+| `output_thread.py` | 40 Hz daemon output thread; tracks consecutive failures, auto-reopens the backend after 5 with exponential backoff (1 s → 30 s); exposes a `health` property |
 
 ### `app/render/`
 
@@ -373,7 +402,8 @@ Determinism requires:
 |--------|---------------|
 | `server.py` | FastAPI app, WebSocket manager, REST endpoints, shared state dict |
 | `ipad_server.py` | iPad PWA server (port 8080), bidirectional WebSocket |
-| `dashboard.html` | Desktop web dashboard (canvas visualizer, controls) |
+| `dashboard.html` | Desktop web dashboard (Live/Scene Editor/Rig tabs, 2D canvas + 3D VIEW toggle) |
+| `visualizer3d.html` | Three.js rig view, served at `/visualizer3d`, embedded as lazy iframe |
 | `ipad.html` | iPad PWA (PERF/TEST/SETUP tabs, touch-optimized) |
 
 ### `data/`
