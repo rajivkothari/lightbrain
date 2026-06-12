@@ -455,6 +455,13 @@ def main():
         _ros_scenes = []
     _ros_index = -1   # -1 = not started; 0..len-1 = current position
 
+    # --- Auto-fade to dinner on silence ---
+    _auto_fade_enabled = True   # operator can toggle
+    _auto_fade_delay_s = 15.0   # seconds of sustained silence before fade
+    _silence_threshold = 0.04   # overall_energy below this counts as silent
+    _silence_start: float | None = None  # monotonic timestamp when silence began
+    _auto_faded        = False  # prevent repeat triggers until audio returns
+
     try:
         while not quit_flag:
             frame_start = time.monotonic()
@@ -696,6 +703,13 @@ def main():
                         _sid = _ros_scenes[_ros_index]
                         if scene_mgr.activate_scene(_sid):
                             _active_scene = scene_mgr.active_scene
+                elif _wtype == "set_auto_fade":
+                    _auto_fade_enabled = bool(_wcmd.get("enabled", _auto_fade_enabled))
+                    if "delay_s" in _wcmd:
+                        try:
+                            _auto_fade_delay_s = float(_wcmd["delay_s"])
+                        except (ValueError, TypeError):
+                            pass
 
             # --- MIDI ---
             if midi_in is not None:
@@ -748,6 +762,39 @@ def main():
             last_lanes = smoother.update(bands_dict)
             last_lanes["bpm"]  = beat_detector.bpm
             last_lanes["beat"] = beat_detected
+
+            # --- silence detection / auto-fade to dinner ---
+            _overall_e = float(bands_dict.get("overall_energy", 0.0))
+            _room_e    = float(last_lanes.get("room", 0.0))
+            if _overall_e < _silence_threshold and _room_e < _silence_threshold:
+                if _silence_start is None:
+                    _silence_start = time.monotonic()
+            else:
+                _silence_start = None
+                _auto_faded    = False  # audio returned; allow next fade
+
+            if (
+                _auto_fade_enabled
+                and _silence_start is not None
+                and not _auto_faded
+                and mode_key != "dinner"
+                and not safety.state.blackout_active
+            ):
+                if time.monotonic() - _silence_start >= _auto_fade_delay_s:
+                    new_mode    = get_mode("dinner")
+                    new_palette = all_palettes.get(new_mode.palette_key, current_palette)
+                    _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                     last_lanes.get("wau_amber", 0.0),
+                                     last_lanes.get("wau_uv",    0.0))
+                    transitioner.switch(new_mode)
+                    current_mode    = new_mode
+                    current_palette = new_palette
+                    mode_key        = "dinner"
+                    safety.update_from_mode(current_mode)
+                    room_lane.set_mode(current_mode)
+                    room_lane.set_palette(current_palette)
+                    smoother.apply_mode_profile(mode_key)
+                    _auto_faded = True
 
             # --- drop-sync mode ARM trigger ---
             if _armed_mode and (
@@ -1049,6 +1096,12 @@ def main():
                         {"id": sid, "name": scene_mgr.get_scene_name(sid)}
                         for sid in _ros_scenes
                     ],
+                    auto_fade_enabled=  _auto_fade_enabled,
+                    auto_fade_delay_s=  _auto_fade_delay_s,
+                    auto_fade_countdown=(
+                        round(max(0.0, _auto_fade_delay_s - (time.monotonic() - _silence_start)), 1)
+                        if _silence_start is not None else None
+                    ),
                 )
 
             # --- frame rate cap (hybrid sleep/spin-lock, ~50µs jitter) ---

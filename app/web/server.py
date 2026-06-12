@@ -79,6 +79,9 @@ _engine_state: Dict[str, Any] = {
     "dmx_channels":        [],   # 512-element int list — updated each frame
     "ros_index":           -1,
     "ros_scenes":          [],   # [{id, name}] ordered list
+    "auto_fade_enabled":   True,
+    "auto_fade_delay_s":   15.0,
+    "auto_fade_countdown": None, # seconds remaining until fade, or null if not silent
 }
 
 _command_queue: _queue.Queue = _queue.Queue()
@@ -270,6 +273,7 @@ _ALLOWED_COMMAND_TYPES = frozenset({
     "blackout", "strobe_master", "set_fader", "momentary",
     "arm_strobe", "arm_mode", "toggle_kill", "fixture_test", "release_fixture_test",
     "fixture_test_aim", "white_hold", "next_ros_scene", "prev_ros_scene",
+    "set_auto_fade",
 })
 
 

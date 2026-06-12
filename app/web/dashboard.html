@@ -553,6 +553,19 @@
           </button>
         </div>
       </div>
+
+      <div class="section" id="auto-fade-section">
+        <div class="section-label" style="margin-bottom:8px">Auto-Fade to Ambient</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <button class="btn btn-full" id="auto-fade-toggle-btn" onclick="_toggleAutoFade()" style="flex:1">
+            AUTO-FADE OFF
+          </button>
+          <span id="auto-fade-countdown" style="font-size:0.72rem;color:var(--dim);min-width:60px;text-align:right"></span>
+        </div>
+        <div style="font-size:0.62rem;color:var(--dim);line-height:1.5">
+          Silence <span id="auto-fade-delay-label">15</span>s → fades to Dinner / Ambient
+        </div>
+      </div>
     </div>
 
     <!-- RIG TAB -->
@@ -1147,6 +1160,12 @@ function toggleKill(target) {
   cmd({type:'toggle_kill', target: target});
 }
 
+let _autoFadeEnabled = true;
+function _toggleAutoFade() {
+  _autoFadeEnabled = !_autoFadeEnabled;
+  cmd({type:'set_auto_fade', enabled: _autoFadeEnabled});
+}
+
 function buildModes(modes) {
   if (modesReady) return;
   const list = (modes && modes.length) ? modes : DEFAULT_MODES;
@@ -1393,6 +1412,27 @@ function applyState(s) {
     _lastDmxChannels = s.dmx_channels;
     if (document.getElementById('tab-rig').style.display !== 'none') {
       _rigDraw(s.dmx_channels);
+    }
+  }
+
+  // Auto-fade section
+  if (s.auto_fade_enabled !== undefined) {
+    const btn = document.getElementById('auto-fade-toggle-btn');
+    if (btn) {
+      btn.textContent = s.auto_fade_enabled ? 'AUTO-FADE ON' : 'AUTO-FADE OFF';
+      btn.style.background = s.auto_fade_enabled ? 'var(--accent)' : '';
+      btn.style.color = s.auto_fade_enabled ? '#fff' : '';
+    }
+    const delayEl = document.getElementById('auto-fade-delay-label');
+    if (delayEl && s.auto_fade_delay_s !== undefined) delayEl.textContent = Math.round(s.auto_fade_delay_s);
+    const cdEl = document.getElementById('auto-fade-countdown');
+    if (cdEl) {
+      if (s.auto_fade_countdown !== null && s.auto_fade_countdown !== undefined && s.auto_fade_enabled) {
+        cdEl.textContent = `silent · ${s.auto_fade_countdown}s`;
+        cdEl.style.color = s.auto_fade_countdown < 5 ? 'var(--accent)' : 'var(--dim)';
+      } else {
+        cdEl.textContent = '';
+      }
     }
   }
 }
