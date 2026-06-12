@@ -239,6 +239,22 @@
       0%,100% { box-shadow: 0 0 8px rgba(76,207,255,0.4); }
       50%      { box-shadow: 0 0 18px rgba(76,207,255,0.8); }
     }
+    .btn-strobe-arm.drop-loud {
+      background: rgba(255,181,71,0.15); border-color: rgba(255,181,71,0.6); color: var(--amber);
+      animation: arm-pulse-amber 0.8s ease-in-out infinite;
+    }
+    @keyframes arm-pulse-amber {
+      0%,100% { box-shadow: 0 0 6px rgba(255,181,71,0.3); }
+      50%      { box-shadow: 0 0 14px rgba(255,181,71,0.7); }
+    }
+    .btn-strobe-arm.drop-ready {
+      background: rgba(255,77,94,0.22); border-color: var(--red); color: #fff;
+      animation: arm-pulse-drop 0.35s ease-in-out infinite;
+    }
+    @keyframes arm-pulse-drop {
+      0%,100% { box-shadow: 0 0 10px rgba(255,77,94,0.5); opacity: 1; }
+      50%      { box-shadow: 0 0 22px rgba(255,77,94,0.9); opacity: 0.85; }
+    }
     .btn-strobe-hold {
       background: rgba(255,181,71,0.07); border-color: rgba(255,181,71,0.3); color: var(--amber);
       font-weight: 700; letter-spacing: 0.08em; user-select: none;
@@ -558,8 +574,12 @@
       </div>
 
       <div class="section" id="ros-section">
-        <div class="section-label" style="margin-bottom:8px">Run of Show</div>
-        <div id="ros-list"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div class="section-label" style="margin-bottom:0">Run of Show</div>
+          <button class="btn" id="ros-stop-btn" onclick="cmd({type:'stop_ros'})"
+                  style="font-size:0.6rem;padding:3px 8px;opacity:0.7">&#x25A0; STOP</button>
+        </div>
+        <div id="ros-list" style="max-height:220px;overflow-y:auto;scrollbar-width:thin"></div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="btn btn-full" id="ros-prev-btn" onclick="cmd({type:'prev_ros_scene'})" style="flex:1">
             &#x276E; PREV
@@ -579,7 +599,7 @@
           <span id="auto-fade-countdown" style="font-size:0.72rem;color:var(--dim);min-width:60px;text-align:right"></span>
         </div>
         <div style="font-size:0.62rem;color:var(--dim);line-height:1.5">
-          Silence <span id="auto-fade-delay-label">15</span>s → fades to Dinner / Ambient
+          Silence <span id="auto-fade-delay-label">8</span>s → fades to Dinner / Ambient
         </div>
       </div>
     </div>
@@ -1385,9 +1405,20 @@ function applyState(s) {
   const w3 = document.getElementById('white3d');
   if (w3) w3.classList.toggle('held', !!s.white_hold);
 
-  // ARM button sync + kick client-side strobe animation
+  // ARM button sync + kick client-side strobe animation + drop state
   const armBtn = document.getElementById('strobe-arm-btn');
-  if (armBtn) armBtn.classList.toggle('armed', !!s.strobe_armed);
+  if (armBtn) {
+    const dropReady   = !!s.drop_ready;
+    const dropLoud    = !!s.drop_was_loud;
+    const armed       = !!s.strobe_armed;
+    armBtn.classList.toggle('armed',      armed);
+    armBtn.classList.toggle('drop-ready', dropReady);
+    armBtn.classList.toggle('drop-loud',  dropLoud && !dropReady);
+    if (dropReady)            armBtn.textContent = '▼ DROP!';
+    else if (dropLoud)        armBtn.textContent = '◉ LISTENING';
+    else if (armed)           armBtn.textContent = '◎ ARMED';
+    else                      armBtn.textContent = '◎ ARM';
+  }
   const wasArmed = _strobeArmed;
   _strobeArmed  = !!s.strobe_armed;
   if (s.strobe_master !== undefined) _strobeMaster = s.strobe_master;

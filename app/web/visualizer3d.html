@@ -1052,8 +1052,10 @@
     }
 
     // Per-type gates fold in kill switches and uplight_dimmer.
-    const beamGate    = masterGate * (global.kill_laser ? 0 : 1) * strobeGate;
-    const washGate    = masterGate * strobeGate;
+    // Only the impact (flash) fixtures strobe — washes/beams stay steady so the
+    // large orbs don't overwhelm the view in banger/indian modes.
+    const beamGate    = masterGate * (global.kill_laser ? 0 : 1);
+    const washGate    = masterGate;
     const upGate      = masterGate * global.uplight_dimmer;
     const sparkleGate = masterGate * (global.kill_derby ? 0 : 1);
     const impactGate  = masterGate * (global.kill_strobe ? 0 : 1) * strobeGate;
