@@ -250,6 +250,7 @@
     }
     .btn-kill-dash:hover { background: rgba(255,77,94,0.07); border-color: rgba(255,77,94,0.35); color: var(--red); }
     .btn-kill-dash.active { background: rgba(255,77,94,0.15); border-color: var(--red); color: var(--red); }
+    .btn-kill-dash.spotlight-active { background: rgba(255,180,50,0.18); border-color: #ffb432; color: #ffb432; }
 
     /* ---- Canvas blackout / flash state ---- */
     #rig-canvas.blacked-out {
@@ -519,6 +520,7 @@
           <div class="section-label" style="margin-top:8px; margin-bottom:4px">Kill Switches</div>
           <div class="kill-row">
             <button class="btn-kill-dash" id="dash-kill-mover_solo" onclick="toggleKill('mover_solo')">&#x25CE; MOVERS ONLY</button>
+            <button class="btn-kill-dash" id="dash-kill-spotlight"   onclick="toggleKill('spotlight')">&#x2605; SPOTLIGHT</button>
             <button class="btn-kill-dash" id="dash-kill-derby"       onclick="toggleKill('derby')">&#x2B55; DERBY</button>
             <button class="btn-kill-dash" id="dash-kill-laser"       onclick="toggleKill('laser')">&#x25B6; LASER</button>
           </div>
@@ -669,6 +671,7 @@
         <div class="section-label">Kill Switches</div>
         <div class="kill-row">
           <button class="btn-kill-dash" id="dash3d-kill-mover_solo" onclick="toggleKill('mover_solo')">&#x25CE; MOVERS ONLY</button>
+          <button class="btn-kill-dash" id="dash3d-kill-spotlight"   onclick="toggleKill('spotlight')">&#x2605; SPOTLIGHT</button>
           <button class="btn-kill-dash" id="dash3d-kill-derby"       onclick="toggleKill('derby')">&#x2B55; DERBY</button>
           <button class="btn-kill-dash" id="dash3d-kill-laser"       onclick="toggleKill('laser')">&#x25B6; LASER</button>
         </div>
@@ -700,8 +703,9 @@ let _lastFlashActive = false;
 let _beatFlash = 0;    // 0–1, set to 1 on beat, decays each draw frame
 let _ambientWarm = 0;  // 0–1, driven by W/A channels (dinner / slow dance)
 
-// Mover-solo state — mirrors engine flag so the canvas can reflect it
-let _moverSolo = false;
+// Mover-solo and spotlight state — mirror engine flags so the canvas can reflect them
+let _moverSolo   = false;
+let _spotlightOn = false;
 
 // Strobe animation — client-side RAF loop so the 2D canvas actually flickers
 let _strobeArmed    = false;
@@ -815,17 +819,22 @@ function _drawRig(fixtures, blackout, strobeBrt = 1.0) {
 
   // Draw fixtures (housings always, effects only when not blacked out)
   if (fixtures) {
-    // Mover solo: blank uplights and washes — show housings only
-    const _soloActive = _moverSolo && !blackout;
+    const _soloActive      = (_moverSolo && !_spotlightOn) && !blackout;
+    const _spotActive      = _spotlightOn && !blackout;
+    // Spotlight: dim amber uplights (25% warm), blank washes, no sparkles/impacts
+    const _spotlightUplight = (u) => ({...u, active: true, brt: 0.25, r: 255, g: 120, b: 20});
     (fixtures.beams    || []).forEach(b  => _drawBeam(ctx, b, s));
     (fixtures.washes   || []).forEach(w  => {
-      _drawWash(ctx, _soloActive ? {...w, active: false, brt: 0} : w, s);
+      _drawWash(ctx, (_soloActive || _spotActive) ? {...w, active: false, brt: 0} : w, s);
     });
     (fixtures.uplights || []).forEach(u  => {
-      _drawUplight(ctx, _soloActive ? {...u, active: false, brt: 0} : u, s);
+      _drawUplight(ctx,
+        _soloActive  ? {...u, active: false, brt: 0} :
+        _spotActive  ? _spotlightUplight(u) : u,
+        s);
     });
     if (!blackout) {
-      if (!_soloActive) {
+      if (!_soloActive && !_spotActive) {
         (fixtures.sparkles || []).forEach(sp => _drawSparkle(ctx, sp, s));
         (fixtures.impacts  || []).forEach(im => _drawImpact(ctx, im, s, W, H));
       }
@@ -1359,18 +1368,22 @@ function applyState(s) {
   if (s.strobe_master !== undefined) _strobeMaster = s.strobe_master;
   if (_strobeArmed && !wasArmed) _startStrobeAnim();
 
-  // Mover solo — update global so _drawRig can blank uplights/washes
-  _moverSolo = !!s.mover_solo;
+  // Mover solo + spotlight — update globals so _drawRig can blank/dim uplights
+  _moverSolo   = !!s.mover_solo;
+  _spotlightOn = !!s.spotlight;
 
-  // Kill switches + mover solo — active (lit red) = mode is engaged
-  const killLabels    = {mover_solo:'◎ MOVERS ONLY', derby:'⊕ DERBY', laser:'▶ LASER'};
-  const killOffLabels = {mover_solo:'◎ MOVERS ONLY', derby:'⊕ DERBY OFF', laser:'▶ LASER OFF'};
-  ['mover_solo','derby','laser'].forEach(t => {
-    const active = t === 'mover_solo' ? !!s.mover_solo : !!s['kill_' + t];
+  // Kill switches + presets — active (lit) = mode is engaged
+  const killLabels    = {mover_solo:'◎ MOVERS ONLY', spotlight:'★ SPOTLIGHT', derby:'⊕ DERBY', laser:'▶ LASER'};
+  const killOffLabels = {mover_solo:'◎ MOVERS ONLY', spotlight:'★ SPOTLIGHT OFF', derby:'⊕ DERBY OFF', laser:'▶ LASER OFF'};
+  ['mover_solo','spotlight','derby','laser'].forEach(t => {
+    const active = (t === 'mover_solo') ? !!s.mover_solo
+                 : (t === 'spotlight')  ? !!s.spotlight
+                 : !!s['kill_' + t];
     ['dash-kill-', 'dash3d-kill-'].forEach(pfx => {
       const el = document.getElementById(pfx + t);
       if (!el) return;
       el.classList.toggle('active', active);
+      if (t === 'spotlight') el.classList.toggle('spotlight-active', active);
       el.textContent = active ? killOffLabels[t] : killLabels[t];
     });
   });

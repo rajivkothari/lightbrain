@@ -184,6 +184,7 @@ class ChauvetGigBarMoveILS(FixtureBase):
         self._laser_enabled = laser_enabled
         self._derby_enabled = True
         self._mover_only    = False   # when True: zero Par/Derby/Flash/Laser, keep Spot
+        self._spot_color_dmx: int = 0  # Ch 26 color wheel (0=open/white, 45=CTO warm)
 
     # ── Public controls ──────────────────────────────────────────────────
 
@@ -201,6 +202,10 @@ class ChauvetGigBarMoveILS(FixtureBase):
     def set_mover_only(self, enabled: bool) -> None:
         """Solo the spot head — zero Par, Derby, Flash, and Laser."""
         self._mover_only = bool(enabled)
+
+    def set_spot_color(self, dmx_val: int) -> None:
+        """Set the spot color wheel (Ch 26). 0=open/white, 45=CTO warm white."""
+        self._spot_color_dmx = max(0, min(255, int(dmx_val)))
 
     # ── Core render ──────────────────────────────────────────────────────
 
@@ -312,7 +317,7 @@ class ChauvetGigBarMoveILS(FixtureBase):
             spot_tilt_dmx,      # Ch 23 Spot Tilt
             0,                  # Ch 24 Spot Fine Tilt
             spot_speed_dmx,     # Ch 25 Spot Pan/Tilt Speed
-            0,                  # Ch 26 Spot Color Wheel (0=white/open)
+            self._spot_color_dmx, # Ch 26 Spot Color Wheel (0=white/open, 45=CTO)
             0,                  # Ch 27 Spot Gobo (0=open)
             spot_dimmer_dmx,    # Ch 28 Spot Dimmer
             spot_strobe_dmx,    # Ch 29 Spot Strobe
