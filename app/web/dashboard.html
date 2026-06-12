@@ -456,6 +456,9 @@
   </button>
   <span class="status">
     <span class="dot" id="dot"></span><span id="status-text">connecting…</span>
+    <span id="dmx-hw-dot" title="DMX hardware health"
+          style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#555;margin-left:10px;vertical-align:middle"></span>
+    <span id="dmx-hw-label" style="font-size:0.62rem;color:var(--dim);margin-left:4px">DMX</span>
   </span>
 </div>
 
@@ -590,6 +593,14 @@
           <span class="rig-key">DMX Output</span>  <span class="rig-val" id="rig-dmx-output">--</span>
           <span class="rig-key">Engine FPS</span>  <span class="rig-val" id="rig-fps">--</span>
           <span class="rig-key">Address Check</span> <span class="rig-val" id="rig-check">--</span>
+          <span class="rig-key">DMX Health</span>
+          <span class="rig-val" id="rig-dmx-health">
+            <span id="dmx-health-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3ddc84;margin-right:5px;vertical-align:middle"></span>
+            <span id="dmx-health-text">OK</span>
+          </span>
+          <span class="rig-key">Reconnects</span>   <span class="rig-val" id="rig-dmx-reconnects">0</span>
+          <span class="rig-key">Last Error</span>
+          <span class="rig-val" id="rig-dmx-last-error" style="font-size:0.6rem;color:var(--dim);word-break:break-all"></span>
         </div>
       </div>
 
@@ -1428,6 +1439,27 @@ function applyState(s) {
   if (s.fps !== undefined) {
     const el = document.getElementById('rig-fps');
     if (el) el.textContent = s.fps + ' fps';
+  }
+  // DMX health indicator
+  if (s.dmx_ok !== undefined) {
+    const errors = s.dmx_errors || 0;
+    const ok     = !!s.dmx_ok;
+    const color  = ok ? '#3ddc84' : (errors >= 5 ? '#ff4d5e' : '#ffb432');
+    const label  = ok ? 'OK' : (errors >= 5 ? `ERROR ×${errors}` : `WARN ×${errors}`);
+    // Header dot
+    const hwDot = document.getElementById('dmx-hw-dot');
+    const hwLbl = document.getElementById('dmx-hw-label');
+    if (hwDot) { hwDot.style.background = color; hwDot.style.boxShadow = ok ? 'none' : `0 0 6px ${color}`; }
+    if (hwLbl) { hwLbl.textContent = ok ? 'DMX' : `DMX ${label}`; hwLbl.style.color = ok ? 'var(--dim)' : color; }
+    // Rig tab detail
+    const dot  = document.getElementById('dmx-health-dot');
+    const txt  = document.getElementById('dmx-health-text');
+    if (dot) dot.style.background = color;
+    if (txt) txt.textContent = label;
+    const rcEl = document.getElementById('rig-dmx-reconnects');
+    if (rcEl) rcEl.textContent = s.dmx_reconnects || 0;
+    const errEl = document.getElementById('rig-dmx-last-error');
+    if (errEl) errEl.textContent = s.dmx_last_error || '';
   }
   // Build fixture table once on first non-empty rig_layout
   if (s.rig_layout && s.rig_layout.length && !_rigBuilt) {

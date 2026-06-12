@@ -168,6 +168,11 @@ class ArtNetOutput:
     def universe(self) -> int:
         return self._universe
 
+    def reopen(self) -> None:
+        """Close and re-open the UDP socket (called by DmxOutputThread on repeated failures)."""
+        self.disconnect()
+        self.connect()
+
     @property
     def is_connected(self) -> bool:
         return self._sock is not None

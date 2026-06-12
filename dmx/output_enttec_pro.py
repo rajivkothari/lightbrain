@@ -225,6 +225,17 @@ class EnttecProOutput:
                 self._serial.close()
             self._serial = None
 
+    def reopen(self) -> None:
+        """Close and re-open the serial port (called by DmxOutputThread on repeated failures)."""
+        try:
+            if self._serial and self._serial.is_open:
+                self._serial.close()
+        except Exception:
+            pass
+        self._serial = None
+        if self._port:
+            self.open(self._port)
+
     def is_open(self) -> bool:
         return self._serial is not None and self._serial.is_open
 
