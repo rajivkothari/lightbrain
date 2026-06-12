@@ -500,7 +500,6 @@
       <button class="tab active" onclick="showTab('live')">Live</button>
       <button class="tab" onclick="showTab('scenes')" id="tab-btn-scenes">Scene Editor</button>
       <button class="tab" onclick="showTab('rig')" id="tab-btn-rig">Rig</button>
-      <button class="tab" onclick="showTab('threed')" id="tab-btn-3d">3D</button>
     </div>
 
     <!-- LIVE TAB -->
@@ -572,6 +571,16 @@
         <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})" style="flex:1">
           BLACKOUT
         </button>
+      </div>
+      <div class="section" style="margin-top:10px">
+        <div class="section-label">Brightness</div>
+        <div class="btn-row" id="brightness-row">
+          <button class="btn btn-sm btn-brt" id="brt-0"   onclick="setBrightness(0)">0%</button>
+          <button class="btn btn-sm btn-brt" id="brt-25"  onclick="setBrightness(0.25)">25%</button>
+          <button class="btn btn-sm btn-brt" id="brt-50"  onclick="setBrightness(0.5)">50%</button>
+          <button class="btn btn-sm btn-brt" id="brt-75"  onclick="setBrightness(0.75)">75%</button>
+          <button class="btn btn-sm btn-brt active" id="brt-100" onclick="setBrightness(1)">100%</button>
+        </div>
       </div>
       <div class="section" style="margin-top:10px">
         <div class="section-label">Mode</div>
@@ -701,62 +710,19 @@
     </div>
 
     <!-- 3D TAB (left pane) — full rig control beside the 3D render -->
-    <div id="tab-3d" class="tab-pane" style="display:none">
-      <div class="section">
-        <div class="section-label">Mode</div>
-        <div class="grid" id="mode-grid-3d"></div>
-      </div>
-      <div class="section">
-        <div class="section-label">Scene</div>
-        <div class="grid" id="scene-grid-3d"></div>
-      </div>
-      <div class="section">
-        <div class="section-label">Strobe</div>
-        <div class="btn-row" id="strobe-3d">
-          <button class="btn btn-sm" id="strobe3d-off" onclick="strobe3dOff()">OFF</button>
-          <button class="btn btn-sm strobe3d-rate" data-m="0.2"  onclick="strobe3dRate(this)">SLOW</button>
-          <button class="btn btn-sm strobe3d-rate" data-m="0.45" onclick="strobe3dRate(this)">MED</button>
-          <button class="btn btn-sm strobe3d-rate" data-m="0.7"  onclick="strobe3dRate(this)">FAST</button>
-          <button class="btn btn-sm strobe3d-rate" data-m="1.0"  onclick="strobe3dRate(this)">MAX</button>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-label">Uplights (preview)</div>
-        <div class="btn-row" id="uplights-3d">
-          <button class="btn btn-sm upl3d" data-n="6"  onclick="uplights3d(6)">6</button>
-          <button class="btn btn-sm upl3d" data-n="12" onclick="uplights3d(12)">12</button>
-          <button class="btn btn-sm upl3d active" data-n="18" onclick="uplights3d(18)">18</button>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-label">Master</div>
-        <div class="btn-row">
-          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:0})">0%</button>
-          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:0.5})">50%</button>
-          <button class="btn btn-sm" onclick="cmd({type:'set_fader',fader:'master',value:1})">100%</button>
-          <button class="btn btn-sm" onclick="cmd({type:'momentary',effect:'flash',action:'start'})">BUMP</button>
-          <button class="btn btn-sm" id="white3d"
-                  onmousedown="white3d(true)" onmouseup="white3d(false)" onmouseleave="white3d(false)">WHITE</button>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-label">Kill Switches</div>
-        <div class="kill-row">
-          <button class="btn-kill-dash" id="dash3d-kill-mover_solo" onclick="toggleKill('mover_solo')">&#x25CE; MOVERS ONLY</button>
-          <button class="btn-kill-dash" id="dash3d-kill-spotlight"   onclick="toggleKill('spotlight')">&#x2605; SPOTLIGHT</button>
-          <button class="btn-kill-dash" id="dash3d-kill-derby"       onclick="toggleKill('derby')">&#x2B55; DERBY</button>
-          <button class="btn-kill-dash" id="dash3d-kill-laser"       onclick="toggleKill('laser')">&#x25B6; LASER</button>
-        </div>
-      </div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-full btn-panic" id="panic-btn-3d" onclick="cmd({type:'panic'})" style="flex:1">&#x26A0; PANIC</button>
-        <button class="btn btn-full btn-blackout" id="blackout-btn-3d" onclick="cmd({type:'blackout'})" style="flex:1">BLACKOUT</button>
-      </div>
-    </div>
   </div>
 
-  <!-- ===== RIGHT PANEL: 2D canvas (default) + 3D iframe ===== -->
+  <!-- ===== RIGHT PANEL: toolbar + 2D canvas (default) + 3D iframe ===== -->
   <div class="right-panel">
+    <div id="right-toolbar" style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0">
+      <button id="viz3d-toggle-btn" class="btn btn-sm" onclick="toggle3dView()" title="Toggle 3D visualizer" style="font-size:0.65rem;padding:3px 10px">3D VIEW</button>
+      <span style="font-size:0.6rem;color:var(--dim);margin-left:4px">UPLIGHTS</span>
+      <div style="display:flex;gap:3px">
+        <button class="btn btn-sm upl-layer" data-n="6"  onclick="setUplightLayer(6)"  style="padding:2px 7px;font-size:0.65rem">6</button>
+        <button class="btn btn-sm upl-layer" data-n="12" onclick="setUplightLayer(12)" style="padding:2px 7px;font-size:0.65rem">12</button>
+        <button class="btn btn-sm upl-layer active" data-n="18" onclick="setUplightLayer(18)" style="padding:2px 7px;font-size:0.65rem">18</button>
+      </div>
+    </div>
     <canvas id="rig-canvas"></canvas>
     <iframe id="viz3d-frame" title="3D Visualizer" style="display:none"></iframe>
   </div>
@@ -1260,6 +1226,13 @@ function updateWeddingColor(idx, hex) {
 }
 function _toggleWeddingMode() {
   _weddingModeOn = !_weddingModeOn;
+  const btn = document.getElementById('wedding-mode-btn');
+  if (btn) {
+    btn.textContent = _weddingModeOn ? '♥ WEDDING COLORS ON' : '♥ WEDDING COLORS OFF';
+    btn.classList.toggle('btn-wedding-on', _weddingModeOn);
+  }
+  // Always send current colors alongside the mode toggle so they're always in sync
+  cmd({type:'set_wedding_colors', colors: _weddingColors});
   cmd({type:'set_wedding_mode', enabled: _weddingModeOn});
 }
 function _saveWeddingColors() {
@@ -1269,38 +1242,34 @@ function _saveWeddingColors() {
 function buildModes(modes) {
   if (modesReady) return;
   const list = (modes && modes.length) ? modes : DEFAULT_MODES;
-  ['mode-grid', 'mode-grid-3d'].forEach(gid => {
-    const grid = document.getElementById(gid);
-    if (!grid) return;
-    grid.innerHTML = '';
-    list.forEach(m => {
-      const b = document.createElement('button');
-      b.className = 'btn mode-btn'; b.dataset.key = m.key;
-      b.textContent = m.display_name;
-      b.onclick = () => cmd({type:'mode', value:m.key});
-      grid.appendChild(b);
-    });
+  const grid = document.getElementById('mode-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  list.forEach(m => {
+    const b = document.createElement('button');
+    b.className = 'btn mode-btn'; b.dataset.key = m.key;
+    b.textContent = m.display_name;
+    b.onclick = () => cmd({type:'mode', value:m.key});
+    grid.appendChild(b);
   });
   modesReady = true;
 }
 
 function buildScenes(scenes) {
   if (scenesReady || !scenes || !scenes.length) return;
-  ['scene-grid', 'scene-grid-3d'].forEach(gid => {
-    const grid = document.getElementById(gid);
-    if (!grid) return;
-    grid.innerHTML = '';
-    scenes.forEach((s, i) => {
-      const b = document.createElement('button');
-      b.className = 'btn scene-btn'; b.dataset.id = s.id;
-      const shortcut = document.createElement('span');
-      shortcut.className = 'shortcut';
-      shortcut.textContent = `F${i+1}`;
-      b.appendChild(shortcut);
-      b.appendChild(document.createTextNode(s.name));
-      b.onclick = () => cmd({type:'scene', value:s.id});
-      grid.appendChild(b);
-    });
+  const grid = document.getElementById('scene-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  scenes.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn scene-btn'; b.dataset.id = s.id;
+    const shortcut = document.createElement('span');
+    shortcut.className = 'shortcut';
+    shortcut.textContent = `F${i+1}`;
+    b.appendChild(shortcut);
+    b.appendChild(document.createTextNode(s.name));
+    b.onclick = () => cmd({type:'scene', value:s.id});
+    grid.appendChild(b);
   });
   scenesReady = true;
 }
@@ -1314,6 +1283,7 @@ function _buildRosList(rosScenes, rosIndex) {
     return;
   }
   container.innerHTML = '';
+  const allIds = rosScenes.map(sc => sc.id || sc);
   rosScenes.forEach((sc, i) => {
     const row = document.createElement('div');
     const isCurrent = i === rosIndex;
@@ -1326,6 +1296,20 @@ function _buildRosList(rosScenes, rosIndex) {
     num.textContent = i + 1;
     const name = document.createElement('span'); name.className = 'ros-name';
     name.textContent = sc.name || sc.id;
+    // Reorder buttons
+    const reorderWrap = document.createElement('span');
+    reorderWrap.style.cssText = 'display:flex;flex-direction:column;gap:1px;margin-left:4px';
+    const upBtn = document.createElement('button');
+    upBtn.className = 'btn'; upBtn.textContent = '▲';
+    upBtn.style.cssText = 'padding:0 4px;font-size:0.55rem;line-height:1.2;min-width:0';
+    upBtn.disabled = i === 0;
+    upBtn.onclick = (e) => { e.stopPropagation(); _rosMove(allIds, i, -1); };
+    const dnBtn = document.createElement('button');
+    dnBtn.className = 'btn'; dnBtn.textContent = '▼';
+    dnBtn.style.cssText = 'padding:0 4px;font-size:0.55rem;line-height:1.2;min-width:0';
+    dnBtn.disabled = i === rosScenes.length - 1;
+    dnBtn.onclick = (e) => { e.stopPropagation(); _rosMove(allIds, i, +1); };
+    reorderWrap.appendChild(upBtn); reorderWrap.appendChild(dnBtn);
     row.appendChild(dot); row.appendChild(num); row.appendChild(name);
     if (isCurrent) {
       const tag = document.createElement('span');
@@ -1333,10 +1317,11 @@ function _buildRosList(rosScenes, rosIndex) {
       tag.textContent = 'NOW';
       row.appendChild(tag);
     }
+    row.appendChild(reorderWrap);
     // Click to jump directly to that scene
     row.style.cursor = 'pointer';
     row.title = 'Activate this scene';
-    row.onclick = () => cmd({type:'scene', value: sc.id});
+    row.onclick = () => cmd({type:'scene', value: sc.id || sc});
     container.appendChild(row);
   });
   // Scroll current item into view
@@ -1350,40 +1335,13 @@ function _buildRosList(rosScenes, rosIndex) {
   if (nextBtn) nextBtn.disabled = rosScenes.length > 0 && rosIndex >= rosScenes.length - 1;
 }
 
-// ---- 3D-tab control helpers (reuse cmd(); uplights drive the iframe) ----
+// ---- Visualizer helpers ----
 function _viz3dPost(msg) {
   const f = document.getElementById('viz3d-frame');
   if (f && f.contentWindow) { try { f.contentWindow.postMessage(msg, '*'); } catch(_){} }
 }
-let _upl3d = 18;
-function uplights3d(n) {
-  _upl3d = n;
-  document.querySelectorAll('#uplights-3d .upl3d').forEach(b =>
-    b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
-  _viz3dPost({type:'lb-uplights', n});
-}
 let _strobe3dLatch = null;
-function strobe3dRate(btn) {
-  cmd({type:'strobe_master', value: parseFloat(btn.dataset.m)});
-  cmd({type:'momentary', effect:'strobe_hold', action:'start'});
-  _strobe3dLatch = btn.dataset.m;
-  reflectStrobe3d();
-}
-function strobe3dOff() {
-  cmd({type:'momentary', effect:'strobe_hold', action:'stop'});
-  _strobe3dLatch = null; reflectStrobe3d();
-}
-function reflectStrobe3d() {
-  document.querySelectorAll('#strobe-3d .strobe3d-rate').forEach(b =>
-    b.classList.toggle('active', b.dataset.m === _strobe3dLatch));
-}
-let _white3dHeld = false;
-function white3d(state) {
-  if (state === _white3dHeld) return;
-  _white3dHeld = state;
-  document.getElementById('white3d').classList.toggle('held', state);
-  cmd({type:'white_hold', state});
-}
+function reflectStrobe3d() {}
 
 function applyState(s) {
   // BPM + beat flash
@@ -1440,16 +1398,7 @@ function applyState(s) {
   bo.classList.toggle('active', _blackoutActive);
   bo.textContent = _blackoutActive ? '■  BLACKOUT  ACTIVE — click to restore' : 'BLACKOUT';
   document.getElementById('rig-canvas').classList.toggle('blacked-out', _blackoutActive);
-  const bo3 = document.getElementById('blackout-btn-3d');
-  if (bo3) {
-    bo3.classList.toggle('active', _blackoutActive);
-    bo3.textContent = _blackoutActive ? '■  BLACKOUT ACTIVE' : 'BLACKOUT';
-  }
   if (_blackoutActive && _strobe3dLatch) { _strobe3dLatch = null; reflectStrobe3d(); }
-
-  // White hold (3D tab) — reflect engine state
-  const w3 = document.getElementById('white3d');
-  if (w3) w3.classList.toggle('held', !!s.white_hold);
 
   // ARM button sync + kick client-side strobe animation + drop state
   const armBtn = document.getElementById('strobe-arm-btn');
@@ -1481,13 +1430,11 @@ function applyState(s) {
     const active = (t === 'mover_solo') ? !!s.mover_solo
                  : (t === 'spotlight')  ? !!s.spotlight
                  : !!s['kill_' + t];
-    ['dash-kill-', 'dash3d-kill-'].forEach(pfx => {
-      const el = document.getElementById(pfx + t);
-      if (!el) return;
-      el.classList.toggle('active', active);
-      if (t === 'spotlight') el.classList.toggle('spotlight-active', active);
-      el.textContent = active ? killOffLabels[t] : killLabels[t];
-    });
+    const el = document.getElementById('dash-kill-' + t);
+    if (!el) return;
+    el.classList.toggle('active', active);
+    if (t === 'spotlight') el.classList.toggle('spotlight-active', active);
+    el.textContent = active ? killOffLabels[t] : killLabels[t];
   });
 
   // Flash feedback — brief canvas pop
@@ -1550,6 +1497,9 @@ function applyState(s) {
       _rigDraw(s.dmx_channels);
     }
   }
+
+  // Brightness buttons
+  if (s.master_dimmer !== undefined) _reflectBrightness(s.master_dimmer);
 
   // Auto-fade section
   if (s.auto_fade_enabled !== undefined) {
@@ -1810,27 +1760,34 @@ async function editorSave() {
 }
 
 // ============================================================
-// TAB SWITCHING
+// TAB SWITCHING + RIGHT PANEL VIEW
 // ============================================================
-let _viz3dLoaded = false;
+let _viz3dLoaded  = false;
+let _viz3dActive  = false;
+let _upl3d        = 18;
+
 function showTab(name) {
   document.getElementById('tab-live').style.display   = name==='live'   ? '' : 'none';
   document.getElementById('tab-scenes').style.display = name==='scenes' ? '' : 'none';
   document.getElementById('tab-rig').style.display    = name==='rig'    ? '' : 'none';
-  document.getElementById('tab-3d').style.display     = name==='threed' ? '' : 'none';
   document.querySelectorAll('.tab').forEach(t => {
     const key = t.getAttribute('onclick').replace("showTab('","").replace("')","");
     t.classList.toggle('active', key === name);
   });
+  if (name === 'scenes') _edLoad();
+  if (name === 'rig')    _rigDraw(_lastDmxChannels);
+}
 
-  // Right panel: canvas for all tabs except 3D, which shows the iframe.
-  // Lazy-load the iframe on first open; pause/resume via postMessage.
+function toggle3dView() {
+  _viz3dActive = !_viz3dActive;
   const frame  = document.getElementById('viz3d-frame');
   const canvas = document.getElementById('rig-canvas');
-  if (name === 'threed') {
+  const btn    = document.getElementById('viz3d-toggle-btn');
+  if (_viz3dActive) {
     if (!_viz3dLoaded) { frame.src = '/visualizer3d?embed=1'; _viz3dLoaded = true; }
     canvas.style.display = 'none';
     frame.style.display  = '';
+    if (btn) { btn.textContent = '2D VIEW'; btn.classList.add('active'); }
     const resume = () => { try {
       frame.contentWindow.postMessage({type:'lb-resume'}, '*');
       frame.contentWindow.postMessage({type:'lb-uplights', n:_upl3d}, '*');
@@ -1840,13 +1797,43 @@ function showTab(name) {
   } else {
     frame.style.display  = 'none';
     canvas.style.display = '';
+    if (btn) { btn.textContent = '3D VIEW'; btn.classList.remove('active'); }
     if (_viz3dLoaded && frame.contentWindow) {
       try { frame.contentWindow.postMessage({type:'lb-pause'}, '*'); } catch(_){}
     }
   }
+}
 
-  if (name === 'scenes') _edLoad();
-  if (name === 'rig')    _rigDraw(_lastDmxChannels);
+function setUplightLayer(n) {
+  _upl3d = n;
+  document.querySelectorAll('.upl-layer').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
+  // Also sync to uplights-3d buttons if the old 3D tab selector is still somewhere
+  document.querySelectorAll('#uplights-3d .upl3d').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.n, 10) === n));
+  if (_viz3dActive) _viz3dPost({type:'lb-uplights', n});
+}
+
+function _rosMove(ids, fromIdx, dir) {
+  const newIds = [...ids];
+  const toIdx  = fromIdx + dir;
+  if (toIdx < 0 || toIdx >= newIds.length) return;
+  [newIds[fromIdx], newIds[toIdx]] = [newIds[toIdx], newIds[fromIdx]];
+  cmd({type:'reorder_ros', scenes: newIds});
+}
+
+function setBrightness(v) {
+  cmd({type:'set_fader', fader:'master', value: v});
+  _reflectBrightness(v);
+}
+
+function _reflectBrightness(v) {
+  const levels = [0, 0.25, 0.5, 0.75, 1.0];
+  const ids    = ['brt-0','brt-25','brt-50','brt-75','brt-100'];
+  levels.forEach((lvl, i) => {
+    const btn = document.getElementById(ids[i]);
+    if (btn) btn.classList.toggle('active', Math.abs(v - lvl) < 0.08);
+  });
 }
 
 // ============================================================
