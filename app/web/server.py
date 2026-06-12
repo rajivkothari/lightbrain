@@ -88,6 +88,9 @@ _engine_state: Dict[str, Any] = {
     "ros_scenes":          [],   # [{id, name}] ordered list
     "wedding_mode":        False,
     "wedding_colors":      [],
+    "input_gain":          1.0,  # sensitivity trim on normalized band energies
+    "input_level":         0.0,  # raw input peak (pre-normalization), smoothed
+    "input_clip":          False,
     "auto_fade_enabled":   True,
     "auto_fade_delay_s":   8.0,
     "auto_fade_countdown": None, # seconds remaining until fade, or null if not silent
@@ -284,6 +287,7 @@ _ALLOWED_COMMAND_TYPES = frozenset({
     "fixture_test_aim", "white_hold", "next_ros_scene", "prev_ros_scene",
     "set_auto_fade", "panic", "stop_ros", "reorder_ros",
     "set_wedding_mode", "set_wedding_colors",
+    "set_input_gain", "reset_audio_gain",
 })
 
 

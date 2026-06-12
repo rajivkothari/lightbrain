@@ -17,6 +17,7 @@ Tests cover:
   - Synthetic audio source (produces valid float32 blocks)
 """
 
+import json
 import math
 import os
 import sys
@@ -40,7 +41,7 @@ from engine.modes     import get_mode, MODES
 from engine.safety    import SafetyEngine
 from engine.lanes     import RoomLane
 from audio.synthetic  import SyntheticAudioSource
-from audio.analyzer   import AudioAnalyzer
+from audio.analyzer   import AudioAnalyzer, AudioBands
 from audio.beat_detector import BeatDetector
 from engine.transitions  import ModeTransitioner
 from app.render.fixture_state import (
@@ -4848,7 +4849,7 @@ class TestDropDetection:
             if energy > self.LOUD:
                 st["drop_was_loud"] = True
                 st["drop_start"]    = None
-                if st["drop_ready"]:
+                if st["drop_ready"] and energy >= self.RISE:
                     st["drop_ready"]    = False
                     st["drop_was_loud"] = False
                     if st["armed_mode"]:
@@ -4957,6 +4958,20 @@ class TestDropDetection:
         assert "drop_was_loud" in _engine_state
         assert _engine_state["drop_ready"]    is False
         assert _engine_state["drop_was_loud"] is False
+
+    def test_rise_between_loud_and_rise_thresholds_does_not_fire(self):
+        """Energy above LOUD (0.20) but below RISE (0.22) must NOT fire —
+        the rise hysteresis requires a stronger comeback than 'just loud'."""
+        st = self._make_state()
+        self._tick(st, 0.5, 0.0)    # loud
+        self._tick(st, 0.02, 0.0)   # drop
+        self._tick(st, 0.02, 0.15)  # quiet held → drop_ready
+        assert st["drop_ready"]
+        self._tick(st, 0.21, 0.2)   # above LOUD, below RISE — no fire
+        assert not st["fired"]
+        assert st["drop_ready"]     # still armed and listening
+        self._tick(st, 0.30, 0.25)  # genuine rise — fires
+        assert st["fired"]
 
 
 # ===========================================================================
@@ -5199,3 +5214,166 @@ class TestLiveBrightness:
             assert 0.0 <= s <= 1.0
         assert steps[0] == 0.0
         assert steps[-1] == 1.0
+
+
+# ===========================================================================
+# Feature #9 — Audio input sensitivity / level metering
+# ===========================================================================
+
+class TestAudioInput:
+    """Input sensitivity trim, level metering, clip detection, auto-gain reset."""
+
+    # Mirror app/main.py constants
+    CLIP_PEAK = 0.985
+    GAIN_MIN, GAIN_MAX = 0.1, 2.0
+
+    # ------------------------------------------------------------------
+    # Command allowlist + server state defaults
+    # ------------------------------------------------------------------
+
+    def test_commands_in_allowlist(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "set_input_gain"   in _ALLOWED_COMMAND_TYPES
+        assert "reset_audio_gain" in _ALLOWED_COMMAND_TYPES
+
+    def test_server_state_defaults(self):
+        from app.web.server import _engine_state
+        assert _engine_state["input_gain"]  == 1.0
+        assert _engine_state["input_level"] == 0.0
+        assert _engine_state["input_clip"]  is False
+
+    # ------------------------------------------------------------------
+    # Gain clamping (mirrors set_input_gain handler)
+    # ------------------------------------------------------------------
+
+    def _clamp(self, v):
+        return min(self.GAIN_MAX, max(self.GAIN_MIN, float(v)))
+
+    def test_gain_clamps_high(self):
+        assert self._clamp(5.0) == self.GAIN_MAX
+
+    def test_gain_clamps_low(self):
+        assert self._clamp(0.0) == self.GAIN_MIN
+
+    def test_gain_passes_normal_values(self):
+        assert self._clamp(0.6) == 0.6
+        assert self._clamp(1.0) == 1.0
+        assert self._clamp(1.5) == 1.5
+
+    # ------------------------------------------------------------------
+    # Sensitivity applied to normalized bands (post-analyzer)
+    # ------------------------------------------------------------------
+
+    def _scale_bands(self, bands, gain):
+        return AudioBands(
+            low_energy=     min(1.0, bands.low_energy     * gain),
+            mid_energy=     min(1.0, bands.mid_energy     * gain),
+            high_energy=    min(1.0, bands.high_energy    * gain),
+            overall_energy= min(1.0, bands.overall_energy * gain),
+        )
+
+    def test_low_sensitivity_pulls_saturated_bands_down(self):
+        """Gain 0.5 turns pegged 1.0 bands into 0.5 — restores dynamic range."""
+        pegged = AudioBands(1.0, 1.0, 1.0, 1.0)
+        out = self._scale_bands(pegged, 0.5)
+        assert out.low_energy == out.mid_energy == out.high_energy == 0.5
+        assert out.overall_energy == 0.5
+
+    def test_high_sensitivity_clamps_at_one(self):
+        bands = AudioBands(0.8, 0.6, 0.9, 0.7)
+        out = self._scale_bands(bands, 2.0)
+        assert out.low_energy  == 1.0   # 1.6 clamped
+        assert out.mid_energy  == 1.0   # 1.2 clamped
+        assert out.high_energy == 1.0
+        assert out.overall_energy == 1.0
+
+    def test_unity_gain_is_identity(self):
+        bands = AudioBands(0.3, 0.5, 0.7, 0.4)
+        out = self._scale_bands(bands, 1.0)
+        assert out.as_dict() == bands.as_dict()
+
+    def test_sensitivity_keeps_band_ratios(self):
+        """Sub-unity gain preserves relative band relationships (no clamping)."""
+        bands = AudioBands(0.8, 0.4, 0.2, 0.6)
+        out = self._scale_bands(bands, 0.5)
+        assert abs(out.low_energy  / out.mid_energy  - 2.0) < 1e-9
+        assert abs(out.mid_energy  / out.high_energy - 2.0) < 1e-9
+
+    # ------------------------------------------------------------------
+    # Why the trim is post-normalization: analyzer output is gain-invariant
+    # ------------------------------------------------------------------
+
+    def test_analyzer_normalized_output_is_gain_invariant(self):
+        """Scaling the raw input does NOT change normalized band output —
+        which is why the sensitivity trim must act after the analyzer."""
+        sr, bs = 44100, 1024
+        t = np.arange(bs) / sr
+        sig = (np.sin(2 * np.pi * 60 * t) + 0.5 * np.sin(2 * np.pi * 5000 * t)).astype(np.float32)
+
+        a_soft, a_loud = AudioAnalyzer(sr, bs), AudioAnalyzer(sr, bs)
+        for _ in range(5):   # let both normalizers adapt
+            out_soft = a_soft.analyze(sig * 0.05)
+            out_loud = a_loud.analyze(sig * 0.90)
+
+        assert abs(out_soft.low_energy  - out_loud.low_energy)  < 1e-6
+        assert abs(out_soft.high_energy - out_loud.high_energy) < 1e-6
+        assert abs(out_soft.overall_energy - out_loud.overall_energy) < 1e-6
+
+    def test_analyzer_reset_gain_resets_peaks(self):
+        sr, bs = 44100, 1024
+        t = np.arange(bs) / sr
+        sig = np.sin(2 * np.pi * 60 * t).astype(np.float32)
+        a = AudioAnalyzer(sr, bs)
+        a.analyze(sig)
+        assert a._peak_low > a.GAIN_FLOOR
+        a.reset_gain()
+        assert a._peak_low     == a.GAIN_FLOOR
+        assert a._peak_mid     == a.GAIN_FLOOR
+        assert a._peak_high    == a.GAIN_FLOOR
+        assert a._peak_overall == a.GAIN_FLOOR
+
+    # ------------------------------------------------------------------
+    # Clip detection + meter envelope (mirrors main.py logic)
+    # ------------------------------------------------------------------
+
+    def test_clip_threshold_detects_hot_signal(self):
+        block = np.full(1024, 0.99, dtype=np.float32)
+        assert float(np.max(np.abs(block))) >= self.CLIP_PEAK
+
+    def test_clip_threshold_ignores_healthy_signal(self):
+        block = np.full(1024, 0.7, dtype=np.float32)
+        assert float(np.max(np.abs(block))) < self.CLIP_PEAK
+
+    def test_clip_detects_negative_peaks(self):
+        block = np.full(1024, -0.999, dtype=np.float32)
+        assert float(np.max(np.abs(block))) >= self.CLIP_PEAK
+
+    def test_meter_fast_attack_slow_release(self):
+        level = 0.0
+        level = max(min(1.0, 0.9), level * 0.92)   # loud block → jumps instantly
+        assert level == 0.9
+        level = max(min(1.0, 0.0), level * 0.92)   # silent block → decays slowly
+        assert abs(level - 0.9 * 0.92) < 1e-9
+
+    # ------------------------------------------------------------------
+    # Config persistence
+    # ------------------------------------------------------------------
+
+    def test_input_gain_in_app_config(self):
+        path = os.path.join(ROOT, "config", "app_config.json")
+        with open(path) as f:
+            cfg = json.load(f)
+        assert "input_gain" in cfg
+        assert 0.1 <= float(cfg["input_gain"]) <= 2.0
+
+    def test_config_round_trip(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"web_server_port": 8080, "input_gain": 0.75}, f)
+            tmp = f.name
+        try:
+            with open(tmp) as f:
+                cfg = json.load(f)
+            assert cfg["input_gain"] == 0.75
+            assert cfg["web_server_port"] == 8080  # other keys preserved
+        finally:
+            os.unlink(tmp)

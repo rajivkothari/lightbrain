@@ -6,8 +6,9 @@ it separates music into **lighting stems** (low, mid, high, energy) and
 interprets them through mode profiles, palettes, and scene presets tuned for
 wedding moments.
 
-**Current status:** Hardware arrives in ~2 weeks. System runs fully in mock
-mode today. 590 automated tests passing (2 skipped on Windows).
+**Current status:** System runs fully in mock mode and against real DMX
+hardware (Enttec USB Pro / Art-Net). 715 automated tests passing
+(2 skipped on Windows).
 
 ---
 
@@ -61,6 +62,7 @@ lightbrain/
       server.py             FastAPI web server (dashboard + REST + WebSocket)
       ipad_server.py        iPad PWA server (port 8080)
       dashboard.html        Desktop web dashboard
+      visualizer3d.html     Three.js 3D rig view (iframe, lazy-loaded)
       ipad.html             iPad PWA controller
   audio/
     input.py                Non-blocking sounddevice capture
@@ -96,6 +98,7 @@ lightbrain/
     output_mock.py          MockDMXOutput (no hardware needed)
     output_enttec_pro.py    Enttec USB Pro protocol
     output_artnet.py        Art-Net 4 UDP output
+    output_thread.py        40 Hz output thread + health tracking / auto-reconnect
   data/
     lighting_program.py     LightingProgram model + fingerprinting
     program_store.py        Save / load / index programs
@@ -107,7 +110,9 @@ lightbrain/
     terminal_debug.py       ANSI 40 FPS terminal overlay
   config/
     rig_config.json         Fixture layout + hardware settings
-    app_config.json         Web server / headless mode toggle
+    app_config.json         Web server / headless / input gain settings
+    run_of_show.json        Ordered scene list for the reception timeline
+    wedding.json            Wedding color palette (up to 3 hex colors)
     palettes/               6 palette files (one per mode)
     scenes/                 9 wedding scene presets
   scripts/
@@ -118,7 +123,7 @@ lightbrain/
     test_dmxking_rockwedge.py  Hardware DMX test
     test_song_preview.py    Offline analysis + deterministic replay
   tests/
-    test_lightbrain.py      590 automated tests (2 skipped on Windows)
+    test_lightbrain.py      Main suite (715 tests total across all files)
   docs/
     ARCHITECTURE.md         System design + module guide
     ROADMAP.md              Sprint history + completed features
@@ -201,17 +206,31 @@ machine's IP from another device on the same network).
 
 ### What you can do
 
-- **Mode** buttons — switch lighting behavior instantly; double-tap to **ARM** a mode (fires automatically on next energy peak or beat)
+The **Live tab** is the primary control surface:
+
+- **Audio Input** — live input level meter with CLIP warning; Sensitivity
+  slider (10–200 %) trims the normalized band energies so loud sources don't
+  pin every lane at once; RESET AUTO-GAIN re-learns levels after a loud burst
+- **Mode** buttons — switch lighting behavior instantly
+- **ARM (drop detection)** — arm a mode or the strobe; the state machine
+  listens for loud → quiet (≥120 ms) → rise and fires exactly on the drop.
+  The ARM button shows ◎ ARMED → ◉ LISTENING → ▼ DROP! as it tracks
 - **Cooldown indicator** — mode button opacity dims proportionally during the 10 s beat-swap lockout after an energy-triggered palette change
 - **Scene presets** — activate wedding moments (Grand Entrance, First Dance, etc.)
-- **Strobe speed presets** — SLOW / MED / FAST / MAX preset buttons; ARM button arms strobe for next beat
+- **Run of Show** — ordered scene list for the reception timeline; NEXT / PREV / STOP buttons, tap a row to jump, ▲/▼ buttons reorder live (saved to `config/run_of_show.json`)
+- **Brightness** — 0 / 25 / 50 / 75 / 100 % master brightness buttons
+- **Wedding Colors** — up to 3 hex colors assigned round-robin to uplights (brightness stays music-reactive); saved to `config/wedding.json`
+- **Auto-Fade** — after 8 s of silence the rig crossfades to Dinner/ambient automatically; toggleable, with a live countdown
+- **Strobe speed presets** — SLOW / MED / FAST / MAX preset buttons
 - **STROBE HOLD** — hold to strobe at current speed; release to stop
 - **BUMP** — single full-white 75 ms accent hit
-- **Kill switches** — STROBE / DERBY / LASER buttons; when red = that element is silenced
+- **Kill switches** — MOVERS ONLY / SPOTLIGHT / DERBY / LASER; when lit = engaged
+- **SPOTLIGHT** — one-button preset: CTO warm-white spot + uplights dimmed to 25 % amber (toasts, cake cutting)
+- **PANIC** — resets every override (kills, faders, arms, holds, test mode) and crossfades to safe ambient light
 - **BLACKOUT** — instant black on press; 1.5 s linear fade-up on release
 - **Canvas** — live 2D fixture visualizer; border glows when strobe fires, flashes on BUMP
-- **3D tab** — Three.js rig visualizer in an iframe; left panel mirrors all Live controls; Uplights preview count selector (6 / 12 / 18); WHITE momentary hold button
-- **Fader shortcuts** — 0% / 50% / 100% quick-set buttons above the master dimmer
+- **3D VIEW toggle** — button in the right-panel toolbar swaps the 2D canvas for the Three.js rig view (Live controls stay visible); uplight layer buttons (6 / 12 / 18) sit next to it
+- **DMX health dot** — header indicator turns red on hardware write failures; the engine auto-reconnects with exponential backoff (details on the Rig tab)
 
 The dashboard connects via WebSocket and updates at ~15 fps. Commands send
 instantly via fetch POST.
@@ -373,6 +392,22 @@ python scripts/list_audio_devices.py
 Set `device_index` in `config/rig_config.json` or use `--device N` on the
 command line.
 
+### Setting the input level
+
+Watch the **Audio Input** meter at the top of the dashboard Live tab:
+
+- **Green** zone — healthy signal, lanes analyze cleanly
+- **Yellow / red** — signal is hot; if **CLIP** lights up the audio interface
+  itself is clipping, which smears bass harmonics into the high bands and
+  makes every lane fire together. Turn the mixer send down — no software
+  setting can fix a clipped input.
+- **Sensitivity** slider — trims how hard the analyzed energies drive the
+  lanes. Lower it if lights feel chaotic on loud music; raise it for quiet
+  sources. Persisted in `config/app_config.json`.
+- **RESET AUTO-GAIN** — the analyzer auto-normalizes per band with a slow
+  decay; after a very loud burst it can stay "deaf" for ~30 s. This button
+  re-learns levels instantly.
+
 ---
 
 ## Keyboard controls
@@ -425,10 +460,12 @@ before DMX write. Red label ("STROBE OFF") = element is silenced.
 python -m pytest tests/ -v
 ```
 
-580 tests covering: audio analysis, beat detection, gamma, DMX universe,
+715 tests covering: audio analysis, beat detection, gamma, DMX universe,
 smoothing, palettes, modes, safety, room lane, all fixture mappers, scene
 system, strobe engine, hue crossfade, Art-Net, hybrid blend, program
-save/load, setlist, web API, iPad commands, and the full codebase audit.
+save/load, setlist, web API, iPad commands, run of show, auto-fade,
+spotlight, panic, DMX health/auto-reconnect, drop detection, wedding
+colors, audio input sensitivity, and the full codebase audit.
 
 ---
 
