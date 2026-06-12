@@ -4676,3 +4676,146 @@ class TestPanic:
     def test_panic_in_allowlist(self):
         from app.web.server import _ALLOWED_COMMAND_TYPES
         assert "panic" in _ALLOWED_COMMAND_TYPES
+
+
+class TestDmxHealth:
+    """DMX health tracking and auto-reconnect in DmxOutputThread."""
+
+    class _GoodBackend:
+        output_type = "MOCK"
+        def send(self, u): pass
+        def close(self): pass
+
+    class _FailBackend:
+        output_type = "MOCK"
+        calls = 0
+        def send(self, u):
+            self.calls += 1
+            raise RuntimeError("USB disconnected")
+        def close(self): pass
+
+    class _RecoverBackend:
+        """Fails first N sends, then succeeds; reopen() resets the counter."""
+        output_type = "MOCK"
+        def __init__(self, fail_count):
+            self._fail_remaining = fail_count
+            self.reopen_calls = 0
+        def send(self, u):
+            if self._fail_remaining > 0:
+                self._fail_remaining -= 1
+                raise RuntimeError("fail")
+        def close(self): pass
+        def reopen(self):
+            self.reopen_calls += 1
+            self._fail_remaining = 0  # simulate successful reconnect
+
+    # ------------------------------------------------------------------
+    # Health property
+    # ------------------------------------------------------------------
+
+    def test_health_ok_on_start(self):
+        from dmx.output_thread import DmxOutputThread
+        t = DmxOutputThread(self._GoodBackend())
+        h = t.health
+        assert h["ok"] is True
+        assert h["error_count"] == 0
+        assert h["reconnect_count"] == 0
+        assert h["last_error"] == ""
+
+    def test_health_reports_failures(self):
+        from dmx.output_thread import DmxOutputThread
+        from dmx.universe import DMXUniverse
+        backend = self._FailBackend()
+        t = DmxOutputThread(backend, fps=200)
+        t.start()
+        import time; time.sleep(0.08)  # ~16 frames at 200Hz
+        t._stop_evt.set()
+        assert t.health["error_count"] > 0
+        assert t.health["ok"] is False
+        assert "USB disconnected" in t.health["last_error"]
+
+    def test_health_clears_on_success(self):
+        from dmx.output_thread import DmxOutputThread
+        t = DmxOutputThread(self._GoodBackend(), fps=200)
+        t._consec_failures = 3  # manually inject failures
+        t._last_error = "stale error"
+        t.start()
+        import time; time.sleep(0.03)  # one successful send should clear it
+        t._stop_evt.set()
+        assert t.health["error_count"] == 0
+        assert t.health["ok"] is True
+
+    # ------------------------------------------------------------------
+    # Auto-reconnect
+    # ------------------------------------------------------------------
+
+    def test_reconnect_triggered_after_threshold(self):
+        from dmx.output_thread import DmxOutputThread
+        import time
+        backend = self._RecoverBackend(fail_count=100)
+        t = DmxOutputThread(backend, fps=200)
+        t.start()
+        time.sleep(0.15)  # enough frames to hit threshold
+        t._stop_evt.set()
+        assert backend.reopen_calls >= 1
+
+    def test_reconnect_count_increments(self):
+        from dmx.output_thread import DmxOutputThread
+        import time
+        backend = self._RecoverBackend(fail_count=100)
+        t = DmxOutputThread(backend, fps=200)
+        t.start()
+        time.sleep(0.15)
+        t._stop_evt.set()
+        assert t.health["reconnect_count"] >= 1
+
+    def test_no_reopen_called_if_backend_lacks_method(self):
+        """Backends without reopen() should not crash."""
+        from dmx.output_thread import DmxOutputThread
+        import time
+        backend = self._FailBackend()  # no reopen()
+        t = DmxOutputThread(backend, fps=200)
+        t.start()
+        time.sleep(0.08)
+        t._stop_evt.set()
+        assert t.health["reconnect_count"] == 0  # never tried
+
+    # ------------------------------------------------------------------
+    # Backend reopen() methods
+    # ------------------------------------------------------------------
+
+    def test_enttec_reopen_no_crash_without_port(self):
+        from dmx.output_enttec_pro import EnttecProOutput
+        out = EnttecProOutput()
+        out.reopen()  # _port is None — should not raise
+
+    def test_artnet_reopen_reconnects_socket(self):
+        from dmx.output_artnet import ArtNetOutput
+        out = ArtNetOutput(target_ip="127.0.0.1", universe=0)
+        out.connect()
+        assert out.is_connected
+        out.reopen()
+        assert out.is_connected  # socket re-opened
+
+    def test_artnet_reopen_from_disconnected_state(self):
+        from dmx.output_artnet import ArtNetOutput
+        out = ArtNetOutput(target_ip="127.0.0.1", universe=0)
+        # Never connected — reopen should not raise
+        out.reopen()
+        assert out.is_connected
+
+    # ------------------------------------------------------------------
+    # Server defaults
+    # ------------------------------------------------------------------
+
+    def test_server_has_dmx_health_defaults(self):
+        from app.web.server import _engine_state
+        assert "dmx_ok"         in _engine_state
+        assert "dmx_errors"     in _engine_state
+        assert "dmx_reconnects" in _engine_state
+        assert "dmx_last_error" in _engine_state
+
+    def test_server_dmx_ok_default_true(self):
+        from app.web.server import _engine_state
+        assert _engine_state["dmx_ok"] is True
+        assert _engine_state["dmx_errors"] == 0

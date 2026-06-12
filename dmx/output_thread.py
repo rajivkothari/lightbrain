@@ -34,6 +34,9 @@ from typing import Optional
 from dmx.universe import DMXUniverse
 from engine.pacer import precise_sleep_until
 
+_RECONNECT_THRESHOLD  = 5     # consecutive failures before reconnect attempt
+_RECONNECT_BACKOFF_MAX = 30.0  # max seconds between reconnect attempts
+
 
 class _LatestFrame:
     """
@@ -79,6 +82,12 @@ class DmxOutputThread:
         self._buf      = _LatestFrame()
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # Health tracking (written by daemon thread, read by main thread — GIL-safe)
+        self._consec_failures:   int   = 0
+        self._last_error:        str   = ""
+        self._reconnect_count:   int   = 0
+        self._next_reconnect:    float = 0.0
+        self._reconnect_backoff: float = 1.0
 
     # ------------------------------------------------------------------
     # Main-thread API
@@ -115,6 +124,16 @@ class DmxOutputThread:
     def output_type(self) -> str:
         return getattr(self._backend, "output_type", "UNKNOWN")
 
+    @property
+    def health(self) -> dict:
+        """Thread-safe health snapshot (reads are atomic under the GIL)."""
+        return {
+            "ok":              self._consec_failures == 0,
+            "error_count":     self._consec_failures,
+            "last_error":      self._last_error,
+            "reconnect_count": self._reconnect_count,
+        }
+
     # ------------------------------------------------------------------
     # Daemon thread
     # ------------------------------------------------------------------
@@ -132,8 +151,31 @@ class DmxOutputThread:
 
             try:
                 self._backend.send(local_u)
-            except Exception:
-                pass  # fail soft; hardware I/O errors must not kill the thread
+                self._consec_failures  = 0   # success: clear error state
+                self._reconnect_backoff = 1.0
+            except Exception as _exc:
+                self._consec_failures += 1
+                self._last_error = str(_exc)[:120]
+                # Auto-reconnect after threshold — backoff between attempts
+                _now = time.monotonic()
+                if (
+                    self._consec_failures >= _RECONNECT_THRESHOLD
+                    and _now >= self._next_reconnect
+                    and hasattr(self._backend, "reopen")
+                ):
+                    try:
+                        self._backend.reopen()
+                        self._reconnect_count  += 1
+                        self._consec_failures   = 0
+                        self._reconnect_backoff = min(
+                            self._reconnect_backoff * 2, _RECONNECT_BACKOFF_MAX
+                        )
+                    except Exception as _re:
+                        self._last_error = f"reconnect failed: {_re}"[:120]
+                        self._reconnect_backoff = min(
+                            self._reconnect_backoff * 2, _RECONNECT_BACKOFF_MAX
+                        )
+                    self._next_reconnect = _now + self._reconnect_backoff
 
             # Drift correction: if we're more than one frame behind, resync
             # to avoid a burst of catch-up frames after a stall

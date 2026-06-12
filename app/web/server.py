@@ -78,6 +78,10 @@ _engine_state: Dict[str, Any] = {
     "cooldown_active":     False,
     "rig_layout":          [],   # [{name, type, address, channels, end}] — static after load
     "dmx_channels":        [],   # 512-element int list — updated each frame
+    "dmx_ok":              True,
+    "dmx_errors":          0,
+    "dmx_reconnects":      0,
+    "dmx_last_error":      "",
     "ros_index":           -1,
     "ros_scenes":          [],   # [{id, name}] ordered list
     "auto_fade_enabled":   True,

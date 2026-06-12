@@ -1142,6 +1142,10 @@ def main():
                     cooldown_pct=    float(room_lane.beat_cooldown_fraction(_now)),
                     cooldown_active= room_lane.beat_cooldown_fraction(_now) > 0.0,
                     dmx_channels=    _dmx_snapshot,
+                    dmx_ok=          dmx_thread.health["ok"],
+                    dmx_errors=      dmx_thread.health["error_count"],
+                    dmx_reconnects=  dmx_thread.health["reconnect_count"],
+                    dmx_last_error=  dmx_thread.health["last_error"],
                     ros_index=       _ros_index,
                     ros_scenes=      [
                         {"id": sid, "name": scene_mgr.get_scene_name(sid)}
