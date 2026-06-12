@@ -1184,6 +1184,9 @@ let currentScene        = null;
 let modesReady          = false;
 let scenesReady         = false;
 let _strobeMasterSynced = false;
+let _rosScenes          = [];   // cached scene objects for optimistic reorder
+let _rosIndex           = -1;
+let _rosOptimisticUntil = 0;    // epoch ms: ignore server ROS state until this time
 function cmd(payload) {
   fetch('/api/command', {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
@@ -1415,7 +1418,13 @@ function applyState(s) {
 
   // Grids
   buildModes(s.modes); buildScenes(s.scenes);
-  if (s.ros_scenes !== undefined) _buildRosList(s.ros_scenes, s.ros_index ?? -1);
+  if (s.ros_scenes !== undefined) {
+    if (Date.now() > _rosOptimisticUntil) {
+      _rosScenes = s.ros_scenes;
+      _rosIndex  = s.ros_index ?? -1;
+      _buildRosList(_rosScenes, _rosIndex);
+    }
+  }
 
   // Mode active
   if (s.mode !== currentMode) {
@@ -1593,13 +1602,15 @@ function applyState(s) {
     }
   }
   if (s.wedding_colors && s.wedding_colors.length > 0) {
+    const active = document.activeElement;
     s.wedding_colors.forEach((c, i) => {
-      const sw = document.getElementById(`wc-swatch-${i}`);
       const inp = document.getElementById(`wc-${i}`);
-      if (sw) sw.style.background = c;
+      const sw  = document.getElementById(`wc-swatch-${i}`);
+      if (inp === active) return;   // user has this picker open — don't override
+      if (sw)  sw.style.background = c;
       if (inp) inp.value = c;
+      _weddingColors[i] = c;
     });
-    _weddingColors = [...s.wedding_colors];
   }
 }
 
@@ -1877,6 +1888,10 @@ function _rosMove(ids, fromIdx, dir) {
   const toIdx  = fromIdx + dir;
   if (toIdx < 0 || toIdx >= newIds.length) return;
   [newIds[fromIdx], newIds[toIdx]] = [newIds[toIdx], newIds[fromIdx]];
+  // Optimistic update: show new order immediately, block server overwrite for 200 ms
+  _rosScenes = newIds.map(id => _rosScenes.find(s => s.id === id) || {id, name: id});
+  _buildRosList(_rosScenes, _rosIndex);
+  _rosOptimisticUntil = Date.now() + 200;
   cmd({type:'reorder_ros', scenes: newIds});
 }
 
