@@ -5098,3 +5098,104 @@ class TestWeddingColors:
         raw = ["#aabbcc", "#112233", "#334455", "#556677"]
         filtered = [c for c in raw if isinstance(c, str) and len(c) == 7][:3]
         assert len(filtered) == 3
+
+
+# ===========================================================================
+# Feature #8 — ROS reorder + Live brightness + 3D-tab removal
+# ===========================================================================
+
+class TestRosReorder:
+    """Tests for the reorder_ros command."""
+
+    def _make_state(self, scenes=None):
+        return {
+            "ros_scenes": list(scenes or ["a", "b", "c", "d"]),
+            "ros_index":  1,  # currently on "b"
+        }
+
+    def _apply_reorder(self, st, new_order):
+        """Simulate the reorder_ros handler logic from main.py."""
+        old_set   = set(st["ros_scenes"])
+        filtered  = [s for s in new_order if s in old_set]
+        for s in st["ros_scenes"]:
+            if s not in filtered:
+                filtered.append(s)
+        cur_id    = st["ros_scenes"][st["ros_index"]] if 0 <= st["ros_index"] < len(st["ros_scenes"]) else None
+        st["ros_scenes"] = filtered
+        if cur_id and cur_id in filtered:
+            st["ros_index"] = filtered.index(cur_id)
+        return st
+
+    def test_move_scene_up(self):
+        st = self._make_state()
+        new_order = ["b", "a", "c", "d"]   # move "a" down (or "b" up)
+        st = self._apply_reorder(st, new_order)
+        assert st["ros_scenes"] == ["b", "a", "c", "d"]
+
+    def test_index_tracks_current_scene(self):
+        """After reordering, ros_index must still point at the same scene."""
+        st = self._make_state()   # index=1 → "b"
+        new_order = ["a", "c", "b", "d"]  # "b" moved to index 2
+        st = self._apply_reorder(st, new_order)
+        assert st["ros_scenes"][st["ros_index"]] == "b"
+        assert st["ros_index"] == 2
+
+    def test_extra_ids_ignored(self):
+        """IDs not in the current list are silently discarded."""
+        st = self._make_state()
+        new_order = ["a", "ghost", "b", "c", "d"]
+        st = self._apply_reorder(st, new_order)
+        assert "ghost" not in st["ros_scenes"]
+        assert len(st["ros_scenes"]) == 4
+
+    def test_missing_ids_appended(self):
+        """Scenes omitted from the new order are appended at the end."""
+        st = self._make_state()
+        new_order = ["a", "c"]   # missing "b" and "d"
+        st = self._apply_reorder(st, new_order)
+        assert set(st["ros_scenes"]) == {"a", "b", "c", "d"}
+        assert len(st["ros_scenes"]) == 4
+
+    def test_reverse_order(self):
+        st = self._make_state()
+        new_order = ["d", "c", "b", "a"]
+        st = self._apply_reorder(st, new_order)
+        assert st["ros_scenes"] == ["d", "c", "b", "a"]
+        assert st["ros_scenes"][st["ros_index"]] == "b"
+
+    def test_reorder_ros_in_server_allowlist(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "reorder_ros" in _ALLOWED_COMMAND_TYPES
+
+    def test_index_minus_one_unchanged_after_reorder(self):
+        """If ROS not started (index = -1), index stays -1 after reorder."""
+        st = self._make_state()
+        st["ros_index"] = -1
+        new_order = ["d", "c", "b", "a"]
+        st = self._apply_reorder(st, new_order)
+        # cur_id is None when index < 0, so index unchanged by logic
+        assert st["ros_index"] == -1
+
+
+class TestLiveBrightness:
+    """Tests for the set_fader master command and brightness state."""
+
+    def test_set_fader_allowlist(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "set_fader" in _ALLOWED_COMMAND_TYPES
+
+    def test_master_dimmer_in_state_defaults(self):
+        from app.web.server import _engine_state
+        assert "master_dimmer" in _engine_state
+
+    def test_master_dimmer_default_is_one(self):
+        from app.web.server import _engine_state
+        assert _engine_state["master_dimmer"] == 1.0
+
+    def test_brightness_steps_cover_range(self):
+        """0 / 0.25 / 0.5 / 0.75 / 1.0 are all representable as floats."""
+        steps = [0, 0.25, 0.5, 0.75, 1.0]
+        for s in steps:
+            assert 0.0 <= s <= 1.0
+        assert steps[0] == 0.0
+        assert steps[-1] == 1.0

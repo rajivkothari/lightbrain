@@ -743,6 +743,24 @@ def main():
                         _sid = _ros_scenes[_ros_index]
                         if scene_mgr.activate_scene(_sid):
                             _active_scene = scene_mgr.active_scene
+                elif _wtype == "reorder_ros":
+                    _new_order = _wcmd.get("scenes", [])
+                    _new_order = [s for s in _new_order if isinstance(s, str)]
+                    _old_set   = set(_ros_scenes)
+                    _new_order = [s for s in _new_order if s in _old_set]
+                    for _s in _ros_scenes:  # append any missing entries
+                        if _s not in _new_order:
+                            _new_order.append(_s)
+                    # keep ros_index pointing at the same scene
+                    _cur_id = _ros_scenes[_ros_index] if 0 <= _ros_index < len(_ros_scenes) else None
+                    _ros_scenes = _new_order
+                    if _cur_id and _cur_id in _ros_scenes:
+                        _ros_index = _ros_scenes.index(_cur_id)
+                    try:
+                        with open(ROS_CONFIG_PATH, "w") as _rf:
+                            json.dump({"scenes": _ros_scenes}, _rf, indent=2)
+                    except OSError:
+                        pass
                 elif _wtype == "set_auto_fade":
                     _auto_fade_enabled = bool(_wcmd.get("enabled", _auto_fade_enabled))
                     if "delay_s" in _wcmd:
