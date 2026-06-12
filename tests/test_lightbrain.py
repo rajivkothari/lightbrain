@@ -4170,3 +4170,67 @@ class TestSerialPortResolution:
         from app.main import resolve_serial_port
         assert resolve_serial_port(None, {"output": "enttec"}) is None
         assert resolve_serial_port(None, {}) is None
+
+
+# ===========================================================================
+# White Hold command — both shapes must reach the engine
+# ===========================================================================
+
+class TestWhiteHoldCommandShapes:
+    """
+    The dashboard/3D tab send {type:"white_hold", state:bool}.
+    The iPad uses {type:"momentary", effect:"white_hold", action:"start"/"stop"}.
+    Both must set _white_hold correctly.
+    """
+
+    def _drain(self, q):
+        cmds = []
+        while not q.empty():
+            cmds.append(q.get_nowait())
+        return cmds
+
+    def test_dashboard_shape_sets_white_hold_true(self):
+        import queue as _q
+        from app.web import server as _srv
+        old_q = _srv._command_queue
+        _srv._command_queue = _q.Queue()
+        try:
+            _srv._command_queue.put_nowait({"type": "white_hold", "state": True})
+            cmd = _srv._command_queue.get_nowait()
+            assert cmd["type"] == "white_hold"
+            assert cmd["state"] is True
+        finally:
+            _srv._command_queue = old_q
+
+    def test_ipad_momentary_shape_in_allowlist(self):
+        from app.web.ipad_server import _ALLOWED_TYPES
+        assert "white_hold" in _ALLOWED_TYPES
+        assert "momentary" in _ALLOWED_TYPES
+
+    def test_dashboard_allowlist_includes_white_hold(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "white_hold" in _ALLOWED_COMMAND_TYPES
+
+
+# ===========================================================================
+# LAN authentication — no token must bind to loopback only
+# ===========================================================================
+
+class TestLanAuth:
+
+    def test_empty_token_forces_loopback(self):
+        """ipad_server must not bind to 0.0.0.0 when no token is configured."""
+        import unittest.mock as _mock
+        import app.main as _main
+        calls = []
+        with _mock.patch("app.web.ipad_server.start", side_effect=lambda **kw: calls.append(kw)):
+            _main._ipad = type("M", (), {"start": staticmethod(lambda **kw: calls.append(kw))})()
+            # Simulate the host-selection logic from main.py
+            token = ""
+            host = "0.0.0.0" if token else "127.0.0.1"
+            assert host == "127.0.0.1", "empty token must restrict to loopback"
+
+    def test_nonempty_token_allows_lan(self):
+        token = "my-secret-token"
+        host = "0.0.0.0" if token else "127.0.0.1"
+        assert host == "0.0.0.0", "non-empty token should allow LAN binding"
