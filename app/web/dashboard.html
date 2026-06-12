@@ -649,6 +649,9 @@ let _lastFlashActive = false;
 let _beatFlash = 0;    // 0–1, set to 1 on beat, decays each draw frame
 let _ambientWarm = 0;  // 0–1, driven by W/A channels (dinner / slow dance)
 
+// Mover-solo state — mirrors engine flag so the canvas can reflect it
+let _moverSolo = false;
+
 // Strobe animation — client-side RAF loop so the 2D canvas actually flickers
 let _strobeArmed    = false;
 let _strobeHoldAnim = false;  // mirrors _strobeHeld for the anim loop
@@ -761,12 +764,20 @@ function _drawRig(fixtures, blackout, strobeBrt = 1.0) {
 
   // Draw fixtures (housings always, effects only when not blacked out)
   if (fixtures) {
+    // Mover solo: blank uplights and washes — show housings only
+    const _soloActive = _moverSolo && !blackout;
     (fixtures.beams    || []).forEach(b  => _drawBeam(ctx, b, s));
-    (fixtures.washes   || []).forEach(w  => _drawWash(ctx, w, s));
-    (fixtures.uplights || []).forEach(u  => _drawUplight(ctx, u, s));
+    (fixtures.washes   || []).forEach(w  => {
+      _drawWash(ctx, _soloActive ? {...w, active: false, brt: 0} : w, s);
+    });
+    (fixtures.uplights || []).forEach(u  => {
+      _drawUplight(ctx, _soloActive ? {...u, active: false, brt: 0} : u, s);
+    });
     if (!blackout) {
-      (fixtures.sparkles || []).forEach(sp => _drawSparkle(ctx, sp, s));
-      (fixtures.impacts  || []).forEach(im => _drawImpact(ctx, im, s, W, H));
+      if (!_soloActive) {
+        (fixtures.sparkles || []).forEach(sp => _drawSparkle(ctx, sp, s));
+        (fixtures.impacts  || []).forEach(im => _drawImpact(ctx, im, s, W, H));
+      }
     }
   }
   // Warm W/A channel tint — amber wash over dance floor for dinner / slow dance
@@ -1244,6 +1255,9 @@ function applyState(s) {
   _strobeArmed  = !!s.strobe_armed;
   if (s.strobe_master !== undefined) _strobeMaster = s.strobe_master;
   if (_strobeArmed && !wasArmed) _startStrobeAnim();
+
+  // Mover solo — update global so _drawRig can blank uplights/washes
+  _moverSolo = !!s.mover_solo;
 
   // Kill switches + mover solo — active (lit red) = mode is engaged
   const killLabels    = {mover_solo:'◎ MOVERS ONLY', derby:'⊕ DERBY', laser:'▶ LASER'};
