@@ -265,6 +265,23 @@
       box-shadow: 0 0 24px rgba(200,200,255,0.7);
     }
 
+    /* ---- Rig preview toggle ---- */
+    .right-panel.hidden { display: none !important; }
+    .main-layout.canvas-hidden .left-panel { width: auto; flex: 1; max-width: 560px; }
+    #canvas-toggle-btn {
+      font-family: inherit; font-size: 0.68rem; font-weight: 500;
+      padding: 5px 13px; border-radius: 99px; cursor: pointer;
+      background: var(--card); border: 1px solid var(--border);
+      color: var(--dim); display: flex; align-items: center; gap: 6px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    #canvas-toggle-btn .tog-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--dim); transition: background 0.15s;
+    }
+    #canvas-toggle-btn.on .tog-dot { background: var(--accent2); }
+    #canvas-toggle-btn.on { color: var(--accent2); border-color: rgba(76,207,255,0.4); }
+
     /* ---- Scene editor ---- */
     .editor-layout {
       display: flex; flex-direction: column; gap: 8px;
@@ -402,6 +419,9 @@
 <div class="header">
   <span class="logo">LIGHTBRAIN</span>
   <span class="bpm" id="bpm">-- BPM</span>
+  <button id="canvas-toggle-btn" class="on" onclick="toggleCanvas()" title="Toggle rig preview">
+    <span class="tog-dot"></span>Rig Preview
+  </button>
   <span class="status">
     <span class="dot" id="dot"></span><span id="status-text">connecting…</span>
   </span>
@@ -629,6 +649,49 @@ let _lastFlashActive = false;
 let _beatFlash = 0;    // 0–1, set to 1 on beat, decays each draw frame
 let _ambientWarm = 0;  // 0–1, driven by W/A channels (dinner / slow dance)
 
+// Strobe animation — client-side RAF loop so the 2D canvas actually flickers
+let _strobeArmed    = false;
+let _strobeHoldAnim = false;  // mirrors _strobeHeld for the anim loop
+let _strobeMaster   = 1.0;
+let _strobeAnimId   = null;
+let _strobePhase    = 0;
+let _strobeLastTs   = 0;
+
+function _startStrobeAnim() {
+  if (_strobeAnimId) return;
+  _strobeLastTs = performance.now();
+  function _tick(ts) {
+    if (!_strobeArmed && !_strobeHoldAnim) {
+      _strobeAnimId = null;
+      _strobePhase  = 0;
+      _drawRig(_lastFixtures, _blackoutActive, 1.0);
+      return;
+    }
+    const dt   = Math.min(0.1, (ts - _strobeLastTs) / 1000);
+    _strobeLastTs = ts;
+    const freq = 2.0 + _strobeMaster * 14.0;
+    _strobePhase  = (_strobePhase + dt * freq) % 1.0;
+    const brt = (_strobePhase < 0.25) ? 1.0 : 0.0;
+    _drawRig(_lastFixtures, _blackoutActive, brt);
+    _strobeAnimId = requestAnimationFrame(_tick);
+  }
+  _strobeAnimId = requestAnimationFrame(_tick);
+}
+
+// Canvas visibility toggle
+let _canvasVisible = localStorage.getItem('lb_canvas') !== 'false';
+function toggleCanvas() {
+  _canvasVisible = !_canvasVisible;
+  localStorage.setItem('lb_canvas', String(_canvasVisible));
+  _applyCanvasVisibility();
+}
+function _applyCanvasVisibility() {
+  document.querySelector('.right-panel').classList.toggle('hidden', !_canvasVisible);
+  document.querySelector('.main-layout').classList.toggle('canvas-hidden', !_canvasVisible);
+  const btn = document.getElementById('canvas-toggle-btn');
+  if (btn) btn.classList.toggle('on', _canvasVisible);
+}
+
 function _initCanvas() {
   const c = document.getElementById('rig-canvas');
   function resize() {
@@ -642,7 +705,7 @@ function _initCanvas() {
   resize();
 }
 
-function _drawRig(fixtures, blackout) {
+function _drawRig(fixtures, blackout, strobeBrt = 1.0) {
   const c = document.getElementById('rig-canvas');
   if (!c) return;
   const ctx = c.getContext('2d');
@@ -720,6 +783,12 @@ function _drawRig(fixtures, blackout) {
     ctx.fillStyle = 'rgba(180,20,20,0.7)';
     ctx.fillText('■  BLACKOUT', W/2, H/2);
     ctx.textAlign = 'left';
+  }
+
+  // Strobe OFF phase: darken the canvas so the flicker is visible
+  if (strobeBrt < 0.5 && !blackout) {
+    ctx.fillStyle = 'rgba(0,0,0,0.97)';
+    ctx.fillRect(0, 0, W, H);
   }
 }
 
@@ -1012,12 +1081,15 @@ let _strobeHeld = false;
 function strobeHoldStart() {
   if (_strobeHeld) return;
   _strobeHeld = true;
+  _strobeHoldAnim = true;
+  _startStrobeAnim();
   document.getElementById('strobe-hold-btn').classList.add('held');
   cmd({type:'momentary', effect:'strobe_hold', action:'start'});
 }
 function strobeHoldEnd() {
   if (!_strobeHeld) return;
   _strobeHeld = false;
+  _strobeHoldAnim = false;
   document.getElementById('strobe-hold-btn').classList.remove('held');
   cmd({type:'momentary', effect:'strobe_hold', action:'stop'});
 }
@@ -1165,9 +1237,13 @@ function applyState(s) {
   const w3 = document.getElementById('white3d');
   if (w3) w3.classList.toggle('held', !!s.white_hold);
 
-  // ARM button sync
+  // ARM button sync + kick client-side strobe animation
   const armBtn = document.getElementById('strobe-arm-btn');
   if (armBtn) armBtn.classList.toggle('armed', !!s.strobe_armed);
+  const wasArmed = _strobeArmed;
+  _strobeArmed  = !!s.strobe_armed;
+  if (s.strobe_master !== undefined) _strobeMaster = s.strobe_master;
+  if (_strobeArmed && !wasArmed) _startStrobeAnim();
 
   // Kill switches — red = element is silenced/OFF
   const killLabels = {strobe:'⚡ STROBE', derby:'⊕ DERBY', laser:'▶ LASER'};
@@ -1650,6 +1726,7 @@ function _rigDraw(channels) {
 // ============================================================
 buildModes([]);
 _initCanvas();
+_applyCanvasVisibility();
 connect();
 </script>
 </body>
