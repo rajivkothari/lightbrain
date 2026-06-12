@@ -4234,3 +4234,84 @@ class TestLanAuth:
         token = "my-secret-token"
         host = "0.0.0.0" if token else "127.0.0.1"
         assert host == "0.0.0.0", "non-empty token should allow LAN binding"
+
+
+# ===========================================================================
+# Run of Show
+# ===========================================================================
+
+class TestRunOfShow:
+    """Run-of-show scene sequencing — next/prev navigation and state broadcast."""
+
+    def setup_method(self):
+        self.mgr = _make_scene_manager()
+        self.ros = ["grand_entrance", "dinner_service", "toasts", "slow_dance", "open_dancing", "send_off"]
+
+    def _step_next(self, index):
+        new_index = min(index + 1, len(self.ros) - 1)
+        sid = self.ros[new_index]
+        ok = self.mgr.activate_scene(sid)
+        return new_index, ok
+
+    def _step_prev(self, index):
+        if index <= 0:
+            return index, False
+        new_index = index - 1
+        sid = self.ros[new_index]
+        ok = self.mgr.activate_scene(sid)
+        return new_index, ok
+
+    def test_get_scene_name_known(self):
+        assert self.mgr.get_scene_name("slow_dance") == "Slow Dance"
+
+    def test_get_scene_name_unknown_fallback(self):
+        assert self.mgr.get_scene_name("nonexistent_scene") == "nonexistent_scene"
+
+    def test_next_advances_index(self):
+        idx = -1
+        idx, ok = self._step_next(idx)
+        assert idx == 0
+        assert ok is True
+        assert self.mgr.active_scene_id == "grand_entrance"
+
+    def test_next_from_last_clamps(self):
+        idx = len(self.ros) - 1   # already at end
+        new_idx, _ = self._step_next(idx)
+        assert new_idx == len(self.ros) - 1   # didn't go past end
+
+    def test_prev_goes_back(self):
+        idx = 2
+        self.mgr.activate_scene(self.ros[2])
+        idx, ok = self._step_prev(idx)
+        assert idx == 1
+        assert ok is True
+        assert self.mgr.active_scene_id == self.ros[1]
+
+    def test_prev_at_zero_does_nothing(self):
+        idx = 0
+        new_idx, ok = self._step_prev(idx)
+        assert new_idx == 0
+        assert ok is False
+
+    def test_full_walkthrough(self):
+        idx = -1
+        for expected in range(len(self.ros)):
+            idx, ok = self._step_next(idx)
+            assert idx == expected
+            assert ok is True
+            assert self.mgr.active_scene_id == self.ros[expected]
+
+    def test_ros_config_loads(self):
+        import json, os
+        p = os.path.join(os.path.dirname(__file__), '..', 'config', 'run_of_show.json')
+        cfg = json.load(open(p))
+        assert "scenes" in cfg
+        assert len(cfg["scenes"]) > 0
+        # all scene ids in the config must actually exist
+        for sid in cfg["scenes"]:
+            assert self.mgr.get_scene(sid) is not None, f"scene {sid!r} in ROS but not loaded"
+
+    def test_ros_state_fields_in_allowlist(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "next_ros_scene" in _ALLOWED_COMMAND_TYPES
+        assert "prev_ros_scene" in _ALLOWED_COMMAND_TYPES

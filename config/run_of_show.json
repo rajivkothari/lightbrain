@@ -1,0 +1,13 @@
+{
+  "_note": "Default wedding reception run of show. Edit order to match your event.",
+  "scenes": [
+    "grand_entrance",
+    "dinner_service",
+    "toasts",
+    "cake_cutting",
+    "slow_dance",
+    "bouquet_garter",
+    "open_dancing",
+    "send_off"
+  ]
+}

@@ -312,6 +312,11 @@ class SceneManager:
     def get_scene(self, scene_id: str) -> Optional[ScenePreset]:
         return self._scenes.get(scene_id)
 
+    def get_scene_name(self, scene_id: str) -> str:
+        """Return display name for scene_id, falling back to the id itself."""
+        scene = self._scenes.get(scene_id)
+        return scene.name if scene else scene_id
+
     def get_state(self, name: str) -> Optional[StatePreset]:
         return self._states.get(name)
 
