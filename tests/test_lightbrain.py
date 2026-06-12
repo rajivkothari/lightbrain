@@ -4315,3 +4315,155 @@ class TestRunOfShow:
         from app.web.server import _ALLOWED_COMMAND_TYPES
         assert "next_ros_scene" in _ALLOWED_COMMAND_TYPES
         assert "prev_ros_scene" in _ALLOWED_COMMAND_TYPES
+
+
+class TestAutoFade:
+    """Song-end silence detection: auto-fade to dinner mode after sustained quiet."""
+
+    # ------------------------------------------------------------------
+    # Silence counter logic (pure unit tests — no engine process)
+    # ------------------------------------------------------------------
+
+    def _make_silence_state(self):
+        """Return a fresh mutable dict representing the relevant main-loop vars."""
+        return {
+            "auto_fade_enabled": True,
+            "auto_fade_delay_s": 15.0,
+            "silence_threshold": 0.04,
+            "silence_start": None,
+            "auto_faded": False,
+            "mode_key": "open_dance",
+            "blackout": False,
+        }
+
+    def _tick(self, st, overall_e, room_e, now):
+        """Replicate one frame of the silence-detection block from main.py."""
+        if overall_e < st["silence_threshold"] and room_e < st["silence_threshold"]:
+            if st["silence_start"] is None:
+                st["silence_start"] = now
+        else:
+            st["silence_start"] = None
+            st["auto_faded"] = False
+
+        triggered = False
+        if (
+            st["auto_fade_enabled"]
+            and st["silence_start"] is not None
+            and not st["auto_faded"]
+            and st["mode_key"] != "dinner"
+            and not st["blackout"]
+        ):
+            if now - st["silence_start"] >= st["auto_fade_delay_s"]:
+                st["mode_key"] = "dinner"
+                st["auto_faded"] = True
+                triggered = True
+        return triggered
+
+    def test_silence_counter_starts_on_quiet(self):
+        st = self._make_silence_state()
+        self._tick(st, 0.01, 0.01, 100.0)
+        assert st["silence_start"] == 100.0
+
+    def test_silence_counter_resets_on_audio(self):
+        st = self._make_silence_state()
+        self._tick(st, 0.01, 0.01, 100.0)
+        self._tick(st, 0.5, 0.5, 100.1)   # audio returns
+        assert st["silence_start"] is None
+
+    def test_no_fade_before_delay(self):
+        st = self._make_silence_state()
+        self._tick(st, 0.01, 0.01, 0.0)
+        triggered = self._tick(st, 0.01, 0.01, 5.0)  # only 5s, need 15s
+        assert not triggered
+        assert st["mode_key"] == "open_dance"
+
+    def test_fade_triggers_after_delay(self):
+        st = self._make_silence_state()
+        self._tick(st, 0.01, 0.01, 0.0)
+        triggered = self._tick(st, 0.01, 0.01, 15.0)  # exactly 15s
+        assert triggered
+        assert st["mode_key"] == "dinner"
+
+    def test_no_second_trigger_without_audio_return(self):
+        st = self._make_silence_state()
+        self._tick(st, 0.01, 0.01, 0.0)
+        self._tick(st, 0.01, 0.01, 15.0)  # first trigger
+        triggered2 = self._tick(st, 0.01, 0.01, 20.0)
+        assert not triggered2
+
+    def test_disabled_flag_prevents_fade(self):
+        st = self._make_silence_state()
+        st["auto_fade_enabled"] = False
+        self._tick(st, 0.01, 0.01, 0.0)
+        triggered = self._tick(st, 0.01, 0.01, 20.0)
+        assert not triggered
+        assert st["mode_key"] == "open_dance"
+
+    def test_blackout_prevents_fade(self):
+        st = self._make_silence_state()
+        st["blackout"] = True
+        self._tick(st, 0.01, 0.01, 0.0)
+        triggered = self._tick(st, 0.01, 0.01, 20.0)
+        assert not triggered
+
+    def test_already_in_dinner_no_trigger(self):
+        st = self._make_silence_state()
+        st["mode_key"] = "dinner"
+        self._tick(st, 0.01, 0.01, 0.0)
+        triggered = self._tick(st, 0.01, 0.01, 20.0)
+        assert not triggered
+
+    def test_auto_faded_resets_when_audio_returns(self):
+        st = self._make_silence_state()
+        self._tick(st, 0.01, 0.01, 0.0)
+        self._tick(st, 0.01, 0.01, 15.0)  # trigger
+        assert st["auto_faded"]
+        self._tick(st, 0.5, 0.5, 15.1)   # audio returns
+        assert not st["auto_faded"]
+
+    # ------------------------------------------------------------------
+    # Server / state defaults
+    # ------------------------------------------------------------------
+
+    def test_server_state_defaults_present(self):
+        from app.web.server import _engine_state
+        assert "auto_fade_enabled" in _engine_state
+        assert "auto_fade_delay_s" in _engine_state
+        assert "auto_fade_countdown" in _engine_state
+
+    def test_server_state_defaults_values(self):
+        from app.web.server import _engine_state
+        assert _engine_state["auto_fade_enabled"] is True
+        assert _engine_state["auto_fade_delay_s"] == 15.0
+        assert _engine_state["auto_fade_countdown"] is None
+
+    def test_set_auto_fade_in_allowlist(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "set_auto_fade" in _ALLOWED_COMMAND_TYPES
+
+    # ------------------------------------------------------------------
+    # Countdown value
+    # ------------------------------------------------------------------
+
+    def test_countdown_is_none_when_not_silent(self):
+        silence_start = None
+        delay = 15.0
+        countdown = (
+            round(max(0.0, delay - (100.0 - silence_start)), 1)
+            if silence_start is not None else None
+        )
+        assert countdown is None
+
+    def test_countdown_value_during_silence(self):
+        silence_start = 100.0
+        delay = 15.0
+        now = 108.0
+        countdown = round(max(0.0, delay - (now - silence_start)), 1)
+        assert countdown == 7.0
+
+    def test_countdown_clamps_to_zero(self):
+        silence_start = 100.0
+        delay = 15.0
+        now = 120.0  # past the delay
+        countdown = round(max(0.0, delay - (now - silence_start)), 1)
+        assert countdown == 0.0
