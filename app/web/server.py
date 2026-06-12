@@ -274,7 +274,7 @@ _ALLOWED_COMMAND_TYPES = frozenset({
     "blackout", "strobe_master", "set_fader", "momentary",
     "arm_strobe", "arm_mode", "toggle_kill", "fixture_test", "release_fixture_test",
     "fixture_test_aim", "white_hold", "next_ros_scene", "prev_ros_scene",
-    "set_auto_fade",
+    "set_auto_fade", "panic",
 })
 
 

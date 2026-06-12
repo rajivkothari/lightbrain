@@ -4554,3 +4554,125 @@ class TestSpotlight:
     def test_toggle_kill_spotlight_in_allowlist(self):
         from app.web.server import _ALLOWED_COMMAND_TYPES
         assert "toggle_kill" in _ALLOWED_COMMAND_TYPES  # spotlight uses toggle_kill
+
+
+class TestPanic:
+    """Panic / Safe State button: single command resets all overrides to safe defaults."""
+
+    def _make_state(self, **overrides):
+        """Mutable dict mirroring the relevant main-loop state variables."""
+        st = {
+            "kill_strobe":    True,
+            "kill_derby":     True,
+            "kill_laser":     True,
+            "mover_solo":     True,
+            "spotlight":      True,
+            "strobe_armed":   True,
+            "armed_mode":     "open_dance",
+            "white_hold":     True,
+            "strobe_hold":    True,
+            "test_mode":      True,
+            "test_pattern":   "white",
+            "master_dimmer":  0.4,
+            "uplight_dimmer": 0.5,
+            "strobe_master":  0.9,
+            "flash_frames":   5,
+            "silence_start":  100.0,
+            "auto_faded":     True,
+            "blackout":       False,
+            "mode_key":       "open_dance",
+        }
+        st.update(overrides)
+        return st
+
+    def _apply_panic(self, st):
+        """Replicate the panic handler from main.py."""
+        st["kill_strobe"]   = False
+        st["kill_derby"]    = False
+        st["kill_laser"]    = False
+        st["mover_solo"]    = False
+        st["spotlight"]     = False
+        st["strobe_armed"]  = False
+        st["armed_mode"]    = ""
+        st["white_hold"]    = False
+        st["strobe_hold"]   = False
+        st["test_mode"]     = False
+        st["test_pattern"]  = ""
+        st["master_dimmer"]   = 1.0
+        st["uplight_dimmer"]  = 1.0
+        st["strobe_master"]   = 1.0
+        st["silence_start"]   = None
+        st["auto_faded"]      = False
+        st["flash_frames"]    = 0
+        # Crossfade to dinner
+        st["mode_key"] = "dinner"
+        # Release blackout if active
+        if st["blackout"]:
+            st["blackout"] = False
+
+    def test_kill_switches_cleared(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert not st["kill_strobe"]
+        assert not st["kill_derby"]
+        assert not st["kill_laser"]
+
+    def test_solo_and_spotlight_cleared(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert not st["mover_solo"]
+        assert not st["spotlight"]
+
+    def test_armed_mode_cleared(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert st["armed_mode"] == ""
+
+    def test_white_hold_and_strobe_hold_cleared(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert not st["white_hold"]
+        assert not st["strobe_hold"]
+
+    def test_test_mode_cleared(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert not st["test_mode"]
+        assert st["test_pattern"] == ""
+
+    def test_dimmers_restored_to_full(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert st["master_dimmer"]   == 1.0
+        assert st["uplight_dimmer"]  == 1.0
+        assert st["strobe_master"]   == 1.0
+
+    def test_flash_frames_cleared(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert st["flash_frames"] == 0
+
+    def test_silence_detection_reset(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert st["silence_start"] is None
+        assert not st["auto_faded"]
+
+    def test_mode_switches_to_dinner(self):
+        st = self._make_state()
+        self._apply_panic(st)
+        assert st["mode_key"] == "dinner"
+
+    def test_blackout_released_if_active(self):
+        st = self._make_state(blackout=True)
+        self._apply_panic(st)
+        assert not st["blackout"]
+
+    def test_blackout_not_toggled_if_already_off(self):
+        st = self._make_state(blackout=False)
+        self._apply_panic(st)
+        assert not st["blackout"]
+
+    def test_panic_in_allowlist(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "panic" in _ALLOWED_COMMAND_TYPES

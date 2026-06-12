@@ -198,13 +198,19 @@
     .btn.active .shortcut { color: rgba(255,255,255,0.6); }
     .btn-full { width: 100%; padding: 11px; font-size: 0.82rem; letter-spacing: 0.1em; }
     .btn-blackout {
-      margin-top: 6px; font-weight: 700; letter-spacing: 0.18em; border-radius: 12px;
+      font-weight: 700; letter-spacing: 0.18em; border-radius: 12px;
       background: rgba(255,77,94,0.08); border-color: rgba(255,77,94,0.35); color: var(--red);
     }
     .btn-blackout:hover { background: rgba(255,77,94,0.14); border-color: rgba(255,77,94,0.55); }
     .btn-blackout.active { background: rgba(255,77,94,0.22); border-color: var(--red); color: #fff;
                            animation: pulse-red 1s ease-in-out infinite; }
     @keyframes pulse-red { 0%,100%{opacity:1} 50%{opacity:.75} }
+    .btn-panic {
+      font-weight: 700; letter-spacing: 0.14em; border-radius: 12px;
+      background: rgba(255,150,30,0.10); border-color: rgba(255,150,30,0.40); color: #ff9a1e;
+    }
+    .btn-panic:hover  { background: rgba(255,150,30,0.18); border-color: #ff9a1e; }
+    .btn-panic:active { background: rgba(255,150,30,0.28); }
     .btn-release { border-color: rgba(255,181,71,0.4); color: var(--amber); }
     .btn-release:hover { background: rgba(255,181,71,0.08); border-color: var(--amber); color: var(--amber); }
 
@@ -526,9 +532,14 @@
           </div>
         </div>
       </div>
-      <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})">
-        BLACKOUT
-      </button>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-full btn-panic" id="panic-btn" onclick="cmd({type:'panic'})" style="flex:1">
+          &#x26A0; PANIC
+        </button>
+        <button class="btn btn-full btn-blackout" id="blackout-btn" onclick="cmd({type:'blackout'})" style="flex:1">
+          BLACKOUT
+        </button>
+      </div>
       <div class="section" style="margin-top:10px">
         <div class="section-label">Mode</div>
         <div class="grid" id="mode-grid"></div>
@@ -676,7 +687,10 @@
           <button class="btn-kill-dash" id="dash3d-kill-laser"       onclick="toggleKill('laser')">&#x25B6; LASER</button>
         </div>
       </div>
-      <button class="btn btn-full btn-blackout" id="blackout-btn-3d" onclick="cmd({type:'blackout'})">BLACKOUT</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-full btn-panic" id="panic-btn-3d" onclick="cmd({type:'panic'})" style="flex:1">&#x26A0; PANIC</button>
+        <button class="btn btn-full btn-blackout" id="blackout-btn-3d" onclick="cmd({type:'blackout'})" style="flex:1">BLACKOUT</button>
+      </div>
     </div>
   </div>
 

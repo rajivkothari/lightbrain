@@ -713,6 +713,46 @@ def main():
                             _auto_fade_delay_s = float(_wcmd["delay_s"])
                         except (ValueError, TypeError):
                             pass
+                elif _wtype == "panic":
+                    # Reset all overrides → safe ambient state with lights on
+                    _kill_strobe  = False
+                    _kill_derby   = False
+                    _kill_laser   = False
+                    _mover_solo   = False
+                    _spotlight    = False
+                    _strobe_armed = False
+                    _armed_mode   = ""
+                    _white_hold   = False
+                    _strobe_hold  = False
+                    _test_mode    = False
+                    _test_pattern = ""
+                    _master_dimmer   = 1.0
+                    _uplight_dimmer  = 1.0
+                    _strobe_master   = 1.0
+                    _silence_start   = None
+                    _auto_faded      = False
+                    _flash_frames    = 0
+                    scene_mgr.release_scene()
+                    _active_scene = None
+                    # Release blackout if active so there IS light
+                    if safety.state.blackout_active:
+                        safety.toggle_blackout()
+                        _blackout_recovering     = True
+                        _blackout_recovery_start = time.monotonic()
+                    # Crossfade to safe ambient (Dinner) mode
+                    new_mode    = get_mode("dinner")
+                    new_palette = all_palettes.get(new_mode.palette_key, current_palette)
+                    _wau_snapshot = (last_lanes.get("wau_white", 0.0),
+                                     last_lanes.get("wau_amber", 0.0),
+                                     last_lanes.get("wau_uv",    0.0))
+                    transitioner.switch(new_mode)
+                    current_mode    = new_mode
+                    current_palette = new_palette
+                    mode_key        = "dinner"
+                    safety.update_from_mode(current_mode)
+                    room_lane.set_mode(current_mode)
+                    room_lane.set_palette(current_palette)
+                    smoother.apply_mode_profile(mode_key)
 
             # --- MIDI ---
             if midi_in is not None:
