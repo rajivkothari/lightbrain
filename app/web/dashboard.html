@@ -1296,19 +1296,23 @@ function _buildRosList(rosScenes, rosIndex) {
     num.textContent = i + 1;
     const name = document.createElement('span'); name.className = 'ros-name';
     name.textContent = sc.name || sc.id;
-    // Reorder buttons
+    // Reorder buttons — 44px min height per Apple HIG tap target guide
     const reorderWrap = document.createElement('span');
-    reorderWrap.style.cssText = 'display:flex;flex-direction:column;gap:1px;margin-left:4px';
+    reorderWrap.style.cssText = 'display:flex;flex-direction:row;gap:4px;margin-left:6px;flex-shrink:0';
     const upBtn = document.createElement('button');
-    upBtn.className = 'btn'; upBtn.textContent = '▲';
-    upBtn.style.cssText = 'padding:0 4px;font-size:0.55rem;line-height:1.2;min-width:0';
+    upBtn.type = 'button';
+    upBtn.textContent = '▲';
+    upBtn.style.cssText = 'min-width:36px;min-height:32px;font-size:0.7rem;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--text);cursor:pointer;';
     upBtn.disabled = i === 0;
-    upBtn.onclick = (e) => { e.stopPropagation(); _rosMove(allIds, i, -1); };
+    if (i === 0) upBtn.style.opacity = '0.25';
+    upBtn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); _rosMove(allIds, i, -1); };
     const dnBtn = document.createElement('button');
-    dnBtn.className = 'btn'; dnBtn.textContent = '▼';
-    dnBtn.style.cssText = 'padding:0 4px;font-size:0.55rem;line-height:1.2;min-width:0';
+    dnBtn.type = 'button';
+    dnBtn.textContent = '▼';
+    dnBtn.style.cssText = 'min-width:36px;min-height:32px;font-size:0.7rem;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--text);cursor:pointer;';
     dnBtn.disabled = i === rosScenes.length - 1;
-    dnBtn.onclick = (e) => { e.stopPropagation(); _rosMove(allIds, i, +1); };
+    if (i === rosScenes.length - 1) dnBtn.style.opacity = '0.25';
+    dnBtn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); _rosMove(allIds, i, +1); };
     reorderWrap.appendChild(upBtn); reorderWrap.appendChild(dnBtn);
     row.appendChild(dot); row.appendChild(num); row.appendChild(name);
     if (isCurrent) {
@@ -1318,10 +1322,13 @@ function _buildRosList(rosScenes, rosIndex) {
       row.appendChild(tag);
     }
     row.appendChild(reorderWrap);
-    // Click to jump directly to that scene
+    // Click to jump directly to that scene (but not when clicking reorder buttons)
     row.style.cursor = 'pointer';
     row.title = 'Activate this scene';
-    row.onclick = () => cmd({type:'scene', value: sc.id || sc});
+    row.onclick = (e) => {
+      if (e.target.tagName === 'BUTTON') return;
+      cmd({type:'scene', value: sc.id || sc});
+    };
     container.appendChild(row);
   });
   // Scroll current item into view

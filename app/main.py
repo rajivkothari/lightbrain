@@ -1213,6 +1213,12 @@ def main():
                 if _uplight_dimmer < 1.0:
                     for _ul in _rig_web.uplights:
                         _ul.brightness *= _uplight_dimmer
+                # Apply wedding colors to visual state so 2D canvas reflects them
+                if _wedding_mode and _wedding_colors_hsv:
+                    for _wix, _ul in enumerate(_rig_web.uplights):
+                        _wc = _wedding_colors_hsv[_wix % len(_wedding_colors_hsv)]
+                        _wr, _wg, _wb = colorsys.hsv_to_rgb(_wc[0] / 360.0, _wc[1], 1.0)
+                        _ul.color_rgb = (int(_wr * 255), int(_wg * 255), int(_wb * 255))
                 _web.update_state(
                     mode=            mode_key,
                     mode_display=    current_mode.display_name,
