@@ -493,9 +493,9 @@
           </div>
           <div class="section-label" style="margin-top:8px; margin-bottom:4px">Kill Switches</div>
           <div class="kill-row">
-            <button class="btn-kill-dash" id="dash-kill-strobe" onclick="toggleKill('strobe')">&#x26A1; STROBE</button>
-            <button class="btn-kill-dash" id="dash-kill-derby"  onclick="toggleKill('derby')">&#x2B55; DERBY</button>
-            <button class="btn-kill-dash" id="dash-kill-laser"  onclick="toggleKill('laser')">&#x25B6; LASER</button>
+            <button class="btn-kill-dash" id="dash-kill-mover_solo" onclick="toggleKill('mover_solo')">&#x25CE; MOVERS ONLY</button>
+            <button class="btn-kill-dash" id="dash-kill-derby"       onclick="toggleKill('derby')">&#x2B55; DERBY</button>
+            <button class="btn-kill-dash" id="dash-kill-laser"       onclick="toggleKill('laser')">&#x25B6; LASER</button>
           </div>
         </div>
       </div>
@@ -617,9 +617,9 @@
       <div class="section">
         <div class="section-label">Kill Switches</div>
         <div class="kill-row">
-          <button class="btn-kill-dash" id="dash3d-kill-strobe" onclick="toggleKill('strobe')">&#x26A1; STROBE</button>
-          <button class="btn-kill-dash" id="dash3d-kill-derby"  onclick="toggleKill('derby')">&#x2B55; DERBY</button>
-          <button class="btn-kill-dash" id="dash3d-kill-laser"  onclick="toggleKill('laser')">&#x25B6; LASER</button>
+          <button class="btn-kill-dash" id="dash3d-kill-mover_solo" onclick="toggleKill('mover_solo')">&#x25CE; MOVERS ONLY</button>
+          <button class="btn-kill-dash" id="dash3d-kill-derby"       onclick="toggleKill('derby')">&#x2B55; DERBY</button>
+          <button class="btn-kill-dash" id="dash3d-kill-laser"       onclick="toggleKill('laser')">&#x25B6; LASER</button>
         </div>
       </div>
       <button class="btn btn-full btn-blackout" id="blackout-btn-3d" onclick="cmd({type:'blackout'})">BLACKOUT</button>
@@ -1245,16 +1245,16 @@ function applyState(s) {
   if (s.strobe_master !== undefined) _strobeMaster = s.strobe_master;
   if (_strobeArmed && !wasArmed) _startStrobeAnim();
 
-  // Kill switches — red = element is silenced/OFF
-  const killLabels = {strobe:'⚡ STROBE', derby:'⊕ DERBY', laser:'▶ LASER'};
-  const killOffLabels = {strobe:'⚡ STROBE OFF', derby:'⊕ DERBY OFF', laser:'▶ LASER OFF'};
-  ['strobe','derby','laser'].forEach(t => {
-    const killed = !!s['kill_' + t];
+  // Kill switches + mover solo — active (lit red) = mode is engaged
+  const killLabels    = {mover_solo:'◎ MOVERS ONLY', derby:'⊕ DERBY', laser:'▶ LASER'};
+  const killOffLabels = {mover_solo:'◎ MOVERS ONLY', derby:'⊕ DERBY OFF', laser:'▶ LASER OFF'};
+  ['mover_solo','derby','laser'].forEach(t => {
+    const active = t === 'mover_solo' ? !!s.mover_solo : !!s['kill_' + t];
     ['dash-kill-', 'dash3d-kill-'].forEach(pfx => {
       const el = document.getElementById(pfx + t);
       if (!el) return;
-      el.classList.toggle('active', killed);
-      el.textContent = killed ? killOffLabels[t] : killLabels[t];
+      el.classList.toggle('active', active);
+      el.textContent = active ? killOffLabels[t] : killLabels[t];
     });
   });
 

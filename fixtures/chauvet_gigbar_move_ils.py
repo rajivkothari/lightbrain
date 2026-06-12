@@ -183,6 +183,7 @@ class ChauvetGigBarMoveILS(FixtureBase):
         self._spot_tilt_dmx = int(spot_tilt_dmx)
         self._laser_enabled = laser_enabled
         self._derby_enabled = True
+        self._mover_only    = False   # when True: zero Par/Derby/Flash/Laser, keep Spot
 
     # ── Public controls ──────────────────────────────────────────────────
 
@@ -196,6 +197,10 @@ class ChauvetGigBarMoveILS(FixtureBase):
 
     def set_derby_enabled(self, enabled: bool) -> None:
         self._derby_enabled = bool(enabled)
+
+    def set_mover_only(self, enabled: bool) -> None:
+        """Solo the spot head — zero Par, Derby, Flash, and Laser."""
+        self._mover_only = bool(enabled)
 
     # ── Core render ──────────────────────────────────────────────────────
 
@@ -268,6 +273,13 @@ class ChauvetGigBarMoveILS(FixtureBase):
         spot_speed_dmx  = 200   # slow tracking (0=fastest, 255=slowest)
         spot_dimmer_dmx = apply_gamma_to_dmx(final_v, gamma)
         spot_strobe_dmx = _spot_strobe_dmx(strobe)
+
+        # Mover-only mode: zero every section except the spot head
+        if self._mover_only:
+            r_dmx = g_dmx = b_dmx = a_dmx = w_dmx = uv_dmx = par_strobe_dmx = 0
+            dr_dmx = dg_dmx = db_dmx = dw_dmx = derby_strobe_dmx = derby_rot_dmx = 0
+            flash_level = flash_strobe_dmx = 0
+            laser_color_dmx = laser_pattern_dmx = 0
 
         universe.set_channels(addr, [
             # Par (Ch 1–7)
