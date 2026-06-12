@@ -211,6 +211,20 @@
     }
     .btn-panic:hover  { background: rgba(255,150,30,0.18); border-color: #ff9a1e; }
     .btn-panic:active { background: rgba(255,150,30,0.28); }
+    /* Wedding color swatches */
+    .wc-swatch-wrap {
+      position: relative; width: 46px; height: 46px; border-radius: 50%;
+      border: 2px solid var(--border); overflow: hidden; cursor: pointer; flex-shrink: 0;
+    }
+    .wc-swatch { width: 100%; height: 100%; border-radius: 50%; }
+    .wc-swatch-wrap input[type="color"] {
+      position: absolute; inset: 0; width: 120%; height: 120%;
+      opacity: 0; cursor: pointer; top: -10%; left: -10%;
+    }
+    .btn-wedding-on {
+      background: linear-gradient(135deg, rgba(232,180,160,0.25), rgba(212,175,55,0.25));
+      border-color: #D4AF37; color: #D4AF37; font-weight: 700;
+    }
     .btn-release { border-color: rgba(255,181,71,0.4); color: var(--amber); }
     .btn-release:hover { background: rgba(255,181,71,0.08); border-color: var(--amber); color: var(--amber); }
 
@@ -600,6 +614,22 @@
         </div>
         <div style="font-size:0.62rem;color:var(--dim);line-height:1.5">
           Silence <span id="auto-fade-delay-label">8</span>s → fades to Dinner / Ambient
+        </div>
+      </div>
+
+      <div class="section" id="wedding-section">
+        <div class="section-label" style="margin-bottom:10px">Wedding Colors</div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center">
+          <div class="wc-swatch-wrap"><input type="color" id="wc-0" value="#E8B4A0" oninput="updateWeddingColor(0,this.value)"><div class="wc-swatch" id="wc-swatch-0" style="background:#E8B4A0"></div></div>
+          <div class="wc-swatch-wrap"><input type="color" id="wc-1" value="#D4AF37" oninput="updateWeddingColor(1,this.value)"><div class="wc-swatch" id="wc-swatch-1" style="background:#D4AF37"></div></div>
+          <div class="wc-swatch-wrap"><input type="color" id="wc-2" value="#FFFFFF" oninput="updateWeddingColor(2,this.value)"><div class="wc-swatch" id="wc-swatch-2" style="background:#FFFFFF"></div></div>
+          <button class="btn" onclick="_saveWeddingColors()" style="font-size:0.62rem;padding:6px 12px;margin-left:auto">SAVE</button>
+        </div>
+        <button class="btn btn-full" id="wedding-mode-btn" onclick="_toggleWeddingMode()">
+          &#x2665; WEDDING COLORS OFF
+        </button>
+        <div style="font-size:0.6rem;color:var(--dim);margin-top:6px;line-height:1.5">
+          Colors assigned round-robin to uplights
         </div>
       </div>
     </div>
@@ -1220,6 +1250,22 @@ function _toggleAutoFade() {
   cmd({type:'set_auto_fade', enabled: _autoFadeEnabled});
 }
 
+// ---- Wedding colors ----
+let _weddingColors  = ['#E8B4A0', '#D4AF37', '#FFFFFF'];
+let _weddingModeOn  = false;
+function updateWeddingColor(idx, hex) {
+  _weddingColors[idx] = hex;
+  const sw = document.getElementById(`wc-swatch-${idx}`);
+  if (sw) sw.style.background = hex;
+}
+function _toggleWeddingMode() {
+  _weddingModeOn = !_weddingModeOn;
+  cmd({type:'set_wedding_mode', enabled: _weddingModeOn});
+}
+function _saveWeddingColors() {
+  cmd({type:'set_wedding_colors', colors: _weddingColors, save: true});
+}
+
 function buildModes(modes) {
   if (modesReady) return;
   const list = (modes && modes.length) ? modes : DEFAULT_MODES;
@@ -1524,6 +1570,25 @@ function applyState(s) {
         cdEl.textContent = '';
       }
     }
+  }
+
+  // Wedding colors
+  if (s.wedding_mode !== undefined) {
+    _weddingModeOn = !!s.wedding_mode;
+    const btn = document.getElementById('wedding-mode-btn');
+    if (btn) {
+      btn.textContent = _weddingModeOn ? '♥ WEDDING COLORS ON' : '♥ WEDDING COLORS OFF';
+      btn.classList.toggle('btn-wedding-on', _weddingModeOn);
+    }
+  }
+  if (s.wedding_colors && s.wedding_colors.length > 0) {
+    s.wedding_colors.forEach((c, i) => {
+      const sw = document.getElementById(`wc-swatch-${i}`);
+      const inp = document.getElementById(`wc-${i}`);
+      if (sw) sw.style.background = c;
+      if (inp) inp.value = c;
+    });
+    _weddingColors = [...s.wedding_colors];
   }
 }
 
