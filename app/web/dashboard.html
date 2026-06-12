@@ -357,6 +357,31 @@
     .editor-empty { color: var(--dim); font-size: 0.8rem; padding: 20px;
                     border: 1px dashed var(--border); border-radius: 10px; text-align: center; }
 
+    /* ---- Run of Show ---- */
+    .ros-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 9px; margin-bottom: 4px;
+      border: 1px solid transparent;
+      font-size: 0.76rem; color: var(--dim);
+      transition: background 0.12s, color 0.12s;
+    }
+    .ros-item .ros-num {
+      font-family: var(--font-mono); font-size: 0.62rem;
+      width: 18px; text-align: right; flex-shrink: 0; opacity: 0.5;
+    }
+    .ros-item .ros-name { flex: 1; }
+    .ros-item.ros-done { opacity: 0.4; text-decoration: line-through; }
+    .ros-item.ros-current {
+      background: linear-gradient(135deg, rgba(124,108,255,0.2), rgba(76,207,255,0.1));
+      border-color: rgba(124,108,255,0.5); color: #fff; font-weight: 600;
+    }
+    .ros-item.ros-next { color: var(--text); }
+    .ros-item.ros-current .ros-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent2); box-shadow: 0 0 8px var(--accent2); flex-shrink: 0;
+    }
+    .ros-item .ros-dot { width: 7px; height: 7px; flex-shrink: 0; }
+
     /* ---- Rig tab ---- */
     .rig-section {
       margin-bottom: 12px;
@@ -512,6 +537,19 @@
         <div style="margin-top:5px">
           <button class="btn btn-full btn-release" onclick="cmd({type:'release_scene'})">
             <span class="shortcut">F10</span>Release Scene
+          </button>
+        </div>
+      </div>
+
+      <div class="section" id="ros-section">
+        <div class="section-label" style="margin-bottom:8px">Run of Show</div>
+        <div id="ros-list"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-full" id="ros-prev-btn" onclick="cmd({type:'prev_ros_scene'})" style="flex:1">
+            &#x276E; PREV
+          </button>
+          <button class="btn btn-full" id="ros-next-btn" onclick="cmd({type:'next_ros_scene'})" style="flex:2;font-weight:700">
+            NEXT &#x276F;
           </button>
         </div>
       </div>
@@ -1148,6 +1186,51 @@ function buildScenes(scenes) {
   scenesReady = true;
 }
 
+// ---- Run of Show ----
+function _buildRosList(rosScenes, rosIndex) {
+  const container = document.getElementById('ros-list');
+  if (!container) return;
+  if (!rosScenes || !rosScenes.length) {
+    container.innerHTML = '<div class="editor-empty">No run of show configured</div>';
+    return;
+  }
+  container.innerHTML = '';
+  rosScenes.forEach((sc, i) => {
+    const row = document.createElement('div');
+    const isCurrent = i === rosIndex;
+    const isDone    = i < rosIndex;
+    const isNext    = i === rosIndex + 1;
+    row.className = 'ros-item' +
+      (isCurrent ? ' ros-current' : isDone ? ' ros-done' : isNext ? ' ros-next' : '');
+    const dot  = document.createElement('span'); dot.className = 'ros-dot';
+    const num  = document.createElement('span'); num.className = 'ros-num';
+    num.textContent = i + 1;
+    const name = document.createElement('span'); name.className = 'ros-name';
+    name.textContent = sc.name || sc.id;
+    row.appendChild(dot); row.appendChild(num); row.appendChild(name);
+    if (isCurrent) {
+      const tag = document.createElement('span');
+      tag.style.cssText = 'font-size:0.58rem;opacity:0.7;letter-spacing:0.1em';
+      tag.textContent = 'NOW';
+      row.appendChild(tag);
+    }
+    // Click to jump directly to that scene
+    row.style.cursor = 'pointer';
+    row.title = 'Activate this scene';
+    row.onclick = () => cmd({type:'scene', value: sc.id});
+    container.appendChild(row);
+  });
+  // Scroll current item into view
+  const cur = container.querySelector('.ros-current');
+  if (cur) cur.scrollIntoView({block:'nearest', behavior:'smooth'});
+
+  // Update PREV button state
+  const prevBtn = document.getElementById('ros-prev-btn');
+  if (prevBtn) prevBtn.disabled = rosIndex <= 0;
+  const nextBtn = document.getElementById('ros-next-btn');
+  if (nextBtn) nextBtn.disabled = rosScenes.length > 0 && rosIndex >= rosScenes.length - 1;
+}
+
 // ---- 3D-tab control helpers (reuse cmd(); uplights drive the iframe) ----
 function _viz3dPost(msg) {
   const f = document.getElementById('viz3d-frame');
@@ -1216,6 +1299,7 @@ function applyState(s) {
 
   // Grids
   buildModes(s.modes); buildScenes(s.scenes);
+  if (s.ros_scenes !== undefined) _buildRosList(s.ros_scenes, s.ros_index ?? -1);
 
   // Mode active
   if (s.mode !== currentMode) {

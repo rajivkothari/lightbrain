@@ -77,6 +77,8 @@ _engine_state: Dict[str, Any] = {
     "cooldown_active":     False,
     "rig_layout":          [],   # [{name, type, address, channels, end}] — static after load
     "dmx_channels":        [],   # 512-element int list — updated each frame
+    "ros_index":           -1,
+    "ros_scenes":          [],   # [{id, name}] ordered list
 }
 
 _command_queue: _queue.Queue = _queue.Queue()
@@ -267,7 +269,7 @@ _ALLOWED_COMMAND_TYPES = frozenset({
     "mode", "set_mode", "scene", "activate_scene", "release_scene",
     "blackout", "strobe_master", "set_fader", "momentary",
     "arm_strobe", "arm_mode", "toggle_kill", "fixture_test", "release_fixture_test",
-    "fixture_test_aim", "white_hold",
+    "fixture_test_aim", "white_hold", "next_ros_scene", "prev_ros_scene",
 })
 
 
