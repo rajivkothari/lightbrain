@@ -2842,29 +2842,29 @@ class TestSceneManager:
         self.mgr = _make_scene_manager()
 
     def test_load_all_counts(self):
-        assert self.mgr.scene_count() == 9
+        assert self.mgr.scene_count() == 8
         assert self.mgr.position_count() >= 5
         assert self.mgr.state_count() == 10
 
     def test_activate_scene_valid(self):
-        assert self.mgr.activate_scene("first_dance") is True
+        assert self.mgr.activate_scene("slow_dance") is True
         self.mgr.release_scene()
 
     def test_activate_scene_invalid(self):
         assert self.mgr.activate_scene("nonexistent_scene_xyz") is False
 
     def test_release_scene(self):
-        self.mgr.activate_scene("first_dance")
+        self.mgr.activate_scene("slow_dance")
         self.mgr.release_scene()
         assert self.mgr.active_scene is None
 
     def test_active_scene_id_after_activate(self):
-        self.mgr.activate_scene("first_dance")
-        assert self.mgr.active_scene_id == "first_dance"
+        self.mgr.activate_scene("slow_dance")
+        assert self.mgr.active_scene_id == "slow_dance"
         self.mgr.release_scene()
 
-    def test_active_base_mode_first_dance(self):
-        self.mgr.activate_scene("first_dance")
+    def test_active_base_mode_slow_dance(self):
+        self.mgr.activate_scene("slow_dance")
         assert self.mgr.active_base_mode == "slow_dance"
         self.mgr.release_scene()
 
@@ -2875,15 +2875,15 @@ class TestSceneManager:
         assert result is state
 
     def test_apply_uplight_color_override(self):
-        self.mgr.activate_scene("first_dance")  # blush_pink: (255, 105, 140)
+        self.mgr.activate_scene("slow_dance")  # blush_pink: (255, 105, 140)
         state = _make_rig_state(uplight_color=(0, 0, 0))
         result = self.mgr.apply_to_rig_state(state)
         assert result.uplights[0].color_rgb == (255, 105, 140)
         self.mgr.release_scene()
 
     def test_apply_uplight_brightness_audio_reactive(self):
-        # first_dance uplights: audio_reactive=True → brightness unchanged
-        self.mgr.activate_scene("first_dance")
+        # slow_dance uplights: audio_reactive=True → brightness unchanged
+        self.mgr.activate_scene("slow_dance")
         state = _make_rig_state(uplight_brightness=0.42)
         result = self.mgr.apply_to_rig_state(state)
         assert result.uplights[0].brightness == pytest.approx(0.42)
@@ -2899,8 +2899,8 @@ class TestSceneManager:
         self.mgr.release_scene()
 
     def test_apply_beam_locked_sets_angle(self):
-        # first_dance beams: position_preset=center, movement_mode=locked
-        self.mgr.activate_scene("first_dance")
+        # slow_dance beams: position_preset=center, movement_mode=locked
+        self.mgr.activate_scene("slow_dance")
         state = _make_rig_state(beam_angle=45.0, beam_speed=0.8)
         result = self.mgr.apply_to_rig_state(state)
         center = self.mgr.get_position("center")
@@ -2909,7 +2909,7 @@ class TestSceneManager:
         self.mgr.release_scene()
 
     def test_apply_beam_color_override(self):
-        self.mgr.activate_scene("first_dance")  # beam state_preset=blush_pink
+        self.mgr.activate_scene("slow_dance")  # beam state_preset=blush_pink
         state = _make_rig_state()
         result = self.mgr.apply_to_rig_state(state)
         sp = self.mgr.get_state("blush_pink")
@@ -2924,7 +2924,7 @@ class TestSceneManager:
         self.mgr.release_scene()
 
     def test_apply_blackout_preserved(self):
-        self.mgr.activate_scene("first_dance")
+        self.mgr.activate_scene("slow_dance")
         state = _make_rig_state()
         state.blackout_active = True
         result = self.mgr.apply_to_rig_state(state)
@@ -2932,7 +2932,7 @@ class TestSceneManager:
         self.mgr.release_scene()
 
     def test_list_scenes_returns_nine(self):
-        assert len(self.mgr.list_scenes()) == 9
+        assert len(self.mgr.list_scenes()) == 8
 
     def test_list_scenes_sorted_by_id(self):
         ids = [s.scene_id for s in self.mgr.list_scenes()]
@@ -2943,7 +2943,7 @@ class TestSceneManager:
         assert self.mgr.get_uplight_color_override() is None
 
     def test_get_uplight_color_override_active(self):
-        self.mgr.activate_scene("first_dance")
+        self.mgr.activate_scene("slow_dance")
         ov = self.mgr.get_uplight_color_override()
         assert ov is not None
         rgb, brightness, reactive = ov
@@ -3047,16 +3047,16 @@ class TestSceneIntegration:
 
     def test_all_nine_scenes_loadable(self):
         mgr = _make_scene_manager()
-        assert mgr.scene_count() == 9
+        assert mgr.scene_count() == 8
 
     def test_all_scene_ids_are_unique(self):
         mgr = _make_scene_manager()
         ids = [s.scene_id for s in mgr.list_scenes()]
         assert len(ids) == len(set(ids))
 
-    def test_first_dance_applies_to_rig(self):
+    def test_slow_dance_applies_to_rig(self):
         mgr = _make_scene_manager()
-        mgr.activate_scene("first_dance")
+        mgr.activate_scene("slow_dance")
         state  = _make_rig_state()
         result = mgr.apply_to_rig_state(state)
         assert result is not state
@@ -3065,7 +3065,7 @@ class TestSceneIntegration:
 
     def test_release_returns_original_state(self):
         mgr = _make_scene_manager()
-        mgr.activate_scene("first_dance")
+        mgr.activate_scene("slow_dance")
         mgr.release_scene()
         state  = _make_rig_state()
         result = mgr.apply_to_rig_state(state)
@@ -3074,9 +3074,9 @@ class TestSceneIntegration:
     def test_scene_covers_all_expected_ids(self):
         mgr = _make_scene_manager()
         expected = {
-            "first_dance", "cake_cutting", "toasts", "bouquet_garter",
+            "slow_dance", "cake_cutting", "toasts", "bouquet_garter",
             "grand_entrance", "dinner_service", "open_dancing",
-            "last_dance", "send_off",
+            "send_off",
         }
         loaded = {s.scene_id for s in mgr.list_scenes()}
         assert loaded == expected
@@ -3124,13 +3124,13 @@ class TestWebServerState:
         assert _web_server._engine_state["blackout"] is True
 
     def test_update_state_scene(self):
-        _web_server.update_state(scene="first_dance", scene_name="First Dance")
-        assert _web_server._engine_state["scene"] == "first_dance"
+        _web_server.update_state(scene="slow_dance", scene_name="First Dance")
+        assert _web_server._engine_state["scene"] == "slow_dance"
         assert _web_server._engine_state["scene_name"] == "First Dance"
 
     def test_set_catalog_populates_modes_and_scenes(self):
         modes  = [{"key": "open_dance", "display_name": "Open Dance"}]
-        scenes = [{"id": "first_dance", "name": "First Dance", "index": 0}]
+        scenes = [{"id": "slow_dance", "name": "First Dance", "index": 0}]
         _web_server.set_catalog(modes=modes, scenes=scenes)
         assert _web_server._engine_state["modes"]  == modes
         assert _web_server._engine_state["scenes"] == scenes
@@ -3161,10 +3161,10 @@ class TestWebServerState:
         assert _web_server.get_all_commands() == []
 
     def test_multiple_scene_commands(self):
-        _web_server._command_queue.put_nowait({"type": "scene", "value": "first_dance"})
+        _web_server._command_queue.put_nowait({"type": "scene", "value": "slow_dance"})
         _web_server._command_queue.put_nowait({"type": "release_scene"})
         cmds = _web_server.get_all_commands()
-        assert cmds[0] == {"type": "scene", "value": "first_dance"}
+        assert cmds[0] == {"type": "scene", "value": "slow_dance"}
         assert cmds[1] == {"type": "release_scene"}
 
     def test_update_state_beat_flag(self):
@@ -3349,7 +3349,7 @@ class TestWebSceneAPI:
     def test_scene_id_regex_accepts_valid(self):
         import re
         pattern = r'^[a-zA-Z0-9_]+$'
-        for valid in ("first_dance", "scene1", "MyScene", "a_b_c_123"):
+        for valid in ("slow_dance", "scene1", "MyScene", "a_b_c_123"):
             assert re.match(pattern, valid), f"Should be valid: {valid}"
 
     def test_scene_id_regex_rejects_invalid(self):

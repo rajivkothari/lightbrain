@@ -88,7 +88,7 @@ class SceneManager:
     Usage:
         mgr = SceneManager(scenes_dir, positions_file, states_file)
         mgr.load_all()
-        mgr.activate_scene("first_dance")
+        mgr.activate_scene("slow_dance")
         overridden = mgr.apply_to_rig_state(live_state)
     """
 
