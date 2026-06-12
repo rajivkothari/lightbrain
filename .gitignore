@@ -13,3 +13,6 @@ build/
 
 # dev screenshot scratch (tools/shot.cjs)
 tools/_shots/
+
+# vendored JS is intentionally committed despite matching build/
+!app/web/vendor/**/build/*.js
