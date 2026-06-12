@@ -79,6 +79,7 @@ except ImportError:
 # ---- constants ----
 CONFIG_PATH     = os.path.join(ROOT, "config", "rig_config.json")
 APP_CONFIG_PATH = os.path.join(ROOT, "config", "app_config.json")
+ROS_CONFIG_PATH = os.path.join(ROOT, "config", "run_of_show.json")
 PALETTES_DIR    = os.path.join(ROOT, "config", "palettes")
 SCENES_DIR      = os.path.join(ROOT, "config", "scenes")
 POSITIONS_FILE  = os.path.join(ROOT, "fixtures", "positions.json")
@@ -446,6 +447,14 @@ def main():
     _armed_mode        = ""      # mode key pre-armed for drop-sync trigger
     _white_hold        = False   # momentary full-white override
 
+    # --- Run of Show ---
+    try:
+        _ros_raw = json.load(open(ROS_CONFIG_PATH))
+        _ros_scenes = [s for s in _ros_raw.get("scenes", []) if isinstance(s, str)]
+    except (FileNotFoundError, json.JSONDecodeError):
+        _ros_scenes = []
+    _ros_index = -1   # -1 = not started; 0..len-1 = current position
+
     try:
         while not quit_flag:
             frame_start = time.monotonic()
@@ -675,6 +684,18 @@ def main():
                                 _fx.set_spot_aim(_aim_pan, _aim_tilt)
                     except (ValueError, TypeError):
                         pass
+                elif _wtype == "next_ros_scene":
+                    if _ros_scenes:
+                        _ros_index = min(_ros_index + 1, len(_ros_scenes) - 1)
+                        _sid = _ros_scenes[_ros_index]
+                        if scene_mgr.activate_scene(_sid):
+                            _active_scene = scene_mgr.active_scene
+                elif _wtype == "prev_ros_scene":
+                    if _ros_scenes and _ros_index > 0:
+                        _ros_index -= 1
+                        _sid = _ros_scenes[_ros_index]
+                        if scene_mgr.activate_scene(_sid):
+                            _active_scene = scene_mgr.active_scene
 
             # --- MIDI ---
             if midi_in is not None:
@@ -1023,6 +1044,11 @@ def main():
                     cooldown_pct=    float(room_lane.beat_cooldown_fraction(_now)),
                     cooldown_active= room_lane.beat_cooldown_fraction(_now) > 0.0,
                     dmx_channels=    _dmx_snapshot,
+                    ros_index=       _ros_index,
+                    ros_scenes=      [
+                        {"id": sid, "name": scene_mgr.get_scene_name(sid)}
+                        for sid in _ros_scenes
+                    ],
                 )
 
             # --- frame rate cap (hybrid sleep/spin-lock, ~50µs jitter) ---
