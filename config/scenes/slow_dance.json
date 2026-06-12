@@ -1,19 +1,23 @@
 {
-  "scene_id": "last_dance",
-  "name": "Last Dance",
-  "description": "Romantic close — blush pink uplights, beams centred and locked",
+  "scene_id": "slow_dance",
+  "name": "Slow Dance",
+  "description": "First dance, last dance, anniversary \u2014 soft blush uplights, beams locked centre",
   "base_mode": "slow_dance",
   "groups": [
     {
       "fixture_type": "uplight",
-      "groups": ["all"],
+      "groups": [
+        "all"
+      ],
       "state_preset": "blush_pink",
       "movement_mode": "inherit",
       "audio_reactive": true
     },
     {
       "fixture_type": "beam",
-      "groups": ["all"],
+      "groups": [
+        "all"
+      ],
       "position_preset": "center",
       "state_preset": "blush_pink",
       "movement_mode": "locked",
@@ -21,7 +25,9 @@
     },
     {
       "fixture_type": "wash",
-      "groups": ["all"],
+      "groups": [
+        "all"
+      ],
       "state_preset": "blush_pink",
       "movement_mode": "inherit",
       "audio_reactive": true
