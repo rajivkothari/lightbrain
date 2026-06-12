@@ -442,6 +442,7 @@ def main():
     _kill_strobe       = False   # kill switch: silence all strobe output
     _kill_derby        = False   # kill switch: stop derby rotation/color
     _kill_laser        = False   # kill switch: force laser off
+    _mover_solo        = False   # solo mode: zero all fixtures except GigBAR spot head
     _armed_mode        = ""      # mode key pre-armed for drop-sync trigger
     _white_hold        = False   # momentary full-white override
 
@@ -655,6 +656,8 @@ def main():
                         _kill_derby = not _kill_derby
                     elif _ktarget == "laser":
                         _kill_laser = not _kill_laser
+                    elif _ktarget == "mover_solo":
+                        _mover_solo = not _mover_solo
                 elif _wtype == "fixture_test":
                     _pname = _wcmd.get("pattern", "white")
                     if _pname in _TEST_PATTERNS:
@@ -876,6 +879,8 @@ def main():
                     _fx.set_derby_enabled(not _kill_derby)
                 if hasattr(_fx, "enable_laser"):
                     _fx.enable_laser(not _kill_laser)
+                if hasattr(_fx, "set_mover_only"):
+                    _fx.set_mover_only(_mover_solo)
 
             # --- fixture write ---
             # Uplight-type fixtures (RockWedge, WashFX2) respect _uplight_dimmer on
@@ -884,6 +889,9 @@ def main():
                 _fx_brt = _frame_brt
                 if isinstance(fixture, (RockWedge, ChauvetWashFX2)):
                     _fx_brt *= _uplight_dimmer
+                # Mover solo: zero uplights and washes; GigBAR handles its own sub-sections
+                if _mover_solo and isinstance(fixture, (RockWedge, ChauvetWashFX2)):
+                    _fx_brt = 0.0
                 fixture.render_to_universe(
                     universe,
                     brightness=_fx_brt,
@@ -1006,6 +1014,7 @@ def main():
                     kill_strobe=     _kill_strobe,
                     kill_derby=      _kill_derby,
                     kill_laser=      _kill_laser,
+                    mover_solo=      _mover_solo,
                     flash_active=    _flash_frames > 0,
                     white_hold_active= _white_hold,
                     white_hold=      _white_hold,
