@@ -14,25 +14,10 @@
   "dmx": {
     "output": "mock",
     "serial_port": null,
-    "baud_rate": 250000
+    "baud_rate": 250000,
+    "_note": "Set output to 'enttec' and serial_port to your COM port (e.g. 'COM9') for live hardware, or pass --serial COM9 on the CLI."
   },
   "fixtures": [
-    {
-      "id": "rw_001",
-      "type": "rockwedge",
-      "name": "RockWedge 1",
-      "dmx_address": 1,
-      "lane": "room",
-      "group": "all",
-      "_note": "Placeholder — swap with real fixtures below when hardware arrives"
-    }
-  ],
-  "_hardware_fixtures_comment": [
-    "Uncomment and replace the fixture list above when hardware is connected.",
-    "Verify all DMX start addresses against your DMX controller patch.",
-    "Set each fixture's personality to match the type listed below."
-  ],
-  "_hardware_fixtures": [
     {
       "id": "washfx2_l",
       "type": "wash_fx2",
@@ -40,7 +25,7 @@
       "dmx_address": 1,
       "lane": "room",
       "group": "left",
-      "_personality": "8Ch"
+      "_personality": "8Ch — Ch1=R Ch2=G Ch3=B Ch4=UV Ch5=Strobe Ch6=AutoProg Ch7=Speed Ch8=Dimmer"
     },
     {
       "id": "washfx2_r",
@@ -58,10 +43,28 @@
       "dmx_address": 17,
       "lane": "room",
       "group": "center",
-      "_personality": "29Ch",
+      "_personality": "29Ch — Ch1-7=Par Ch8-13=Derby Ch14-18=Flash Ch19-20=Laser Ch21-29=Spot",
       "spot_pan_deg": 270,
       "spot_tilt_dmx": 90,
       "laser_enabled": false
-    }
+    },
+    { "id": "rw_01", "type": "rockwedge", "name": "RockWedge 01", "dmx_address": 46,  "lane": "room", "group": "all" },
+    { "id": "rw_02", "type": "rockwedge", "name": "RockWedge 02", "dmx_address": 54,  "lane": "room", "group": "all" },
+    { "id": "rw_03", "type": "rockwedge", "name": "RockWedge 03", "dmx_address": 62,  "lane": "room", "group": "all" },
+    { "id": "rw_04", "type": "rockwedge", "name": "RockWedge 04", "dmx_address": 70,  "lane": "room", "group": "all" },
+    { "id": "rw_05", "type": "rockwedge", "name": "RockWedge 05", "dmx_address": 78,  "lane": "room", "group": "all" },
+    { "id": "rw_06", "type": "rockwedge", "name": "RockWedge 06", "dmx_address": 86,  "lane": "room", "group": "all" },
+    { "id": "rw_07", "type": "rockwedge", "name": "RockWedge 07", "dmx_address": 94,  "lane": "room", "group": "all" },
+    { "id": "rw_08", "type": "rockwedge", "name": "RockWedge 08", "dmx_address": 102, "lane": "room", "group": "all" },
+    { "id": "rw_09", "type": "rockwedge", "name": "RockWedge 09", "dmx_address": 110, "lane": "room", "group": "all" },
+    { "id": "rw_10", "type": "rockwedge", "name": "RockWedge 10", "dmx_address": 118, "lane": "room", "group": "all" },
+    { "id": "rw_11", "type": "rockwedge", "name": "RockWedge 11", "dmx_address": 126, "lane": "room", "group": "all" },
+    { "id": "rw_12", "type": "rockwedge", "name": "RockWedge 12", "dmx_address": 134, "lane": "room", "group": "all" },
+    { "id": "rw_13", "type": "rockwedge", "name": "RockWedge 13", "dmx_address": 142, "lane": "room", "group": "all" },
+    { "id": "rw_14", "type": "rockwedge", "name": "RockWedge 14", "dmx_address": 150, "lane": "room", "group": "all" },
+    { "id": "rw_15", "type": "rockwedge", "name": "RockWedge 15", "dmx_address": 158, "lane": "room", "group": "all" },
+    { "id": "rw_16", "type": "rockwedge", "name": "RockWedge 16", "dmx_address": 166, "lane": "room", "group": "all" },
+    { "id": "rw_17", "type": "rockwedge", "name": "RockWedge 17", "dmx_address": 174, "lane": "room", "group": "all" },
+    { "id": "rw_18", "type": "rockwedge", "name": "RockWedge 18", "dmx_address": 182, "lane": "room", "group": "all" }
   ]
 }

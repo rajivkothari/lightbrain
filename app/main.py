@@ -397,7 +397,10 @@ def main():
     _ipad_port    = args.ipad_port or app_cfg.get("web_server_port", 8080)
     _ipad_token   = app_cfg.get("web_server_token", "")
     if _ipad_enabled:
-        _ipad.start(port=_ipad_port, token=_ipad_token)
+        # If no token is configured, restrict to loopback only so an empty
+        # token cannot be used by any device on the event LAN.
+        _ipad_host = "0.0.0.0" if _ipad_token else "127.0.0.1"
+        _ipad.start(host=_ipad_host, port=_ipad_port, token=_ipad_token)
 
     # ---- fps counter ----
     _fps_frames = 0
@@ -625,6 +628,10 @@ def main():
                         _uplight_dimmer = _fval
                     elif _fname == "strobe":
                         _strobe_master = _fval
+                elif _wtype == "white_hold":
+                    # Dashboard and 3D tab send {type:"white_hold", state:bool}.
+                    # iPad uses the older momentary shape handled below.
+                    _white_hold = bool(_wcmd.get("state", False))
                 elif _wtype == "momentary":
                     _eff = _wcmd.get("effect", "")
                     _act = _wcmd.get("action", "start")

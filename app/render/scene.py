@@ -136,19 +136,20 @@ def _uplight_positions() -> List[Tuple[float, float]]:
 
 _UPLIGHT_POS = _uplight_positions()
 
-# Chauvet Wash FX positions (2)
+# Chauvet Wash FX2 positions — mounted on front speakers flanking the DJ
+# (wide spread so wash covers the full floor from the back corners)
 _WASH_POS = [
-    (340, 665),   # left of DJ booth
-    (860, 665),   # right of DJ booth
+    (175, 655),    # left front speaker / speaker stand
+    (1025, 655),   # right front speaker / speaker stand
 ]
 
-# GigBAR center position
+# GigBAR Move+ILS — center, behind/beside DJ
 _GIGBAR_POS = (600, 660)
 
-# DJFLX beam positions (2) — flanking the booth
+# DJFLX beam positions (visualizer-only, no DMX) — flanking the booth
 _BEAM_POS = [
-    (175, 670),    # far left
-    (1025, 670),   # far right
+    (340, 665),    # inner left
+    (860, 665),    # inner right
 ]
 
 
