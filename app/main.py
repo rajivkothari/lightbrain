@@ -79,7 +79,8 @@ except ImportError:
 # ---- constants ----
 CONFIG_PATH     = os.path.join(ROOT, "config", "rig_config.json")
 APP_CONFIG_PATH = os.path.join(ROOT, "config", "app_config.json")
-ROS_CONFIG_PATH = os.path.join(ROOT, "config", "run_of_show.json")
+ROS_CONFIG_PATH     = os.path.join(ROOT, "config", "run_of_show.json")
+WEDDING_CONFIG_PATH = os.path.join(ROOT, "config", "wedding.json")
 PALETTES_DIR    = os.path.join(ROOT, "config", "palettes")
 SCENES_DIR      = os.path.join(ROOT, "config", "scenes")
 POSITIONS_FILE  = os.path.join(ROOT, "fixtures", "positions.json")
@@ -90,6 +91,18 @@ BLACKOUT_RECOVERY_S = 1.5  # seconds to fade up when blackout is released
 # Both have appeared in docs/configs; accepting both prevents a silent
 # fall-through to mock output on hardware day.
 _ENTTEC_OUTPUT_KEYS = ("enttec", "enttec_pro")
+
+
+def _hex_to_hsv(hex_color: str) -> tuple:
+    """Return (hue_degrees, saturation, value) from a CSS hex color string."""
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return 0.0, 0.0, 1.0
+    r = int(h[0:2], 16) / 255.0
+    g = int(h[2:4], 16) / 255.0
+    b = int(h[4:6], 16) / 255.0
+    h_n, s, v = colorsys.rgb_to_hsv(r, g, b)
+    return h_n * 360.0, s, v
 
 
 def resolve_serial_port(cli_serial, dmx_cfg: dict):
@@ -466,6 +479,16 @@ def main():
         _ros_scenes = []
     _ros_index = -1   # -1 = not started; 0..len-1 = current position
 
+    # --- Wedding color palette ---
+    try:
+        _wedding_raw  = json.load(open(WEDDING_CONFIG_PATH))
+        _wedding_hex:  list = _wedding_raw.get("colors", [])
+        _wedding_mode: bool = bool(_wedding_raw.get("enabled", False))
+    except (FileNotFoundError, json.JSONDecodeError):
+        _wedding_hex  = []
+        _wedding_mode = False
+    _wedding_colors_hsv = [_hex_to_hsv(c) for c in _wedding_hex if isinstance(c, str)]
+
     # --- Auto-fade to dinner on silence ---
     _auto_fade_enabled = True   # operator can toggle
     _auto_fade_delay_s = 8.0    # seconds of sustained silence before fade
@@ -726,6 +749,23 @@ def main():
                         try:
                             _auto_fade_delay_s = float(_wcmd["delay_s"])
                         except (ValueError, TypeError):
+                            pass
+                elif _wtype == "set_wedding_mode":
+                    _wedding_mode = bool(_wcmd.get("enabled", _wedding_mode))
+                    try:
+                        with open(WEDDING_CONFIG_PATH, "w") as _wf:
+                            json.dump({"colors": _wedding_hex, "enabled": _wedding_mode}, _wf, indent=2)
+                    except OSError:
+                        pass
+                elif _wtype == "set_wedding_colors":
+                    _raw_cols = _wcmd.get("colors", [])
+                    _wedding_hex = [c for c in _raw_cols if isinstance(c, str) and len(c) == 7][:3]
+                    _wedding_colors_hsv = [_hex_to_hsv(c) for c in _wedding_hex]
+                    if _wcmd.get("save"):
+                        try:
+                            with open(WEDDING_CONFIG_PATH, "w") as _wf:
+                                json.dump({"colors": _wedding_hex, "enabled": _wedding_mode}, _wf, indent=2)
+                        except OSError:
                             pass
                 elif _wtype == "panic":
                     # Reset all overrides → safe ambient state with lights on
@@ -1040,11 +1080,20 @@ def main():
             # --- fixture write ---
             # Uplight-type fixtures (RockWedge, WashFX2) respect _uplight_dimmer on
             # the DMX path, not only in the web visualisation.
+            _uplight_idx = 0  # for wedding color round-robin by fixture
             for fixture in fixtures:
                 _fx_brt   = _frame_brt
                 _fx_amber = eff_amber
+                _fx_h     = _frame_h
+                _fx_s     = _frame_s
                 if isinstance(fixture, (RockWedge, ChauvetWashFX2)):
                     _fx_brt *= _uplight_dimmer
+                    # Wedding color: assign each uplight its palette color
+                    if _wedding_mode and _wedding_colors_hsv:
+                        _wc = _wedding_colors_hsv[_uplight_idx % len(_wedding_colors_hsv)]
+                        _fx_h, _fx_s = _wc[0], _wc[1]
+                        _fx_amber = 0.0  # don't overlay amber on top of custom colors
+                    _uplight_idx += 1
                 # Mover solo: zero uplights; GigBAR handles its own sub-sections
                 if _mover_solo and not _spotlight and isinstance(fixture, (RockWedge, ChauvetWashFX2)):
                     _fx_brt = 0.0
@@ -1055,8 +1104,8 @@ def main():
                 fixture.render_to_universe(
                     universe,
                     brightness=_fx_brt,
-                    hue=_frame_h,
-                    saturation=_frame_s,
+                    hue=_fx_h,
+                    saturation=_fx_s,
                     value=_frame_v,
                     strobe=_eff_strobe,
                     white=_frame_w,
@@ -1195,6 +1244,8 @@ def main():
                         {"id": sid, "name": scene_mgr.get_scene_name(sid)}
                         for sid in _ros_scenes
                     ],
+                    wedding_mode=    _wedding_mode,
+                    wedding_colors=  _wedding_hex,
                     auto_fade_enabled=  _auto_fade_enabled,
                     auto_fade_delay_s=  _auto_fade_delay_s,
                     auto_fade_countdown=(

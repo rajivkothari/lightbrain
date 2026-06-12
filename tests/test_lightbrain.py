@@ -4957,3 +4957,144 @@ class TestDropDetection:
         assert "drop_was_loud" in _engine_state
         assert _engine_state["drop_ready"]    is False
         assert _engine_state["drop_was_loud"] is False
+
+
+# ===========================================================================
+# Feature #7 — Wedding color palette
+# ===========================================================================
+
+class TestWeddingColors:
+    """Tests for _hex_to_hsv helper and wedding palette application logic."""
+
+    # ------------------------------------------------------------------
+    # _hex_to_hsv
+    # ------------------------------------------------------------------
+
+    def _hsv(self, hex_color):
+        import colorsys
+        h = hex_color.lstrip("#")
+        r = int(h[0:2], 16) / 255.0
+        g = int(h[2:4], 16) / 255.0
+        b = int(h[4:6], 16) / 255.0
+        h_n, s, v = colorsys.rgb_to_hsv(r, g, b)
+        return h_n * 360.0, s, v
+
+    def test_hex_to_hsv_pure_red(self):
+        from app.main import _hex_to_hsv
+        h, s, v = _hex_to_hsv("#ff0000")
+        assert abs(h - 0.0) < 1.0
+        assert abs(s - 1.0) < 0.01
+        assert abs(v - 1.0) < 0.01
+
+    def test_hex_to_hsv_pure_blue(self):
+        from app.main import _hex_to_hsv
+        h, s, v = _hex_to_hsv("#0000ff")
+        assert abs(h - 240.0) < 1.0
+        assert abs(s - 1.0) < 0.01
+        assert abs(v - 1.0) < 0.01
+
+    def test_hex_to_hsv_white(self):
+        from app.main import _hex_to_hsv
+        h, s, v = _hex_to_hsv("#ffffff")
+        assert s < 0.01          # white has zero saturation
+        assert abs(v - 1.0) < 0.01
+
+    def test_hex_to_hsv_black(self):
+        from app.main import _hex_to_hsv
+        h, s, v = _hex_to_hsv("#000000")
+        assert abs(v) < 0.01
+
+    def test_hex_to_hsv_case_insensitive_upper(self):
+        from app.main import _hex_to_hsv
+        lower = _hex_to_hsv("#e8b4a0")
+        upper = _hex_to_hsv("#E8B4A0")
+        assert lower == upper
+
+    def test_hex_to_hsv_invalid_returns_white_fallback(self):
+        from app.main import _hex_to_hsv
+        h, s, v = _hex_to_hsv("notacolor")
+        assert h == 0.0 and s == 0.0 and v == 1.0
+
+    def test_hex_to_hsv_short_string_returns_fallback(self):
+        from app.main import _hex_to_hsv
+        h, s, v = _hex_to_hsv("#fff")
+        assert h == 0.0 and s == 0.0 and v == 1.0
+
+    def test_hex_to_hsv_wedding_palette_color(self):
+        """#E8B4A0 (dusty rose) should have low-red hue and moderate saturation."""
+        from app.main import _hex_to_hsv
+        h, s, v = _hex_to_hsv("#E8B4A0")
+        assert 0.0 <= h <= 30.0     # warm pink / peach
+        assert 0.2 <= s <= 0.6
+        assert v > 0.7
+
+    def test_hex_to_hsv_gold_hue(self):
+        """#D4AF37 (gold) should land in the yellow range."""
+        from app.main import _hex_to_hsv
+        h, s, v = _hex_to_hsv("#D4AF37")
+        assert 40.0 <= h <= 55.0    # yellow-gold
+        assert s > 0.5
+        assert v > 0.6
+
+    # ------------------------------------------------------------------
+    # Round-robin assignment logic
+    # ------------------------------------------------------------------
+
+    def test_round_robin_two_colors_even(self):
+        """With 2 colors, even-index uplights get color 0, odd get color 1."""
+        colors = ["#ff0000", "#0000ff"]
+        from app.main import _hex_to_hsv
+        hsv = [_hex_to_hsv(c) for c in colors]
+        assert hsv[0 % 2] == hsv[0]
+        assert hsv[1 % 2] == hsv[1]
+        assert hsv[2 % 2] == hsv[0]
+
+    def test_round_robin_single_color(self):
+        """With 1 color all uplights get the same hue."""
+        from app.main import _hex_to_hsv
+        hsv = [_hex_to_hsv("#D4AF37")]
+        for i in range(18):
+            assert hsv[i % len(hsv)] == hsv[0]
+
+    def test_round_robin_three_colors(self):
+        """Three-color palette cycles every three fixtures."""
+        from app.main import _hex_to_hsv
+        colors = ["#ff0000", "#00ff00", "#0000ff"]
+        hsv = [_hex_to_hsv(c) for c in colors]
+        assert hsv[3 % 3] == hsv[0]
+        assert hsv[4 % 3] == hsv[1]
+        assert hsv[5 % 3] == hsv[2]
+
+    # ------------------------------------------------------------------
+    # Server-state defaults
+    # ------------------------------------------------------------------
+
+    def test_server_wedding_mode_default(self):
+        from app.web.server import _engine_state
+        assert "wedding_mode" in _engine_state
+        assert _engine_state["wedding_mode"] is False
+
+    def test_server_wedding_colors_default(self):
+        from app.web.server import _engine_state
+        assert "wedding_colors" in _engine_state
+        assert isinstance(_engine_state["wedding_colors"], list)
+
+    def test_set_wedding_mode_in_allowlist(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "set_wedding_mode"   in _ALLOWED_COMMAND_TYPES
+        assert "set_wedding_colors" in _ALLOWED_COMMAND_TYPES
+
+    # ------------------------------------------------------------------
+    # Config-file color filtering (max 3, must be 7-char strings)
+    # ------------------------------------------------------------------
+
+    def test_color_filter_strips_invalid(self):
+        """Only well-formed 7-char hex strings should survive the filter."""
+        raw = ["#ff0000", "bad", "#0000ff", "#112233", "#444455"]
+        filtered = [c for c in raw if isinstance(c, str) and len(c) == 7][:3]
+        assert filtered == ["#ff0000", "#0000ff", "#112233"]
+
+    def test_color_filter_max_three(self):
+        raw = ["#aabbcc", "#112233", "#334455", "#556677"]
+        filtered = [c for c in raw if isinstance(c, str) and len(c) == 7][:3]
+        assert len(filtered) == 3
