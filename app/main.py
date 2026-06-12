@@ -444,6 +444,7 @@ def main():
     _kill_derby        = False   # kill switch: stop derby rotation/color
     _kill_laser        = False   # kill switch: force laser off
     _mover_solo        = False   # solo mode: zero all fixtures except GigBAR spot head
+    _spotlight         = False   # spotlight: mover-only + CTO spot + dim amber uplights
     _armed_mode        = ""      # mode key pre-armed for drop-sync trigger
     _white_hold        = False   # momentary full-white override
 
@@ -674,6 +675,8 @@ def main():
                         _kill_laser = not _kill_laser
                     elif _ktarget == "mover_solo":
                         _mover_solo = not _mover_solo
+                    elif _ktarget == "spotlight":
+                        _spotlight = not _spotlight
                 elif _wtype == "fixture_test":
                     _pname = _wcmd.get("pattern", "white")
                     if _pname in _TEST_PATTERNS:
@@ -948,18 +951,25 @@ def main():
                 if hasattr(_fx, "enable_laser"):
                     _fx.enable_laser(not _kill_laser)
                 if hasattr(_fx, "set_mover_only"):
-                    _fx.set_mover_only(_mover_solo)
+                    _fx.set_mover_only(_mover_solo or _spotlight)
+                if hasattr(_fx, "set_spot_color"):
+                    _fx.set_spot_color(45 if _spotlight else 0)
 
             # --- fixture write ---
             # Uplight-type fixtures (RockWedge, WashFX2) respect _uplight_dimmer on
             # the DMX path, not only in the web visualisation.
             for fixture in fixtures:
-                _fx_brt = _frame_brt
+                _fx_brt   = _frame_brt
+                _fx_amber = eff_amber
                 if isinstance(fixture, (RockWedge, ChauvetWashFX2)):
                     _fx_brt *= _uplight_dimmer
-                # Mover solo: zero uplights and washes; GigBAR handles its own sub-sections
-                if _mover_solo and isinstance(fixture, (RockWedge, ChauvetWashFX2)):
+                # Mover solo: zero uplights; GigBAR handles its own sub-sections
+                if _mover_solo and not _spotlight and isinstance(fixture, (RockWedge, ChauvetWashFX2)):
                     _fx_brt = 0.0
+                # Spotlight: dim warm-amber uplights instead of full blackout
+                if _spotlight and isinstance(fixture, (RockWedge, ChauvetWashFX2)):
+                    _fx_brt   = _frame_brt * 0.25
+                    _fx_amber = 0.35
                 fixture.render_to_universe(
                     universe,
                     brightness=_fx_brt,
@@ -968,7 +978,7 @@ def main():
                     value=_frame_v,
                     strobe=_eff_strobe,
                     white=_frame_w,
-                    amber=eff_amber,
+                    amber=_fx_amber,
                     uv=eff_uv,
                 )
 
@@ -1083,6 +1093,7 @@ def main():
                     kill_derby=      _kill_derby,
                     kill_laser=      _kill_laser,
                     mover_solo=      _mover_solo,
+                    spotlight=       _spotlight,
                     flash_active=    _flash_frames > 0,
                     white_hold_active= _white_hold,
                     white_hold=      _white_hold,

@@ -69,6 +69,7 @@ _engine_state: Dict[str, Any] = {
     "kill_derby":          False,
     "kill_laser":          False,
     "flash_active":        False,
+    "spotlight":           False,
     "white_hold_active":   False,
     "white_hold":          False,
     "armed_mode":          "",

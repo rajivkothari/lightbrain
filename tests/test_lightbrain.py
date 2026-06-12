@@ -4467,3 +4467,90 @@ class TestAutoFade:
         now = 120.0  # past the delay
         countdown = round(max(0.0, delay - (now - silence_start)), 1)
         assert countdown == 0.0
+
+
+class TestSpotlight:
+    """One-button Spotlight preset: CTO spot + dim amber uplights."""
+
+    def _make_gigbar(self):
+        from fixtures.chauvet_gigbar_move_ils import ChauvetGigBarMoveILS
+        return ChauvetGigBarMoveILS(
+            fixture_id="gigbar1", name="GigBAR", dmx_address=17
+        )
+
+    def _make_rockwedge(self, address=46):
+        from fixtures.rockwedge import RockWedge
+        return RockWedge(fixture_id=f"rw{address}", name=f"RW{address}", dmx_address=address)
+
+    # ------------------------------------------------------------------
+    # GigBAR spot color control
+    # ------------------------------------------------------------------
+
+    def test_set_spot_color_clamps_low(self):
+        fx = self._make_gigbar()
+        fx.set_spot_color(-10)
+        assert fx._spot_color_dmx == 0
+
+    def test_set_spot_color_clamps_high(self):
+        fx = self._make_gigbar()
+        fx.set_spot_color(999)
+        assert fx._spot_color_dmx == 255
+
+    def test_set_spot_color_midrange(self):
+        fx = self._make_gigbar()
+        fx.set_spot_color(45)
+        assert fx._spot_color_dmx == 45
+
+    def test_spot_color_default_is_white(self):
+        fx = self._make_gigbar()
+        assert fx._spot_color_dmx == 0
+
+    def test_spot_color_written_to_universe(self):
+        from dmx.universe import DMXUniverse
+        fx = self._make_gigbar()
+        fx.set_spot_color(45)
+        uni = DMXUniverse()
+        fx.render_to_universe(uni, brightness=1.0)
+        # Ch 26 relative to address 17 → DMX channel 42 (17 + 25)
+        assert uni.get_channel(17 + 25) == 45
+
+    def test_spot_color_open_when_not_spotlight(self):
+        from dmx.universe import DMXUniverse
+        fx = self._make_gigbar()
+        uni = DMXUniverse()
+        fx.render_to_universe(uni, brightness=1.0)
+        assert uni.get_channel(17 + 25) == 0  # open white
+
+    def test_mover_only_with_spot_color_applied(self):
+        """set_mover_only doesn't clear _spot_color_dmx."""
+        from dmx.universe import DMXUniverse
+        fx = self._make_gigbar()
+        fx.set_spot_color(45)
+        fx.set_mover_only(True)
+        uni = DMXUniverse()
+        fx.render_to_universe(uni, brightness=1.0)
+        # Spot color wheel should still be 45
+        assert uni.get_channel(17 + 25) == 45
+
+    def test_mover_only_zeros_par_with_spot_cto(self):
+        """With mover_only+CTO, Par Red (ch 1) should be zero."""
+        from dmx.universe import DMXUniverse
+        fx = self._make_gigbar()
+        fx.set_spot_color(45)
+        fx.set_mover_only(True)
+        uni = DMXUniverse()
+        fx.render_to_universe(uni, brightness=1.0, value=1.0)
+        assert uni.get_channel(17 + 0) == 0  # Par Red zeroed
+
+    # ------------------------------------------------------------------
+    # Server defaults
+    # ------------------------------------------------------------------
+
+    def test_server_has_spotlight_default(self):
+        from app.web.server import _engine_state
+        assert "spotlight" in _engine_state
+        assert _engine_state["spotlight"] is False
+
+    def test_toggle_kill_spotlight_in_allowlist(self):
+        from app.web.server import _ALLOWED_COMMAND_TYPES
+        assert "toggle_kill" in _ALLOWED_COMMAND_TYPES  # spotlight uses toggle_kill
