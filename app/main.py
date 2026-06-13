@@ -505,7 +505,7 @@ def main():
     # normalizer. Trim < 1.0 pulls saturated lanes back into usable range
     # when the source is loud; > 1.0 drives lanes harder on quiet sources.
     try:
-        _input_gain = min(2.0, max(0.1, float(app_cfg.get("input_gain", 1.0))))
+        _input_gain = min(4.0, max(0.1, float(app_cfg.get("input_gain", 1.0))))
     except (ValueError, TypeError):
         _input_gain = 1.0
     _input_level      = 0.0   # raw pre-normalization peak, smoothed for the meter
@@ -787,7 +787,7 @@ def main():
                             pass
                 elif _wtype == "set_input_gain":
                     try:
-                        _input_gain = min(2.0, max(0.1, float(_wcmd.get("value", _input_gain))))
+                        _input_gain = min(4.0, max(0.1, float(_wcmd.get("value", _input_gain))))
                     except (ValueError, TypeError):
                         pass
                     if _wcmd.get("save"):
