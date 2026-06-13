@@ -59,7 +59,9 @@ class AudioAnalyzer:
 
     # Noise gate — raw time-domain RMS below this is treated as silence.
     # Prevents USB interface electrical noise from auto-normalizing to 1.0.
-    NOISE_GATE  = 0.002
+    # Pro DJ mixers (Rane ONE MKII etc.) idle at ~-40 dBFS ≈ 0.01 RMS;
+    # music typically lands above -20 dBFS ≈ 0.10 RMS.
+    NOISE_GATE  = 0.02
 
     def __init__(self, sample_rate: int = 44100, block_size: int = 1024):
         self.sample_rate = sample_rate
