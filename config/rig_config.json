@@ -7,9 +7,9 @@
   "target_fps": 40,
   "audio": {
     "device_index": null,
-    "sample_rate": 44100,
+    "sample_rate": 48000,
     "block_size": 1024,
-    "channels": 1
+    "channels": 2
   },
   "dmx": {
     "output": "mock",
