@@ -326,6 +326,7 @@ def main():
             fixtures.append(ChauvetGigBarMoveILS(
                 fixture_id=_fid, name=_fname, dmx_address=_faddr,
                 lane=_flane, group=_fgrp,
+                personality=str(fx_cfg.get("personality", "51ch")),
                 spot_pan_deg=float(fx_cfg.get("spot_pan_deg", 270.0)),
                 spot_tilt_dmx=int(fx_cfg.get("spot_tilt_dmx", 90)),
                 laser_enabled=bool(fx_cfg.get("laser_enabled", False)),

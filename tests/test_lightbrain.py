@@ -3967,14 +3967,16 @@ class TestChauvetWashFX2:
 
 
 # ===========================================================================
-# Chauvet GigBAR Move + ILS — 29-channel fixture mapper
+# Chauvet GigBAR Move + ILS — 29-channel and 51-channel fixture mapper
 # ===========================================================================
 
 class TestChauvetGigBarMoveILS:
+    """Tests for 29Ch personality (shared par bank)."""
 
     def _make(self, addr=1, **kwargs):
         return ChauvetGigBarMoveILS(
-            fixture_id="gb1", name="GigBAR Test", dmx_address=addr, **kwargs
+            fixture_id="gb1", name="GigBAR Test", dmx_address=addr,
+            personality="29ch", **kwargs
         )
 
     def _render(self, fx, **kwargs):
@@ -3982,8 +3984,10 @@ class TestChauvetGigBarMoveILS:
         fx.render_to_universe(uni, **kwargs)
         return uni
 
-    def test_num_channels_is_29(self):
-        assert GIGBAR_CHANNELS == 29
+    def test_num_channels_29ch_is_29(self):
+        fx = self._make()
+        assert fx.channel_count == 29
+        assert GIGBAR_CHANNELS == 29  # backward-compat alias
 
     def test_all_channels_zero_at_blackout(self):
         uni = self._render(self._make(), brightness=0.0, value=0.0)
@@ -4074,6 +4078,79 @@ class TestChauvetGigBarMoveILS:
         from fixtures.chauvet_gigbar_move_ils import CH_PAR_AMBER, CH_PAR_WHITE
         assert uni.get_channel(1 + CH_PAR_AMBER) > 0
         assert uni.get_channel(1 + CH_PAR_WHITE) > 0
+
+
+class TestChauvetGigBarMoveILS51ch:
+    """Tests for 51Ch personality (individual par bank per fixture)."""
+
+    def _make(self, addr=1, **kwargs):
+        return ChauvetGigBarMoveILS(
+            fixture_id="gb1", name="GigBAR Test", dmx_address=addr,
+            personality="51ch", **kwargs
+        )
+
+    def _render(self, fx, **kwargs):
+        uni = DMXUniverse()
+        fx.render_to_universe(uni, **kwargs)
+        return uni
+
+    def test_channel_count_is_51(self):
+        assert self._make().channel_count == 51
+
+    def test_personality_stored(self):
+        assert self._make().personality == "51ch"
+
+    def test_invalid_personality_defaults_to_51ch(self):
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fx = ChauvetGigBarMoveILS(fixture_id="x", name="x", dmx_address=1,
+                                      personality="99ch")
+            assert fx.personality == "51ch"
+            assert len(w) == 1
+
+    def test_all_four_par_banks_written_identically(self):
+        from fixtures.chauvet_gigbar_move_ils import (
+            CH51_PAR1_RED, CH51_PAR2_RED, CH51_PAR3_RED, CH51_PAR4_RED,
+        )
+        uni = self._render(self._make(), brightness=1.0, value=1.0,
+                           hue=0.0, saturation=1.0)
+        addr = 1
+        r1 = uni.get_channel(addr + CH51_PAR1_RED)
+        r2 = uni.get_channel(addr + CH51_PAR2_RED)
+        r3 = uni.get_channel(addr + CH51_PAR3_RED)
+        r4 = uni.get_channel(addr + CH51_PAR4_RED)
+        assert r1 == r2 == r3 == r4 > 0
+
+    def test_derby_at_correct_offset(self):
+        from fixtures.chauvet_gigbar_move_ils import CH51_DERBY_ROTATION
+        uni = self._render(self._make(), brightness=1.0, value=1.0)
+        rot = uni.get_channel(1 + CH51_DERBY_ROTATION)
+        assert rot >= 129
+
+    def test_spot_pan_at_correct_51ch_offset(self):
+        from fixtures.chauvet_gigbar_move_ils import CH51_SPOT_PAN
+        fx = self._make(spot_pan_deg=270.0)
+        uni = self._render(fx, brightness=1.0, value=1.0)
+        pan = uni.get_channel(1 + CH51_SPOT_PAN)
+        assert 120 <= pan <= 140
+
+    def test_ils_channel_is_zero(self):
+        from fixtures.chauvet_gigbar_move_ils import CH51_ILS
+        uni = self._render(self._make(), brightness=1.0, value=1.0)
+        assert uni.get_channel(1 + CH51_ILS) == 0
+
+    def test_all_51_channels_in_dmx_range(self):
+        uni = self._render(self._make(), brightness=0.7, value=0.8, hue=180.0,
+                           saturation=0.9, strobe=0.3, uv=0.2, white=0.3, amber=0.2)
+        for i in range(51):
+            ch = uni.get_channel(1 + i)
+            assert 0 <= ch <= 255, f"ch {i+1} = {ch} out of range"
+
+    def test_laser_off_by_default_51ch(self):
+        from fixtures.chauvet_gigbar_move_ils import CH51_LASER_COLOR
+        uni = self._render(self._make())
+        assert uni.get_channel(1 + CH51_LASER_COLOR) == 0
 
 
 # ===========================================================================
@@ -4473,10 +4550,11 @@ class TestAutoFade:
 class TestSpotlight:
     """One-button Spotlight preset: CTO spot + dim amber uplights."""
 
-    def _make_gigbar(self):
+    def _make_gigbar(self, personality="29ch"):
         from fixtures.chauvet_gigbar_move_ils import ChauvetGigBarMoveILS
         return ChauvetGigBarMoveILS(
-            fixture_id="gigbar1", name="GigBAR", dmx_address=17
+            fixture_id="gigbar1", name="GigBAR", dmx_address=17,
+            personality=personality,
         )
 
     def _make_rockwedge(self, address=46):
