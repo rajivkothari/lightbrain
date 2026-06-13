@@ -5402,7 +5402,8 @@ class TestAudioInput:
         t = np.arange(bs) / sr
         sig = np.sin(2 * np.pi * 60 * t).astype(np.float32)
         a = AudioAnalyzer(sr, bs)
-        a.analyze(sig)
+        for _ in range(a._GATE_OPEN_FRAMES):  # warm up gate before peaks update
+            a.analyze(sig)
         assert a._peak_low > a.GAIN_FLOOR
         a.reset_gain()
         assert a._peak_low     == a.GAIN_FLOOR

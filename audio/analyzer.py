@@ -57,11 +57,13 @@ class AudioAnalyzer:
     GAIN_DECAY  = 0.9995   # per-frame decay of the peak tracking
     GAIN_FLOOR  = 1e-6     # minimum denominator to avoid divide-by-zero
 
-    # Noise gate — raw time-domain RMS below this is treated as silence.
-    # Prevents USB interface electrical noise from auto-normalizing to 1.0.
-    # Pro DJ mixers (Rane ONE MKII etc.) idle at ~-40 dBFS ≈ 0.01 RMS;
-    # music typically lands above -20 dBFS ≈ 0.10 RMS.
-    NOISE_GATE  = 0.02
+    # Noise gate with hysteresis.
+    # NOISE_GATE: raw RMS threshold — just above DJ mixer idle noise (~0.005).
+    # _GATE_OPEN_FRAMES: consecutive frames needed to open (blocks USB bursts).
+    # _GATE_CLOSE_FRAMES: consecutive silent frames to close (survives quiet beats).
+    NOISE_GATE         = 0.007
+    _GATE_OPEN_FRAMES  = 4    # ~85 ms at 40 fps — rejects single-frame USB artifacts
+    _GATE_CLOSE_FRAMES = 15   # ~375 ms hold after signal drops
 
     def __init__(self, sample_rate: int = 44100, block_size: int = 1024):
         self.sample_rate = sample_rate
@@ -72,6 +74,11 @@ class AudioAnalyzer:
         self._peak_mid:     float = self.GAIN_FLOOR
         self._peak_high:    float = self.GAIN_FLOOR
         self._peak_overall: float = self.GAIN_FLOOR
+
+        # Gate state
+        self._gate_open:         bool = False
+        self._gate_frames_above: int  = 0
+        self._gate_frames_below: int  = 0
 
         # Precompute FFT frequency bins
         self._freqs = np.fft.rfftfreq(block_size, d=1.0 / sample_rate)
@@ -124,9 +131,19 @@ class AudioAnalyzer:
         # Overall = RMS of the whole block (time domain)
         overall = float(np.sqrt(np.mean(block ** 2)))
 
-        # Noise gate: if the raw signal is below the floor, treat as silence.
-        # This prevents USB interface noise from auto-normalizing to 1.0.
-        if overall < self.NOISE_GATE:
+        # Hysteresis noise gate.
+        if overall >= self.NOISE_GATE:
+            self._gate_frames_above += 1
+            self._gate_frames_below  = 0
+            if self._gate_frames_above >= self._GATE_OPEN_FRAMES:
+                self._gate_open = True
+        else:
+            self._gate_frames_below += 1
+            self._gate_frames_above  = 0
+            if self._gate_frames_below >= self._GATE_CLOSE_FRAMES:
+                self._gate_open = False
+
+        if not self._gate_open:
             return AudioBands()
 
         # Running gain normalization — track per-band peak with slow decay
@@ -144,8 +161,11 @@ class AudioAnalyzer:
         )
 
     def reset_gain(self) -> None:
-        """Reset gain normalization state (e.g. on mode switch)."""
+        """Reset gain normalization and gate state."""
         self._peak_low     = self.GAIN_FLOOR
         self._peak_mid     = self.GAIN_FLOOR
         self._peak_high    = self.GAIN_FLOOR
         self._peak_overall = self.GAIN_FLOOR
+        self._gate_open         = False
+        self._gate_frames_above = 0
+        self._gate_frames_below = 0
