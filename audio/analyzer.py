@@ -102,11 +102,11 @@ class AudioAnalyzer:
         if block is None or len(block) == 0:
             return AudioBands()
 
-        # Flatten to mono — use the loudest channel so signal on any USB channel
-        # is detected (DJ mixers may return the main mix on channels 3-4, 5-6, etc.)
+        # Flatten to mono by averaging all channels. With channels=10 this captures
+        # any signal across all Rane USB return channels regardless of which pair
+        # carries the main mix.
         if block.ndim > 1:
-            rms_per_ch = np.sqrt(np.mean(block ** 2, axis=0))
-            block = block[:, int(np.argmax(rms_per_ch))]
+            block = block.mean(axis=1)
 
         # Skip blocks that don't match expected size — avoids mismatched freqs
         if len(block) != self.block_size:

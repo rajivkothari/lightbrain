@@ -1063,10 +1063,12 @@ def main():
                 _eff_strobe = _strobe_master
 
             # --- strobe hold (iPad hold-to-strobe — software oscillator) ---
+            # Software oscillator toggles brightness; hardware strobe channel is kept
+            # at 0 so the fixture shutter stays open and doesn't double-strobe.
             if (_strobe_hold or _strobe_armed) and not safety.state.blackout_active and not _kill_strobe:
                 _hold_freq = 2.0 + _strobe_master * 14.0
                 _strobe_hold_phase = (_strobe_hold_phase + _frame_time * _hold_freq) % 1.0
-                _eff_strobe = _strobe_master
+                _eff_strobe = 0.0  # software flicker only — hardware channel stays open
             else:
                 _strobe_hold_phase = 0.0
 
