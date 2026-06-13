@@ -57,6 +57,10 @@ class AudioAnalyzer:
     GAIN_DECAY  = 0.9995   # per-frame decay of the peak tracking
     GAIN_FLOOR  = 1e-6     # minimum denominator to avoid divide-by-zero
 
+    # Noise gate — raw time-domain RMS below this is treated as silence.
+    # Prevents USB interface electrical noise from auto-normalizing to 1.0.
+    NOISE_GATE  = 0.002
+
     def __init__(self, sample_rate: int = 44100, block_size: int = 1024):
         self.sample_rate = sample_rate
         self.block_size  = block_size
@@ -117,6 +121,11 @@ class AudioAnalyzer:
 
         # Overall = RMS of the whole block (time domain)
         overall = float(np.sqrt(np.mean(block ** 2)))
+
+        # Noise gate: if the raw signal is below the floor, treat as silence.
+        # This prevents USB interface noise from auto-normalizing to 1.0.
+        if overall < self.NOISE_GATE:
+            return AudioBands()
 
         # Running gain normalization — track per-band peak with slow decay
         self._peak_low     = max(self._peak_low     * self.GAIN_DECAY, low_e,      self.GAIN_FLOOR)
