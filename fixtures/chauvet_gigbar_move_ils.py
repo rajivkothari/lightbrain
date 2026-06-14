@@ -381,7 +381,8 @@ class ChauvetGigBarMoveILS(FixtureBase):
             db_dmx = apply_gamma_to_dmx(b_f, gamma)
             dw_dmx = apply_gamma_to_dmx(max(0.0, min(1.0, white * brightness * 0.5)), gamma)
             derby_strobe_dmx = _par_strobe(strobe)
-            derby_rot_dmx = (_DERBY_ROTATE_CCW_BASE + int(final_v * 126)) if final_v > 0.05 else 0
+            # Derby rotation: scale 140–175 with energy (moderate sweep, never strobing-fast)
+            derby_rot_dmx = (140 + int(final_v * 35)) if final_v > 0.05 else 0
         else:
             dr_dmx = dg_dmx = db_dmx = dw_dmx = derby_strobe_dmx = derby_rot_dmx = 0
 
@@ -393,8 +394,8 @@ class ChauvetGigBarMoveILS(FixtureBase):
 
         spot_pan_dmx    = _pan_deg_to_dmx(self._spot_pan_deg)
         spot_tilt_dmx   = self._spot_tilt_dmx
-        spot_speed_dmx  = 200
-        spot_dimmer_dmx = apply_gamma_to_dmx(final_v, gamma)
+        spot_speed_dmx  = 120
+        spot_dimmer_dmx = apply_gamma_to_dmx(max(0.25, final_v), gamma)
         spot_strobe_dmx = _spot_strobe_dmx(strobe)
 
         if self._mover_only:
